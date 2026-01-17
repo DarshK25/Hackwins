@@ -1,0 +1,48 @@
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: INSERT_YOUR_GOOGLE_CLIENT_ID_HERE
+            client-secret: INSERT_YOUR_GOOGLE_CLIENT_SECRET_HERE
+            scope:
+              - email
+              - profile
+  application:
+    name: ledgertalk-backend
+  
+  # H2 Database for now -
+  datasource:
+    url: jdbc:h2:file:./data/ledgertalk
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+  
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.H2Dialect
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+server:
+  port: 8081
+
+jwt:
+  secret: my-super-secret-key-that-is-at-least-256-bits-long-for-HS256-algorithm-must-be-longer
+  expiration: 86400000  # 24 hours in milliseconds
+
+logging:
+  level:
+    com.ledgertalk: DEBUG
