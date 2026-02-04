@@ -141,3 +141,62 @@ To synchronize everything so all branches have all folders:
     ```
 
 Now, anyone pulling `dev` will have both `MoneyOps/backend` and `MoneyOps/ai-gateway`.
+
+## 🚨 Git Rescue Mission Log (Dev Restoration)
+
+**Incident:**
+A merge conflict resolution on `dev` accidentally reverted the project cleanup (folder structure reorganization) while introducing new Java files for `api-gateway`.
+
+**The Problem:**
+- `dev` branch had cluttered root (original state).
+- `ai-gateway` branch had clean structure (`docs/`, `scripts/`, etc.).
+- `api-gateway` folder (Teammate's work) was only present in the "bad" `dev` state.
+
+**The Fix (The "Grand Combine"):**
+We performed a surgical restoration to keep the best of both worlds:
+
+1.  **Restored Clean Structure:** Checked out `docs/`, `scripts/`, `tests/` from `origin/ai-gateway`.
+    ```bash
+    git checkout origin/ai-gateway -- docs/ scripts/ tests/ README.md
+    ```
+2.  **Preserved New Code:** Kept the `MoneyOps/api-gateway` folder (Teammate's Java code) which was already on `dev`.
+3.  **Cleaned Clutter:** Removed the redundant root files that were reintroduced by the bad merge.
+    ```bash
+    git rm TEST_ENDPOINTS.md TEST_RESULTS.md test_api.ps1 ...
+    ```
+4.  **Result:** A clean `dev` branch with:
+    - Phase 4 AI Gateway (Python)
+    - Original Backend Core (Java)
+    - New API Gateway (Java)
+    - Clean Docs/Scripts structure
+
+**Recovery for Teammates:**
+Teammates should force-align with the fixed `dev` branch:
+```bash
+git fetch origin
+git checkout dev
+git reset --hard origin/dev
+```
+
+## 🛡️ Phase 4 Finalization Issues
+
+### 1. Security Incident: OAuth2 Secrets Exposure
+**Problem:** GitGuardian flagged hardcoded Google OAuth2 client ID/secret in `application.yml`.
+**Solution:**
+1.  Replaced hardcoded values in `application.yml` with Spring placeholders: `${GOOGLE_CLIENT_ID:placeholder}`.
+2.  Created a local `backend/.env` file to store the actual secrets.
+3.  Ensured `.gitignore` includes `.env`.
+4.  **Runtime:** We now inject these as environment variables when starting the process.
+
+### 2. Backend Startup Failure (H2 Database Lock)
+**Problem:** Application failed with `JDBCConnectionException: Database may be already in use` and `The file is locked: .../moneyops.mv.db`.
+**Cause:** A previous Java process crashed or didn't shut down cleanly, holding a file system lock on the embedded H2 database.
+**Solution:**
+1.  **Kill Process:** Force-killed all Java processes to release the lock.
+    ```powershell
+    taskkill /F /IM java.exe
+    ```
+2.  **Clean Slate:** Deleted the corrupted/locked database files to ensure a fresh start.
+    ```powershell
+    rm MoneyOps/backend/data/*.db
+    ```

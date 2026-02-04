@@ -4,8 +4,8 @@ spring:
       client:
         registration:
           google:
-            client-id: INSERT_YOUR_GOOGLE_CLIENT_ID_HERE
-            client-secret: INSERT_YOUR_GOOGLE_CLIENT_SECRET_HERE
+            client-id: ${GOOGLE_CLIENT_ID:placeholder_id}
+            client-secret: ${GOOGLE_CLIENT_SECRET:placeholder_secret}
             scope:
               - email
               - profile

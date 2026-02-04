@@ -27,6 +27,7 @@ class FinanceAgent(BaseAgent):
     def __init__(self):
         super().__init__()
         # Lazy-get the backend adapter instance
+        # Auth token will be set per request in process() method
         self.backend = get_backend_adapter()
         
         # Register tools with the global registry
@@ -338,7 +339,7 @@ class FinanceAgent(BaseAgent):
         """Handle balance check"""
         org_id = context.get("org_id", "default_org") if context else "default_org"
         
-        response = await self.backend.get_balance(org_id=org_id, context=context)
+        response = await self.backend.get_balance(org_id=org_id)
         
         if response.success:
             balance_data = response.data
@@ -380,6 +381,10 @@ class FinanceAgent(BaseAgent):
         Process a request based on intent and entities
         """
         logger.info("finance_agent_processing", intent=intent.value)
+        
+        # Set auth token from context if available
+        if context and context.get("auth_token"):
+            self.backend.set_auth_token(context["auth_token"])
         
         # Route to appropriate tool based on intent
         tool_name = self._get_tool_for_intent(intent)

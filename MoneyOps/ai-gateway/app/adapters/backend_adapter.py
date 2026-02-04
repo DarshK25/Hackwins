@@ -24,16 +24,24 @@ class BackendHttpAdapter:
     Http client for backend core api
     Handles auth, retries, and error handling
     """
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(self, base_url: Optional[str] = None, auth_token: Optional[str] = None):
         self.base_url = base_url or settings.BACKEND_BASE_URL
         self.timeout = getattr(settings, "BACKEND_TIMEOUT", 30)
+        self.auth_token = auth_token
+        
+        default_headers = {
+            "Content-Type": "application/json",
+            "User-Agent":  "MoneyOps-AI-Gateway/1.0"
+        }
+        
+        # Add authorization header if token is provided
+        if self.auth_token:
+            default_headers["Authorization"] = f"Bearer {self.auth_token}"
+        
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=self.timeout,
-            headers={
-                "Content-Type": "application/json",
-                "User-Agent":  "MoneyOps-AI-Gateway/1.0"
-            }
+            headers=default_headers
         )
         
         logger.info("backend_adatper_initialized", base_url=self.base_url)
@@ -44,8 +52,7 @@ class BackendHttpAdapter:
         endpoint: str,
         data: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, Any]]=  None,
-        headers: Optional[Dict[str, Any]] = None,
-        context: Optional[Dict[str, Any]] = None
+        headers: Optional[Dict[str, Any]] = None
     ) -> BackendResponse:
         """
         Make http req to backend core
@@ -64,8 +71,6 @@ class BackendHttpAdapter:
         req_headers = self.client.headers.copy()
         if headers:
             req_headers.update(headers)
-        if context and context.get("auth_token"):
-            req_headers["Authorization"] = f"Bearer {context['auth_token']}"
 
         try:
             logger.debug(
@@ -104,7 +109,7 @@ class BackendHttpAdapter:
                 success=success,
                 data=response_data,
                 status_code=response.status_code,
-                error=response_data.get("error") or response_data.get("message") if isinstance(response_data, dict) else None
+                error=response_data.get("error") if isinstance(response_data, dict) else None
             )
  
         except httpx.TimeoutException as e:
@@ -310,14 +315,13 @@ class BackendHttpAdapter:
         
         return await self._request("GET", "/api/v1/transactions", params=params)
     
-    async def get_balance(self, org_id: str, context: Optional[Dict[str, Any]] = None) -> BackendResponse:
+    async def get_balance(self, org_id: str) -> BackendResponse:
         """Get account balance by calling transactions summary and returning netProfit as balance"""
         # Transactions summary endpoint expects X-Org-Id header
         summary_resp = await self._request(
             "GET",
             "/api/transactions/summary",
-            headers={"X-Org-Id": org_id},
-            context=context
+            headers={"X-Org-Id": org_id}
         )
 
         if not summary_resp.success:
@@ -355,14 +359,30 @@ class BackendHttpAdapter:
         await self.client.aclose()
         logger.info("backend_adapter_closed")
 
+    def set_auth_token(self, token: str):
+        """Set or update the authentication token"""
+        self.auth_token = token
+        self.client.headers["Authorization"] = f"Bearer {token}"
+        logger.debug("backend_adapter_auth_token_updated")
+
 
 # Lazy singleton accessor
 _backend_adapter_instance = None
 
-def get_backend_adapter() -> BackendHttpAdapter:
-    """Return a singleton BackendHttpAdapter instance (lazy init)."""
+def get_backend_adapter(auth_token: Optional[str] = None) -> BackendHttpAdapter:
+    """Return a singleton BackendHttpAdapter instance (lazy init).
+    
+    Args:
+        auth_token: Optional JWT token to use for authentication with backend
+    
+    Returns:
+        BackendHttpAdapter singleton instance
+    """
     global _backend_adapter_instance
     if _backend_adapter_instance is None:
-        _backend_adapter_instance = BackendHttpAdapter()
+        _backend_adapter_instance = BackendHttpAdapter(auth_token=auth_token)
+    elif auth_token:
+        # Update token if provided
+        _backend_adapter_instance.set_auth_token(auth_token)
     return _backend_adapter_instance
 

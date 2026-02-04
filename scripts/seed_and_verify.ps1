@@ -144,8 +144,47 @@ $agentBody = @{
         org_id = $orgId
     }
 }
-$agentResponse = Send-Request -Url "$gatewayBase/test/agents/execute" -Method POST -Body $agentBody
-Write-Host "Agent Response:" -ForegroundColor White
+$agentResponse = Send-Request -Url "$gatewayBase/test/agents/execute" -Method POST -Body $agentBody -Headers @{"Authorization" = "Bearer $globalToken"}
+Write-Host "Agent Response (Balance):" -ForegroundColor White
 Write-Host ($agentResponse | ConvertTo-Json -Depth 5) -ForegroundColor Gray
+
+Write-Host "`n--- 7. Testing Agent: Create Invoice ---" -ForegroundColor Cyan
+$invoiceBody = @{
+    intent = "INVOICE_CREATE"
+    entities = @{
+        client_name = "TEST_CLIENT_ACME"
+        total = 55000
+        items = @(@{description="Consulting"; amount=50000}, @{description="Tax"; amount=5000})
+        subtotal = 50000
+        tax = 5000
+        due_date = (Get-Date).AddDays(30).ToString("yyyy-MM-dd")
+    }
+    context = @{
+        org_id = $orgId
+    }
+}
+$invoiceAgentResponse = Send-Request -Url "$gatewayBase/test/agents/execute" -Method POST -Body $invoiceBody -Headers @{"Authorization" = "Bearer $globalToken"}
+Write-Host "Agent Response (Create Invoice):" -ForegroundColor White
+Write-Host ($invoiceAgentResponse | ConvertTo-Json -Depth 5) -ForegroundColor Gray
+
+if ($invoiceAgentResponse -and $invoiceAgentResponse.data -and $invoiceAgentResponse.data.invoice_id) {
+    $newInvoiceId = $invoiceAgentResponse.data.invoice_id
+    
+    Write-Host "`n--- 8. Testing Agent: Record Payment ---" -ForegroundColor Cyan
+    $paymentBody = @{
+        intent = "PAYMENT_RECORD"
+        entities = @{
+            invoice_id = $newInvoiceId
+            amount = 55000
+            payment_method = "BANK_TRANSFER"
+        }
+        context = @{
+            org_id = $orgId
+        }
+    }
+    $paymentAgentResponse = Send-Request -Url "$gatewayBase/test/agents/execute" -Method POST -Body $paymentBody -Headers @{"Authorization" = "Bearer $globalToken"}
+    Write-Host "Agent Response (Record Payment):" -ForegroundColor White
+    Write-Host ($paymentAgentResponse | ConvertTo-Json -Depth 5) -ForegroundColor Gray
+}
 
 Write-Host "`n--- Seeding and Testing Complete ---" -ForegroundColor Yellow
