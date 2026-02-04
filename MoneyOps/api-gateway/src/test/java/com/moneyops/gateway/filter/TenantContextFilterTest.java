@@ -20,6 +20,7 @@ import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
@@ -43,7 +44,7 @@ class TenantContextFilterTest {
             Arrays.asList("/api/clients/**", "/api/invoices/**", "/api/transactions/**"));
         
         // Mock filter chain to complete successfully
-        when(filterChain.filter(any(ServerWebExchange.class)))
+        lenient().when(filterChain.filter(any(ServerWebExchange.class)))
             .thenReturn(Mono.empty());
     }
     
