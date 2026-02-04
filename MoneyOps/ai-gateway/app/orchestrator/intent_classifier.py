@@ -20,6 +20,9 @@ from app.schemas.intents import (
     get_confidence_level,
 )
 
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class IntentClassifier:
     """
@@ -29,6 +32,7 @@ class IntentClassifier:
 
     def __init__(self):
         self.groq = groq_client
+        
         # Pattern-based quick classification (for common cases)
         self.intent_patterns = self._build_intent_patterns()
 
@@ -161,7 +165,7 @@ class IntentClassifier:
                 complexity=requirements.complexity,
                 is_followup=False,
                 processing_time_ms=int((time.time() - start_time) * 1000),
-                model_used="pattern_matching",
+                model_name="pattern_matching",
             )
 
         # Step 3: Use LLM for complex classification
@@ -337,7 +341,7 @@ IMPORTANT:
                 requires_multi_turn=(
                     len(requirements.required_entities) > 3 or requirements.complexity in [ComplexityLevel.COMPLEX, ComplexityLevel.STRATEGIC]
                 ),
-                model_used="groq-llm",
+                model_name="groq-llm",
             )
 
         except Exception as e:
@@ -349,7 +353,7 @@ IMPORTANT:
                 category=IntentCategory.CONVERSATIONAL,
                 primary_agent=AgentType.GENERAL_AGENT,
                 complexity=ComplexityLevel.SIMPLE,
-                model_used="fallback",
+                model_name="fallback",
             )
 
     def _adjust_confidence(

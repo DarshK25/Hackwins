@@ -116,8 +116,9 @@ app.include_router(health.router, prefix="/api/v1", tags=["Health"])
 
 # Test routers
 if settings.ENVIRONMENT != "production":
-    from app.api.v1 import test_llm
+    from app.api.v1 import test_llm, test_agents
     app.include_router(test_llm.router, prefix="/api/v1", tags=["Test LLM"])
+    app.include_router(test_agents.router, prefix="/api/v1", tags=["Test Agents"])
 # Root endpoint
 @app.get("/")
 async def root():
