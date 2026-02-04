@@ -1,0 +1,11 @@
+package com.moneyops.documents.exceptions;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.ResponseStatus;
+
+@ResponseStatus(HttpStatus.BAD_REQUEST)
+public class DocumentRuleViolationException extends RuntimeException {
+    public DocumentRuleViolationException(String message) {
+        super(message);
+    }
+}
