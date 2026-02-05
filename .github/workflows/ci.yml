@@ -55,6 +55,8 @@ jobs:
           fi
 
       - name: Run tests (pytest)
+        env:
+          PYTHONPATH: .
         run: |
           mkdir -p reports
           pytest tests/ --junitxml=reports/junit-python.xml --cov=app --cov-report=xml || exit 1
