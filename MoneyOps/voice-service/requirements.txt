@@ -1,46 +1,40 @@
+# LiveKit Core
 livekit-agents
 livekit-plugins-silero
-python-dotenv
+livekit-plugins-groq
 livekit-api
-flask[async]
-flask
-flask-cors
-uvicorn
-# Testing
-pytest
-pytest-asyncio
 # LedgerTalk Voice Service Dependencies
 # Python 3.11+
 
-# LiveKit
-livekit==0.12.0
-livekit-plugins-silero==0.6.0
-livekit-plugins-groq
+# LiveKit SDK
+livekit
 
 # HTTP & Async
-httpx==0.26.0
-aiohttp==3.9.1
+httpx
+aiohttp
 
 # Configuration
-python-dotenv==1.0.0
-pydantic>=2.10.0
-pydantic-settings>=2.7.0
+python-dotenv
+pydantic
+pydantic-settings
 
 # Logging
-structlog==24.1.0
+structlog
 
 # Utilities
-tenacity==8.2.3
+tenacity
 
-# API (optional health endpoint)
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
+# Web Framework
+fastapi
+uvicorn[standard]
+flask
+flask-cors
 
 # Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
+pytest
+pytest-asyncio
+pytest-cov
 
 # Development
-black==23.12.1
-flake8==7.0.0
+black
+flake8

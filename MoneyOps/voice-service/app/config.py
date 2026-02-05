@@ -4,6 +4,7 @@ All settings loaded from environment variables
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional
 
 class Settings(BaseSettings):
     #voice service settings 
@@ -20,7 +21,7 @@ class Settings(BaseSettings):
     LIVEKIT_URL: str
 
     #GROQ
-    GROQ_API_KEY: str
+    GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL: str = "groq/compound"
 
     #AI GATEWAY
@@ -32,8 +33,8 @@ class Settings(BaseSettings):
     MAX_CONVERSATION_HISTORY: int = 10  # messages
 
     #EXTERNAL APIs
-    ASSEMBLYAI_API_KEY: str  # Required for STT
-    CARTESIA_API_KEY: str = ""
+    ASSEMBLYAI_API_KEY: Optional[str] = None  
+    CARTESIA_API_KEY: Optional[str] = None  
 
     #VAD (Voice Activity Detection)
     VAD_MIN_SPEECH_DURATION: float = 0.3  # seconds
