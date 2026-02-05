@@ -1,3 +1,4 @@
+import pytest
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -14,24 +15,25 @@ from app.utils.logger import get_logger, logger
 router = APIRouter()
 logger = get_logger(__name__)
 
-class TestPromptRequest(BaseModel):
+class PromptRequest(BaseModel):
     """Simple prompt test"""
     prompt: str
     temperature: Optional[float] = 0.3
 
-class TestIntentRequest(BaseModel):
+class IntentRequest(BaseModel):
     """Intent classification test"""
     user_input: str
     industry: Optional[str] = "IT & Software"
     has_gst: Optional[bool] = True
 
-class TestEntityExtractionRequest(BaseModel):
+class EntityExtractionRequest(BaseModel):
     """Entity extraction test"""
     user_input: str
     intent: str
 
 @router.post("/test/simple-prompt")
-async def test_simple_prompt(request: TestPromptRequest):
+@pytest.mark.asyncio
+async def test_simple_prompt(request: PromptRequest):
     """
     Test basic Groq completion
     """
@@ -51,7 +53,8 @@ async def test_simple_prompt(request: TestPromptRequest):
         raise HTTPException(status_code=500, detail="Error processing prompt")
     
 @router.post("/test/intent-classification")
-async def test_intent_classification(request: TestIntentRequest):
+@pytest.mark.asyncio
+async def test_intent_classification(request: IntentRequest):
     """
     Test intent classification prompt
     """
@@ -81,7 +84,8 @@ async def test_intent_classification(request: TestIntentRequest):
         raise HTTPException(status_code=500, detail="Error processing intent classification")
     
 @router.post("/test/entity-extraction")
-async def test_entity_extraction(request: TestEntityExtractionRequest):
+@pytest.mark.asyncio
+async def test_entity_extraction(request: EntityExtractionRequest):
     """
     Test entity extraction prompt
     """
