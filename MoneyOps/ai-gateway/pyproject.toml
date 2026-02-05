@@ -30,6 +30,9 @@ black = "^23.12.1"
 ruff = "^0.1.9"
 mypy = "^1.8.0"
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

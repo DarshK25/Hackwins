@@ -2,7 +2,7 @@
 Tool registry for centralized tool mgmt and executn
 """
 from typing import List, Dict, Any, Optional, Callable, Awaitable
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 import asyncio
 from app.utils.logger import get_logger
 
@@ -35,8 +35,9 @@ class Tool(BaseModel):
     requires_confirmation: bool = False
     estimated_time_seconds: int = 2
     
-    class Config:
-        arbitrary_types_allowed = True
+    estimated_time_seconds: int = 2
+    
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 class ToolExecutionResult(BaseModel):
     """Result of tool execution"""
