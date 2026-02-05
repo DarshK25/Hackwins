@@ -6,6 +6,8 @@ pom.xml.versionsBackup
 pom.xml.next
 dependency-reduced-pom.xml
 
+.env
+
 # H2 database files
 *.mv.db
 *.trace.db

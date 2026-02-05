@@ -16,7 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-// import java.util.UUID;
+import java.util.UUID;
 
 @Service
 @Transactional
@@ -56,6 +56,8 @@ public class AuthService {
         org.setLegalName(request.getOrgName());
         org.setCreatedAt(LocalDateTime.now());
         org.setUpdatedAt(LocalDateTime.now());
+        // Use a temporary creator to satisfy non-null constraint, will be corrected after user creation
+        org.setCreatedBy(UUID.randomUUID());
         BusinessOrganization savedOrg = orgRepository.save(org);
 
         // Create user
@@ -68,8 +70,19 @@ public class AuthService {
         user.setOrgId(savedOrg.getId());
         user.setCreatedAt(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());
-        user.setCreatedBy(savedOrg.getId()); // Self
+        // Temporarily set createdBy/updatedBy to org id to satisfy non-null constraints
+        user.setCreatedBy(savedOrg.getId());
+        user.setUpdatedBy(savedOrg.getId());
         User savedUser = userRepository.save(user);
+
+        // Now correct the org.createdBy to point to the actual user who created it
+        savedOrg.setCreatedBy(savedUser.getId());
+        orgRepository.save(savedOrg);
+
+        // Also ensure user's createdBy/updatedBy reference themselves
+        savedUser.setCreatedBy(savedUser.getId());
+        savedUser.setUpdatedBy(savedUser.getId());
+        userRepository.save(savedUser);
 
         String token = jwtProvider.generateToken(savedUser.getId().toString());
         return new TokenResponse(token, null, "Bearer", 86400);

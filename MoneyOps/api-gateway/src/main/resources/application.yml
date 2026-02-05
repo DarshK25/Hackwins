@@ -1,0 +1,328 @@
+spring:
+  application:
+    name: api-gateway
+  
+  cloud:
+    gateway:
+      # Global CORS configuration
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns: "*"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - PATCH
+              - OPTIONS
+            allowedHeaders: "*"
+            allowCredentials: true
+            maxAge: 3600
+      
+      # Redis Rate Limiter Configuration
+      redis-rate-limiter:
+        replenish-rate: 10      # Tokens added per second (default)
+        burst-capacity: 20      # Max tokens in bucket (default)
+        requested-tokens: 1     # Tokens per request
+      
+      # Route definitions
+      routes:
+        # ============================================
+        # AUTH ROUTES (Public - IP-based rate limiting)
+        # ============================================
+        - id: auth-login
+          uri: ${backend.core.url}
+          predicates:
+            - Path=/api/auth/login
+            - Method=POST
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 5    # 5 requests per second
+                redis-rate-limiter.burstCapacity: 10   # Max 10 requests in burst
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@ipKeyResolver}"
+        
+        - id: auth-register
+          uri: ${backend.core.url}
+          predicates:
+            - Path=/api/auth/register
+            - Method=POST
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 2    # 2 requests per second (stricter)
+                redis-rate-limiter.burstCapacity: 5
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@ipKeyResolver}"
+        
+        # Token refresh requires valid JWT
+        - id: auth-refresh
+          uri: ${backend.core.url}
+          predicates:
+            - Path=/api/auth/refresh
+            - Method=POST
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@userKeyResolver}"
+        
+        # ============================================
+        # USER ROUTES (Authenticated - User-based)
+        # ============================================
+        - id: users-routes
+          uri: ${backend.core.url}
+          predicates:
+            - Path=/api/users/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50   # 50 requests per second per user
+                redis-rate-limiter.burstCapacity: 100
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@userKeyResolver}"
+        
+        # ============================================
+        # ORGANIZATION ROUTES (Org-based)
+        # ============================================
+        - id: organizations-routes
+          uri: ${backend.core.url}
+          predicates:
+            - Path=/api/organizations/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@orgKeyResolver}"
+        
+        # ============================================
+        # CLIENT ROUTES (Org-based)
+        # ============================================
+        - id: clients-routes
+          uri: ${backend.core.url}
+          predicates:
+            - Path=/api/clients/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 30
+                redis-rate-limiter.burstCapacity: 60
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@orgKeyResolver}"
+        
+        # ============================================
+        # INVOICE ROUTES (Org-based)
+        # ============================================
+        - id: invoices-routes
+          uri: ${backend.core.url}
+          predicates:
+            - Path=/api/invoices/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 30
+                redis-rate-limiter.burstCapacity: 60
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@orgKeyResolver}"
+        
+        # ============================================
+        # TRANSACTION ROUTES (Org-based)
+        # ============================================
+        - id: transactions-routes
+          uri: ${backend.core.url}
+          predicates:
+            - Path=/api/transactions/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 30
+                redis-rate-limiter.burstCapacity: 60
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@orgKeyResolver}"
+        
+        # ============================================
+        # DOCUMENT ROUTES (Org-based)
+        # ============================================
+        - id: documents-routes
+          uri: ${backend.core.url}
+          predicates:
+            - Path=/api/documents/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 20   # Lower for large file uploads
+                redis-rate-limiter.burstCapacity: 40
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@orgKeyResolver}"
+        
+        # ============================================
+        # AI GATEWAY ROUTES (Org-based - Stricter limits)
+        # ============================================
+        - id: ai-chat-routes
+          uri: ${ai.gateway.url}
+          predicates:
+            - Path=/api/ai/chat/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 5    # AI is expensive - stricter limit
+                redis-rate-limiter.burstCapacity: 10
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@orgKeyResolver}"
+        
+        - id: ai-voice-routes
+          uri: ${ai.gateway.url}
+          predicates:
+            - Path=/api/ai/voice/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 3    # Voice AI even stricter
+                redis-rate-limiter.burstCapacity: 6
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@orgKeyResolver}"
+        
+        # ============================================
+        # VOICE SERVICE ROUTES (Org-based)
+        # ============================================
+        - id: voice-service-routes
+          uri: ${voice.service.url}
+          predicates:
+            - Path=/api/voice/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 5
+                redis-rate-limiter.burstCapacity: 10
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@orgKeyResolver}"
+
+# ============================================
+# DOWNSTREAM SERVICE URLs
+# ============================================
+backend:
+  core:
+    url: http://localhost:8081
+
+ai:
+  gateway:
+    url: http://localhost:8082
+
+voice:
+  service:
+    url: http://localhost:8083
+
+# ============================================
+# JWT CONFIGURATION
+# ============================================
+jwt:
+  secret: ${JWT_SECRET:your-256-bit-secret-your-256-bit-secret-your-256-bit-secret-your-256-bit-secret}
+  expiration: 86400000  # 24 hours in milliseconds
+
+# ============================================
+# GATEWAY CONFIGURATION
+# ============================================
+gateway:
+  # Public endpoints (no JWT validation)
+  public-endpoints: /api/auth/login,/api/auth/register,/actuator/health,/actuator/ready
+  
+  # Tenant isolation configuration
+  tenant:
+    enforce-isolation: true
+    required-paths: /api/clients/**,/api/invoices/**,/api/transactions/**,/api/documents/**,/api/organizations/**
+  
+  # Request logging
+  logging:
+    enabled: true
+    log-request-body: false  # Security: Don't log sensitive data
+    log-response-body: false
+    slow-request-threshold-ms: 3000  # Log requests slower than 3 seconds
+  
+  # Rate limiting configuration
+  rate-limit:
+    enabled: true
+    fail-open: true  # Allow requests if Redis is down
+    
+    # Rate limit presets (requests per second)
+    presets:
+      strict: 2      # For registration, sensitive operations
+      normal: 10     # For login, standard operations
+      relaxed: 50    # For authenticated user operations
+      ai: 5          # For AI/ML operations (expensive)
+      
+    # Default rate limits per endpoint type
+    defaults:
+      public-endpoints: 10      # Login, register
+      authenticated-endpoints: 50  # User operations
+      tenant-endpoints: 30      # Org-scoped operations
+      ai-endpoints: 5           # AI operations
+      voice-endpoints: 3        # Voice AI operations
+
+# ============================================
+# REDIS CONFIGURATION (for Rate Limiting - Phase 3)
+# ============================================
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 2
+  
+  # Graceful shutdown timeout
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+# ============================================
+# ACTUATOR (Health Checks)
+# ============================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  health:
+    readiness-state:
+      enabled: true
+    liveness-state:
+      enabled: true
+
+# ============================================
+# LOGGING CONFIGURATION
+# ============================================
+logging:
+  level:
+    root: INFO
+    com.ledgertalk.gateway: DEBUG
+    org.springframework.cloud.gateway: DEBUG
+    org.springframework.security: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# ============================================
+# SERVER CONFIGURATION
+# ============================================
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: never
+    include-exception: false

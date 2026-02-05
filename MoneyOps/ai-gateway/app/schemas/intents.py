@@ -184,7 +184,7 @@ class IntentClassification(BaseModel):
 
     # Metadata
     processing_time_ms: Optional[float] = None
-    model_used: Optional[str] = None
+    model_name: Optional[str] = None
 
 
 class IntentRequirements(BaseModel):
