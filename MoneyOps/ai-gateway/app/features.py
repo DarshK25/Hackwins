@@ -2,7 +2,7 @@
 Feature Flags - Control which features are enabled
 Easy toggling between MVP and v2.0 features
 """
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class FeatureFlags(BaseSettings):
@@ -10,6 +10,7 @@ class FeatureFlags(BaseSettings):
     Feature flags for MVP vs Full version
     Toggle these to enable/disable features without code changes
     """
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="FEATURE_", extra="ignore")
     
     # === MVP FEATURES (Enabled for 3-week deadline) ===
     ENABLE_INVOICE_OPERATIONS: bool = True
@@ -47,9 +48,7 @@ class FeatureFlags(BaseSettings):
     ENABLE_WEB_SCRAPING: bool = False            # Competitor data
     ENABLE_INDUSTRY_BENCHMARKS: bool = False     # External benchmark APIs
     
-    class Config:
-        env_file = ".env"
-        env_prefix = "FEATURE_"
+
 
 
 # Global singleton

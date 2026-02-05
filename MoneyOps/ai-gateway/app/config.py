@@ -2,6 +2,7 @@
 Configuration management for AI Gateway
 """
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 from typing import Optional
 from functools import lru_cache
 
@@ -23,6 +24,7 @@ class Settings(BaseSettings):
     
     # LLM Providers
     GROQ_API_KEY: Optional[str] = None
+    ANTHROPIC_API_KEY: Optional[str] = None
     
     # LLM Models
     GROQ_MODEL: str = "groq/compound"  
@@ -69,10 +71,7 @@ class Settings(BaseSettings):
     AGENT_TIMEOUT: int = 60
     MAX_TOOL_ITERATIONS: int = 5
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+    model_config = ConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=True)
 
 
 @lru_cache()
@@ -82,6 +81,14 @@ def get_settings() -> Settings:
     Returns the same instance on subsequent calls
     """
     return Settings()
+
+
+def require_groq_key():
+    """
+    Ensure GROQ_API_KEY is present
+    """
+    if not settings.GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY is required")
 
 
 # Convenience function

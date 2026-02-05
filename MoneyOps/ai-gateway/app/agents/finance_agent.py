@@ -5,6 +5,9 @@ v2.0: Strategic features (health scoring, recommendations, forecasting)
 """
 from typing import Dict, Any, List, Optional
 from decimal import Decimal
+from datetime import datetime, timedelta
+import time
+
 
 from app.agents.base_agent import BaseAgent, AgentResponse, ToolDefinition
 from app.schemas.intents import Intent, AgentType
@@ -254,17 +257,57 @@ class FinanceAgent(BaseAgent):
     ) -> Dict[str, Any]:
         """Handle invoice creation"""
         org_id = context.get("org_id", "default_org") if context else "default_org"
+        user_id = context.get("user_id")
         
+        if not user_id:
+            # Fallback for testing if not provided, though backend will likely reject null
+            logger.warning("user_id_missing_in_context")
+            # Try to proceed or raise? Backend adapter needs it.
+            # If we don't have it, we can't create invoice securely.
+            raise Exception("User ID is missing from context. Please ensure you are logged in.")
+
+        # 1. Lookup Client ID by Name
+        client_name = params["client_name"]
+        client_resp = await self.backend.get_client_by_name(org_id, client_name)
+        
+        if not client_resp.success:
+            raise Exception(f"Failed to lookup client: {client_resp.error}")
+            
+        clients = client_resp.data
+        if isinstance(clients, list):
+            if not clients:
+                raise Exception(f"Client '{client_name}' not found. Please create the client first.")
+            client_id = clients[0].get("id")
+        elif isinstance(clients, dict):
+             client_id = clients.get("id")
+        else:
+             raise Exception(f"Unexpected response format for client search")
+             
+        if not client_id:
+            raise Exception(f"Client ID not found for '{client_name}'")
+
+        # Generate required fields
+        invoice_number = f"INV-{int(time.time())}"
+        issue_date = datetime.now().strftime("%Y-%m-%d")
+        due_date = params.get("due_date")
+        if not due_date:
+            due_date = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
+
+        # 2. Create Invoice
         response = await self.backend.create_invoice(
             org_id=org_id,
-            client_name=params["client_name"],
+            user_id=user_id,
+            client_id=client_id,
+            invoice_number=invoice_number,
+            issue_date=issue_date,
             items=params["items"],
             subtotal=float(params["subtotal"]),
             tax=float(params.get("tax", 0.0)),
             total=float(params["total"]),
-            due_date=params.get("due_date"),
+            due_date=due_date,
             notes=params.get("notes")
         )
+
         
         if response.success:
             invoice_data = response.data

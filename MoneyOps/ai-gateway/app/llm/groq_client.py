@@ -9,9 +9,23 @@ from tenacity import (
 )
 from typing import Optional, List, Dict, Any
 import json
+import re
 
 from app.config import Settings
 from app.utils.logger import get_logger
+
+def extract_json(content: str) -> str:
+    """
+    Extract JSON from markdown code blocks or raw string
+    """
+    content = content.strip()
+    
+    # Try to find JSON block in markdown
+    json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
+    if json_match:
+        return json_match.group(1)
+        
+    return content
 
 logger = get_logger(__name__)
 settings = Settings()
@@ -103,9 +117,10 @@ class GroqClient:
         )
 
         content = response.choices[0].message.content
-
+        
         try:
-            return json.loads(content)
+            cleaned_content = extract_json(content)
+            return json.loads(cleaned_content)
         except json.JSONDecodeError as e:
             logger.error(
                 "groq_json_parse_error",
