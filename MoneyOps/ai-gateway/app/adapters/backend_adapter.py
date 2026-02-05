@@ -105,11 +105,15 @@ class BackendHttpAdapter:
                     endpoint=endpoint
                 )
 
+            error_msg = None
+            if isinstance(response_data, dict):
+                error_msg = response_data.get("message") or response_data.get("error")
+            
             return BackendResponse(
                 success=success,
                 data=response_data,
                 status_code=response.status_code,
-                error=response_data.get("error") if isinstance(response_data, dict) else None
+                error=error_msg
             )
  
         except httpx.TimeoutException as e:
@@ -142,27 +146,43 @@ class BackendHttpAdapter:
     async def create_invoice(
         self,
         org_id:str,
-        client_name: str,
+        user_id: str,
+        client_id: str,
+        invoice_number: str,
+        issue_date: str,
         items: List[Dict[str, Any]],
         subtotal: float,
         tax: float,
         total:float,
         due_date:Optional[str] = None,
-        notes: Optional[str] = None    
+        notes: Optional[str] = None,
+        status: str = "DRAFT",
+        currency: str = "INR"
     ) -> BackendResponse:
         """Create a new invoice"""
         payload = {
-            "organizationId" : org_id,
-            "clientName"  : client_name,
+            "clientId"  : client_id,
+            "invoiceNumber": invoice_number,
+            "issueDate": issue_date,
             "items" : items,
             "subtotal" : subtotal,
-            "tax" : tax,
-            "total": total,
+            "gstTotal" : tax,
+            "totalAmount": total,
             "dueDate" : due_date,
-            "notes": notes
+            "notes": notes,
+            "status": status,
+            "currency": currency
+        }
+        
+        headers = {
+            "X-Org-Id": org_id,
+            "X-User-Id": user_id
         }
 
-        return await self._request("POST", "/api/v1/invoices", data=payload)
+        return await self._request("POST", "/api/invoices", data=payload, headers=headers)
+
+
+
     
 
     async def get_invoices(
@@ -183,11 +203,13 @@ class BackendHttpAdapter:
         if client_name:
             params["clientName"] = client_name
 
-        return await self._request("GET", "api/v1/invoices", params=params)
+        return await self._request("GET", "/api/invoices", params=params)
+
     
     async def get_invoice_by_id(self, invoice_id: str) -> BackendResponse:
         """Get a specific invoice"""
-        return await self._request("GET", f"api/v1/invoices/{invoice_id}")
+        return await self._request("GET", f"/api/invoices/{invoice_id}")
+
  
     async def update_invoice(
         self,
@@ -195,11 +217,13 @@ class BackendHttpAdapter:
         updates: Dict[str, Any]
     ) -> BackendResponse:
         """Update an invoice"""
-        return await self._request("PATCH", f"api/v1/invoices/{invoice_id}", data=updates)
+        return await self._request("PATCH", f"/api/invoices/{invoice_id}", data=updates)
+
     
     async def delete_invoice(self, invoice_id: str) -> BackendResponse:
         """Delete an invoice"""
-        return await self._request("DELETE", f"api/v1/invoices/{invoice_id}")
+        return await self._request("DELETE", f"/api/invoices/{invoice_id}")
+
 
     # ========================================
     # CLIENT OPERATIONS
@@ -224,7 +248,8 @@ class BackendHttpAdapter:
             "gstNumber": gst_number
         }
 
-        return await self._request("POST", "/api/v1/clients", data=payload)
+        return await self._request("POST", "/api/clients", data=payload)
+
 
     async def get_clients(
         self,
@@ -241,16 +266,19 @@ class BackendHttpAdapter:
         if search:
             params["search"] = search
         
-        return await self._request("GET", "/api/v1/clients", params=params)
+        return await self._request("GET", "/api/clients", params=params)
+
 
 
     async def get_client_by_name(self, org_id: str, name: str) -> BackendResponse:
         """Get client by name"""
         return await self._request(
             "GET",
-            "/api/v1/clients/search",
-            params={"organizationId": org_id, "name": name}
+            "/api/clients/search",
+            params={"q": name},
+            headers={"X-Org-Id": org_id}
         )
+
 
     # ========================================
     # PAYMENT OPERATIONS
@@ -275,7 +303,8 @@ class BackendHttpAdapter:
             "notes": notes
         }
         
-        return await self._request("POST", "/api/v1/payments", data=payload)
+        return await self._request("POST", "/api/payments", data=payload)
+
     
     async def get_payments(
         self,
@@ -292,7 +321,8 @@ class BackendHttpAdapter:
         if invoice_id:
             params["invoiceId"] = invoice_id
         
-        return await self._request("GET", "/api/v1/payments", params=params)
+        return await self._request("GET", "/api/payments", params=params)
+
     
     # ========================================
     # TRANSACTION OPERATIONS
@@ -313,7 +343,8 @@ class BackendHttpAdapter:
         if transaction_type:
             params["type"] = transaction_type
         
-        return await self._request("GET", "/api/v1/transactions", params=params)
+        return await self._request("GET", "/api/transactions", params=params)
+
     
     async def get_balance(self, org_id: str) -> BackendResponse:
         """Get account balance by calling transactions summary and returning netProfit as balance"""
@@ -350,7 +381,8 @@ class BackendHttpAdapter:
         """Get revenue breakdown by period"""
         return await self._request(
             "GET",
-            "/api/v1/analytics/revenue",
+            "/api/analytics/revenue",
+
             params={"organizationId": org_id, "period": period}
         )
     

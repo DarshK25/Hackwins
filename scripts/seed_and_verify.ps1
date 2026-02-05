@@ -142,7 +142,9 @@ $agentBody = @{
     entities = @{}
     context = @{
         org_id = $orgId
+        user_id = $userId
     }
+
 }
 $agentResponse = Send-Request -Url "$gatewayBase/test/agents/execute" -Method POST -Body $agentBody -Headers @{"Authorization" = "Bearer $globalToken"}
 Write-Host "Agent Response (Balance):" -ForegroundColor White
@@ -154,14 +156,24 @@ $invoiceBody = @{
     entities = @{
         client_name = "TEST_CLIENT_ACME"
         total = 55000
-        items = @(@{description="Consulting"; amount=50000}, @{description="Tax"; amount=5000})
+        items = @(
+            @{
+                type = "PRODUCT"
+                description = "Consulting Product"
+                quantity = 1
+                rate = 50000
+                gstPercent = 10
+            }
+        )
         subtotal = 50000
         tax = 5000
         due_date = (Get-Date).AddDays(30).ToString("yyyy-MM-dd")
     }
     context = @{
         org_id = $orgId
+        user_id = $userId
     }
+
 }
 $invoiceAgentResponse = Send-Request -Url "$gatewayBase/test/agents/execute" -Method POST -Body $invoiceBody -Headers @{"Authorization" = "Bearer $globalToken"}
 Write-Host "Agent Response (Create Invoice):" -ForegroundColor White
@@ -180,7 +192,9 @@ if ($invoiceAgentResponse -and $invoiceAgentResponse.data -and $invoiceAgentResp
         }
         context = @{
             org_id = $orgId
+            user_id = $userId
         }
+
     }
     $paymentAgentResponse = Send-Request -Url "$gatewayBase/test/agents/execute" -Method POST -Body $paymentBody -Headers @{"Authorization" = "Bearer $globalToken"}
     Write-Host "Agent Response (Record Payment):" -ForegroundColor White

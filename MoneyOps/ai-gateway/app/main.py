@@ -12,6 +12,8 @@ from app.utils.logger import get_logger
 from app.api.v1 import health
 
 logger = get_logger(__name__)
+# Trigger reload for env update
+
 
 
 @asynccontextmanager
