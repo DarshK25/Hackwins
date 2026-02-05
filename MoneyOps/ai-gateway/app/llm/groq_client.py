@@ -35,6 +35,11 @@ class GroqClient:
     A client for interacting with the Groq LLM API with retry and structured output.
     """
     def __init__(self):
+        if not settings.GROQ_API_KEY:
+            raise RuntimeError(
+                "GROQ_API_KEY is required to use GroqClient. "
+                "Please set it in your .env file or environment variables."
+            )
         self.client = Groq(api_key=settings.GROQ_API_KEY)
         self.async_client = AsyncGroq(api_key=settings.GROQ_API_KEY)
         self.model = settings.GROQ_MODEL

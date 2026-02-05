@@ -29,7 +29,6 @@ class Settings(BaseSettings):
     # LLM Models
     GROQ_MODEL: str = "groq/compound"  
     GROQ_MODEL_COMPLEX: str = "groq/compound"  # For complex tasks
-    CLAUDE_MODEL: str = "claude-3-5-sonnet-20241022"  # Backup
     
     # LLM Settings
     LLM_TEMPERATURE: float = 0.3
