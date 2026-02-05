@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     
     # Server
     HOST: str = "0.0.0.0"
-    PORT: int = 8081
+    PORT: int = 8001
     
     # LLM Providers
     GROQ_API_KEY: str
@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     LLM_MAX_RETRIES: int = 3
     
     # Backend Services
-    BACKEND_BASE_URL: str = "http://localhost:8080"
+    BACKEND_BASE_URL: str = "http://localhost:8000"
     BACKEND_TIMEOUT: int = 30
     
     # Redis

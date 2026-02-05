@@ -1298,8 +1298,6 @@ moneyops-backend/
 
 ---
 
-## How to Present This to Teachers
-
 ### Slide 1: "System Design Maturity Model"
 ```
 Level 1: Basic CRUD (Beginners)
