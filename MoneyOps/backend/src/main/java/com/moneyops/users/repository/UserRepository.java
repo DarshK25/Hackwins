@@ -23,8 +23,10 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     void deleteByIdAndOrgId(UUID id, UUID orgId);
 
     Optional<User> findByEmailAndOrgId(String email, UUID orgId);
+    Optional<User> findByEmail(String email);
 
     boolean existsByEmailAndOrgId(String email, UUID orgId);
+    boolean existsByEmail(String email);
 
     @Query("SELECT u FROM User u WHERE u.orgId = :orgId AND " +
            "(LOWER(u.name) LIKE LOWER(CONCAT('%', :search, '%')) OR " +

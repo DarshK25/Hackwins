@@ -1,4 +1,4 @@
-package com.ledgertalk.gateway.health;
+package com.moneyops.gateway.health;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

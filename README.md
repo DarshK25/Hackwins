@@ -13,6 +13,7 @@ MoneyOps is a next-generation financial platform that orchestrates **AI Agents**
 - **[Troubleshooting & Tradeoffs](docs/troubleshooting_and_tradeoffs.md)**: Solutions to common issues and architectural decisions.
 - **[Testing Results](docs/test_results.md)**: Verification logs.
 - **[Endpoints](docs/test_endpoints.md)**: API reference.
+- **[Secrets Security](docs/security_secrets.md)**: Key rotation and secure secret loading.
 
 ---
 

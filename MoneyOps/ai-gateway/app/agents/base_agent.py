@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
 
 from app.schemas.intents import AgentType, Intent, ComplexityLevel
@@ -8,17 +8,17 @@ from app.schemas.intents import AgentType, Intent, ComplexityLevel
 class AgentCapability(str, Enum):
     """Agent Capabilities"""
     CRUD_OPERATIONS = "crud_operations"
-    ANALYTICS_= "analytics"
+    ANALYTICS = "analytics"
     STRATEGIC_PLANNING = "strategic_planning"
     FORECASTING = "forecasting"
     RECOMMENDATIONS = "recommendations"
 
-class ToolDefinition:
+class ToolDefinition(BaseModel):
     """Definition of a tool that an agent can use"""
     name: str
     description: str
     parameters: Dict[str, Any]
-    required_params: List[str] = []
+    required_params: List[str] = Field(default_factory=list)
     enabled: bool = True
     mvp_ready: bool = True
 
@@ -102,9 +102,13 @@ class BaseAgent:
         """
         tools = self.get_tools()
         for tool in tools:
-            self._tools[tool.name] = tool
+            # Ensure tools are stored as ToolDefinition instances
+            if isinstance(tool, ToolDefinition):
+                self._tools[tool.name] = tool
+            else:
+                self._tools[tool.name] = ToolDefinition.model_validate(tool)
         
-    def get_tool(self, tool_name: str) -> List[ToolDefinition]:
+    def get_tool(self, tool_name: str) -> Optional[ToolDefinition]:
         """Get a specific tool by name"""
         return self._tools.get(tool_name)
 

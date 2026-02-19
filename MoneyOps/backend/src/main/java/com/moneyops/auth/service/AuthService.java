@@ -8,6 +8,8 @@ import com.moneyops.auth.dto.TokenResponse;
 import com.moneyops.auth.security.JwtProvider;
 import com.moneyops.organizations.entity.BusinessOrganization;
 import com.moneyops.organizations.repository.BusinessOrganizationRepository;
+import com.moneyops.shared.exceptions.ConflictException;
+import com.moneyops.shared.exceptions.UnauthorizedException;
 import com.moneyops.users.entity.User;
 import com.moneyops.users.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,11 +37,15 @@ public class AuthService {
     private PasswordEncoder passwordEncoder;
 
     public TokenResponse login(LoginRequest request) {
-        User user = userRepository.findByEmailAndOrgId(request.getEmail(), null) // Need to handle org
-                .orElseThrow(() -> new RuntimeException("Invalid credentials"));
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new UnauthorizedException("Invalid credentials"));
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            throw new RuntimeException("Invalid credentials");
+            throw new UnauthorizedException("Invalid credentials");
+        }
+
+        if (user.getStatus() != User.Status.ACTIVE) {
+            throw new UnauthorizedException("User account is not active");
         }
 
         String token = jwtProvider.generateToken(user.getId().toString());
@@ -47,8 +53,8 @@ public class AuthService {
     }
 
     public TokenResponse register(RegisterRequest request) {
-        if (userRepository.existsByEmailAndOrgId(request.getEmail(), null)) {
-            throw new RuntimeException("User already exists");
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new ConflictException("User already exists");
         }
 
         // Create organization
@@ -90,13 +96,19 @@ public class AuthService {
 
     public String handleOAuth2Login(OAuthUserInfo userInfo) {
         // Find or create user
-        User user = userRepository.findByEmailAndOrgId(userInfo.getEmail(), null)
+        User user = userRepository.findByEmail(userInfo.getEmail())
                 .orElseGet(() -> {
                     User newUser = new User();
                     newUser.setName(userInfo.getName());
                     newUser.setEmail(userInfo.getEmail());
                     newUser.setRole(User.Role.STAFF);
                     newUser.setStatus(User.Status.ACTIVE);
+                    // OAuth bootstrap user must satisfy required non-null columns.
+                    UUID bootstrapId = UUID.randomUUID();
+                    newUser.setOrgId(bootstrapId);
+                    newUser.setCreatedBy(bootstrapId);
+                    newUser.setUpdatedBy(bootstrapId);
+                    newUser.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));
                     newUser.setCreatedAt(LocalDateTime.now());
                     newUser.setUpdatedAt(LocalDateTime.now());
                     return userRepository.save(newUser);

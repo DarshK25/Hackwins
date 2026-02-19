@@ -23,12 +23,12 @@ class Settings(BaseSettings):
     PORT: int = 8001
     
     # LLM Providers
-    GROQ_API_KEY: Optional[str] = None
+    GROQ_API_KEY: str
     ANTHROPIC_API_KEY: Optional[str] = None
     
     # LLM Models
-    GROQ_MODEL: str = "groq/compound"  
-    GROQ_MODEL_COMPLEX: str = "groq/compound"  # For complex tasks
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"  
+    GROQ_MODEL_COMPLEX: str = "llama-3.3-70b-versatile"  # For complex tasks
     
     # LLM Settings
     LLM_TEMPERATURE: float = 0.3
@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     # Agent Settings
     AGENT_TIMEOUT: int = 60
     MAX_TOOL_ITERATIONS: int = 5
+    
+    # LiveKit
+    LIVEKIT_URL: str = "wss://your-project.livekit.cloud"
+    LIVEKIT_API_KEY: Optional[str] = None
+    LIVEKIT_API_SECRET: Optional[str] = None
     
     model_config = ConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=True)
 

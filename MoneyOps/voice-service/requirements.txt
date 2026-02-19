@@ -2,6 +2,8 @@
 livekit-agents
 livekit-plugins-silero
 livekit-plugins-groq
+livekit-plugins-cartesia
+livekit-plugins-assemblyai
 livekit-api
 # LedgerTalk Voice Service Dependencies
 # Python 3.11+

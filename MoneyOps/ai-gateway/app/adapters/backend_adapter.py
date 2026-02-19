@@ -44,7 +44,7 @@ class BackendHttpAdapter:
             headers=default_headers
         )
         
-        logger.info("backend_adatper_initialized", base_url=self.base_url)
+        logger.info("backend_adapter_initialized", base_url=self.base_url)
         
     async def _request(
         self,
