@@ -129,10 +129,28 @@ class IntentClassifier:
             ],
 
             # Conversational intents
-            Intent.GREETING: [r"^(hi|hello|hey|good morning|good afternoon)$", r"^what's up$", r"^how are you$"],
-            Intent.HELP: [r"help", r"what.*can.*do", r"how.*use", r"guide"],
-            Intent.CONFIRMATION: [r"^(yes|yeah|yep|sure|ok|okay|correct|right)$", r"^go ahead$", r"^proceed$"],
-            Intent.CANCELLATION: [r"^(no|nope|cancel|stop|abort|nevermind)$", r"don't.*do.*that"],
+            Intent.GREETING: [
+                r"\b(hi|hello|hey|good morning|good afternoon|good evening)\b",
+                r"what's up",
+                r"how are you",
+                r"^moneyops$",
+            ],
+            Intent.HELP: [
+                r"\b(help|guide|assist)\b",
+                r"what.*can.*do",
+                r"how.*use",
+            ],
+            Intent.CONFIRMATION: [
+                r"\b(yes|yeah|yep|sure|ok|okay|correct|right|fine)\b",
+                r"go ahead",
+                r"proceed",
+                r"confirm",
+            ],
+            Intent.CANCELLATION: [
+                r"\b(no|nope|nah|cancel|stop|abort|nevermind)\b",
+                r"don't.*do.*that",
+                r"wrong",
+            ],
         }
 
     async def classify(

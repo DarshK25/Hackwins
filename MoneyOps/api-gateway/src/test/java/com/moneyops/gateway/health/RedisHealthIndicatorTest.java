@@ -1,4 +1,4 @@
-package com.ledgertalk.gateway.health;
+package com.moneyops.gateway.health;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -7,6 +7,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+    )
+
     #voice service settings 
 
     APP_NAME: str = "MoneyOps Voice Service"
@@ -22,7 +27,7 @@ class Settings(BaseSettings):
 
     #GROQ
     GROQ_API_KEY: Optional[str] = None
-    GROQ_MODEL: str = "groq/compound"
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
     #AI GATEWAY
     AI_GATEWAY_URL: str = "http://localhost:8001"  # Changed URL to use port 8001
@@ -44,8 +49,4 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "development"
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-
 settings = Settings()

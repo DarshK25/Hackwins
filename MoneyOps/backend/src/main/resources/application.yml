@@ -34,10 +34,19 @@ spring:
         dialect: org.hibernate.dialect.H2Dialect
 
   kafka:
-    bootstrap-servers: localhost:9092
+    enabled: ${KAFKA_ENABLED:false}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP_ID:notification-group}
+    # Optional: SASL/SSL for managed Kafka (e.g. Confluent Cloud, AWS MSK)
+    # Uncomment or set via env if your broker requires auth:
+    # properties:
+    #   security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+    #   sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
+    #   sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG}
 
 server:
-  port: 8000
+  port: 8080
 
 jwt:
   secret: my-super-secret-key-that-is-at-least-256-bits-long-for-HS256-algorithm-must-be-longer

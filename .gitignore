@@ -1,0 +1,18 @@
+############################
+# Monorepo root ignore file
+############################
+
+# Python virtual environments
+**/venv/
+
+# Local runtime logs
+runtime-logs/
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+
+# Local env files (each service also has its own .gitignore)
+**/.env
+**/.env.local
+
