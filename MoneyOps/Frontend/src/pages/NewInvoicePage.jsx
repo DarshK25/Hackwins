@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useAuth } from "@clerk/clerk-react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,7 @@ const BLANK_ITEM = { description: "", quantity: 1, rate: 0, gstRate: 18, isServi
 const BLANK_CLIENT = { name: "", email: "", phone: "", company: "", gstin: "", address: "" };
 
 export default function NewInvoicePage() {
+    const { getToken } = useAuth();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [previewData, setPreviewData] = useState(null);
@@ -52,7 +54,10 @@ export default function NewInvoicePage() {
 
     const fetchClients = async () => {
         try {
-            const res = await fetch("/api/clients");
+            const token = await getToken();
+            const res = await fetch("/api/clients", {
+                headers: { Authorization: `Bearer ${token}` }
+            });
             const data = await res.json();
             setClients(Array.isArray(data) ? data : []);
         } catch (error) {
@@ -71,9 +76,13 @@ export default function NewInvoicePage() {
 
         setSavingClient(true);
         try {
+            const token = await getToken();
             const res = await fetch("/api/clients", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
                 body: JSON.stringify(newClientData),
             });
 
@@ -162,9 +171,13 @@ export default function NewInvoicePage() {
     const handlePreview = async () => {
         setLoading(true);
         try {
+            const token = await getToken();
             const res = await fetch("/api/invoices/preview", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
                 body: JSON.stringify({
                     items: buildLineItems(),
                     customerName: formData.customerName,
@@ -186,9 +199,13 @@ export default function NewInvoicePage() {
     const handleCreate = async () => {
         setLoading(true);
         try {
+            const token = await getToken();
             const res = await fetch("/api/invoices", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
                 body: JSON.stringify({
                     clientId: formData.clientId || undefined,
                     customerName: formData.customerName,

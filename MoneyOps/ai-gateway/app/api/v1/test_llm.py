@@ -7,8 +7,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.llm.groq_client import groq_client
-from app.orchestrator.intent_classifier import IntentClassifier
-from app.orchestrator.entity_extractor import EntityExtractor
+from app.orchestration.intent_classifier import IntentClassifier
+from app.orchestration.entity_extractor import EntityExtractor
 from app.schemas.intents import Intent
 from app.utils.logger import get_logger
 

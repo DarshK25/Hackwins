@@ -11,18 +11,22 @@ import {
   TrendingUp,
   Search,
   Shield,
-  GitMerge
+  GitMerge,
+  Brain,
+  Heart,
+  Rocket,
+  Cog
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-    Sidebar,
-    SidebarContent,
-    SidebarFooter,
-    SidebarGroup,
-    SidebarGroupContent,
-    SidebarGroupLabel,
-    SidebarHeader,
-    SidebarRail,
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarRail,
 } from "@/components/ui/sidebar";
 import { Bot } from "lucide-react";
 
@@ -33,7 +37,7 @@ function SidebarNav({ className, items, ...props }) {
     <nav className={cn("flex flex-col space-y-1", className)} {...props}>
       {items.map((item) => {
         const isActive = pathname === item.href || (item.href !== "/analytics" && pathname.startsWith(item.href));
-        
+
         return (
           <Link
             key={`${item.href}-${item.title}`}
@@ -50,7 +54,7 @@ function SidebarNav({ className, items, ...props }) {
             {isActive && (
               <div className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-gradient-to-b from-primary to-accent shadow-lg shadow-primary/50" />
             )}
-            
+
             {/* Icon with glow */}
             <div className={cn(
               "mr-3 transition-all duration-200",
@@ -63,7 +67,7 @@ function SidebarNav({ className, items, ...props }) {
                 {item.icon}
               </div>
             </div>
-            
+
             {/* Text */}
             <span className={cn(
               "transition-all duration-200",
@@ -71,12 +75,12 @@ function SidebarNav({ className, items, ...props }) {
             )}>
               {item.title}
             </span>
-            
+
             {/* Hover effect */}
             {!isActive && (
               <div className="absolute inset-0 rounded-lg bg-gradient-to-r from-primary/0 via-primary/5 to-accent/0 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
             )}
-            
+
             {/* Active pulse */}
             {isActive && (
               <div className="absolute inset-0 rounded-lg bg-gradient-to-r from-primary/5 to-accent/5 animate-pulse" />
@@ -142,15 +146,39 @@ export function AppSidebar(props) {
       variant: "ghost",
     },
     {
-      href: "/market-research",
-      title: "Research Agent",
-      icon: <Search className="h-4 w-4" />,
+      href: "/strategy-agent",
+      title: "Strategy Agent",
+      icon: <Brain className="h-4 w-4" />,
       variant: "ghost",
     },
     {
       href: "/compliance",
       title: "Compliance Agent",
       icon: <Shield className="h-4 w-4" />,
+      variant: "ghost",
+    },
+    {
+      href: "/customer-agent",
+      title: "Customer Agent",
+      icon: <Heart className="h-4 w-4" />,
+      variant: "ghost",
+    },
+    {
+      href: "/growth-agent",
+      title: "Growth Agent",
+      icon: <Rocket className="h-4 w-4" />,
+      variant: "ghost",
+    },
+    {
+      href: "/operations-agent",
+      title: "Operations Agent",
+      icon: <Cog className="h-4 w-4" />,
+      variant: "ghost",
+    },
+    {
+      href: "/market-research",
+      title: "Research Agent",
+      icon: <Search className="h-4 w-4" />,
       variant: "ghost",
     },
     {
@@ -189,7 +217,7 @@ export function AppSidebar(props) {
           </div>
         </div>
       </SidebarHeader>
-      
+
       <SidebarContent className="flex-1">
         <ScrollArea className="flex-1 px-3">
           <div className="flex flex-col gap-6 py-4">
@@ -208,7 +236,7 @@ export function AppSidebar(props) {
           </div>
         </ScrollArea>
       </SidebarContent>
-      
+
       <SidebarFooter>
       </SidebarFooter>
       <SidebarRail />

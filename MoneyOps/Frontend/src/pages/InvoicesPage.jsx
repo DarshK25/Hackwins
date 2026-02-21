@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useAuth } from "@clerk/clerk-react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +41,7 @@ const getStatusClass = (status) =>
 const TABS = ["all", "draft", "sent", "paid", "overdue"];
 
 export default function InvoicesPage() {
+    const { getToken } = useAuth();
     const navigate = useNavigate();
     const [invoices, setInvoices] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -56,7 +58,10 @@ export default function InvoicesPage() {
     const fetchInvoices = async () => {
         try {
             setLoading(true);
-            const res = await fetch("/api/invoices");
+            const token = await getToken();
+            const res = await fetch("/api/invoices", {
+                headers: { Authorization: `Bearer ${token}` }
+            });
             if (!res.ok) throw new Error("Failed to fetch");
             const data = await res.json();
             setInvoices(data.invoices || []);
@@ -80,8 +85,10 @@ export default function InvoicesPage() {
 
         setActionLoading(invoice.id);
         try {
+            const token = await getToken();
             const res = await fetch(`/api/invoices/${invoice.id}/send`, {
                 method: "POST",
+                headers: { Authorization: `Bearer ${token}` }
             });
             const data = await res.json();
             if (!res.ok || !data.success) throw new Error(data.message || "Failed to send");
@@ -99,7 +106,10 @@ export default function InvoicesPage() {
         setActionLoading(invoice.id);
         try {
             toast.info("Generating PDF…");
-            const res = await fetch(`/api/invoices/${invoice.id}/download`);
+            const token = await getToken();
+            const res = await fetch(`/api/invoices/${invoice.id}/download`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
             if (!res.ok) throw new Error("Failed to generate PDF");
 
             const blob = await res.blob();

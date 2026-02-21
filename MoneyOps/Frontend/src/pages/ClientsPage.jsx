@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useAuth } from "@clerk/clerk-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +41,7 @@ const INITIAL_FORM = {
 };
 
 export default function ClientsPage() {
+    const { getToken } = useAuth();
     const [clients, setClients] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
@@ -56,7 +58,10 @@ export default function ClientsPage() {
     const fetchClients = async () => {
         try {
             setLoading(true);
-            const res = await fetch("/api/clients");
+            const token = await getToken();
+            const res = await fetch("/api/clients", {
+                headers: { Authorization: `Bearer ${token}` }
+            });
             if (!res.ok) throw new Error("Failed to fetch");
             const data = await res.json();
             setClients(Array.isArray(data) ? data : []);
@@ -76,9 +81,13 @@ export default function ClientsPage() {
 
         setSaving(true);
         try {
+            const token = await getToken();
             const res = await fetch("/api/clients", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
                 body: JSON.stringify(formData),
             });
 

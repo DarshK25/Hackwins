@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useAuth } from "@clerk/clerk-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +48,7 @@ const FILTER_TYPES = ["all", "credit", "debit"];
 const FILTER_LABELS = { all: "All", credit: "Income", debit: "Expenses" };
 
 export default function TransactionsPage() {
+    const { getToken } = useAuth();
     const [transactions, setTransactions] = useState([]);
     const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -73,7 +75,10 @@ export default function TransactionsPage() {
     const fetchTransactions = async () => {
         try {
             setLoading(true);
-            const res = await fetch("/api/transactions");
+            const token = await getToken();
+            const res = await fetch("/api/transactions", {
+                headers: { Authorization: `Bearer ${token}` }
+            });
             if (!res.ok) throw new Error("Failed to fetch");
             const data = await res.json();
             setTransactions(Array.isArray(data) ? data : data.transactions || []);
@@ -87,7 +92,10 @@ export default function TransactionsPage() {
 
     const fetchAccounts = async () => {
         try {
-            const res = await fetch("/api/accounts");
+            const token = await getToken();
+            const res = await fetch("/api/accounts", {
+                headers: { Authorization: `Bearer ${token}` }
+            });
             if (res.ok) {
                 const data = await res.json();
                 setAccounts(data.accounts || []);
@@ -104,9 +112,13 @@ export default function TransactionsPage() {
         }
 
         try {
+            const token = await getToken();
             const res = await fetch("/api/transactions", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
                 body: JSON.stringify({
                     ...newTransaction,
                     amount: parseFloat(newTransaction.amount),
@@ -136,8 +148,10 @@ export default function TransactionsPage() {
             formData.append("file", uploadFile);
             formData.append("accountId", uploadAccountId);
 
+            const token = await getToken();
             const res = await fetch("/api/transactions/import", {
                 method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
                 body: formData,
             });
 
@@ -160,7 +174,11 @@ export default function TransactionsPage() {
         if (!window.confirm("Delete this transaction? This cannot be undone.")) return;
 
         try {
-            const res = await fetch(`/api/transactions?id=${id}`, { method: "DELETE" });
+            const token = await getToken();
+            const res = await fetch(`/api/transactions?id=${id}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` }
+            });
             if (!res.ok) throw new Error("Failed to delete transaction");
 
             toast.success("Transaction deleted successfully");
@@ -491,8 +509,8 @@ export default function TransactionsPage() {
                                     <div className="flex items-center gap-4 flex-1 min-w-0">
                                         <div
                                             className={`p-2 rounded-full shrink-0 ${transaction.type === "credit"
-                                                    ? "bg-green-100 text-green-600"
-                                                    : "bg-red-100 text-red-600"
+                                                ? "bg-green-100 text-green-600"
+                                                : "bg-red-100 text-red-600"
                                                 }`}
                                         >
                                             {transaction.type === "credit" ? (
@@ -535,8 +553,8 @@ export default function TransactionsPage() {
                                         <div className="text-right">
                                             <p
                                                 className={`font-semibold ${transaction.type === "credit"
-                                                        ? "text-green-600"
-                                                        : "text-red-600"
+                                                    ? "text-green-600"
+                                                    : "text-red-600"
                                                     }`}
                                             >
                                                 {transaction.type === "credit" ? "+" : "−"}₹

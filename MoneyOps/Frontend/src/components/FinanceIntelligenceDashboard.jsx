@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useAuth } from "@clerk/clerk-react";
 import {
     Card,
     CardContent,
@@ -65,6 +66,7 @@ const priorityColors = {
 };
 
 export function FinanceIntelligenceDashboard({ businessId }) {
+    const { getToken } = useAuth();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [metrics, setMetrics] = useState(null);
@@ -82,11 +84,13 @@ export function FinanceIntelligenceDashboard({ businessId }) {
     async function fetchFinanceData() {
         setRefreshing(true);
         try {
+            const token = await getToken();
+            const headers = { Authorization: `Bearer ${token}` };
             const [metricsRes, budgetRes, insightsRes, ledgerRes] = await Promise.all([
-                fetch(`/api/finance-intelligence/metrics?businessId=${businessId}`),
-                fetch(`/api/finance-intelligence/budget?businessId=${businessId}`),
-                fetch(`/api/finance-intelligence/insights?businessId=${businessId}`),
-                fetch(`/api/finance-intelligence/ledger?businessId=${businessId}`),
+                fetch(`/api/finance-intelligence/metrics?businessId=${businessId}`, { headers }),
+                fetch(`/api/finance-intelligence/budget?businessId=${businessId}`, { headers }),
+                fetch(`/api/finance-intelligence/insights?businessId=${businessId}`, { headers }),
+                fetch(`/api/finance-intelligence/ledger?businessId=${businessId}`, { headers }),
             ]);
 
             if (metricsRes.ok) {
@@ -322,8 +326,8 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                     <CardContent>
                         <div
                             className={`text-2xl font-bold ${(metrics?.netCashflow || 0) >= 0
-                                    ? "text-green-500"
-                                    : "text-red-500"
+                                ? "text-green-500"
+                                : "text-red-500"
                                 }`}
                         >
                             ₹{(metrics?.netCashflow || 0).toLocaleString()}

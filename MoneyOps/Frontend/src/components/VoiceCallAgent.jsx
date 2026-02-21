@@ -20,6 +20,8 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
     const [isConnect, setIsConnect] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
 
+    const [liveKitUnavailable, setLiveKitUnavailable] = useState(false);
+
     const startCall = async () => {
         if (!user?.id) {
             toast.error("Please sign in to start a voice call.");
@@ -27,23 +29,30 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
         }
         setIsProcessing(true);
         try {
-            // Use Clerk user ID for LiveKit token (backend/API Gateway auth unchanged)
             const userId = user.id;
-
-            // Fetch token from AI Gateway (proxied via Vite: /api/v1 -> localhost:8001)
             const res = await fetch(`/api/v1/voice/token?user_id=${userId}`);
 
+            // LiveKit SDK not installed on gateway
+            if (res.status === 503) {
+                setLiveKitUnavailable(true);
+                setIsProcessing(false);
+                return;
+            }
+
+            // LiveKit keys not configured
+            if (res.status === 500) {
+                setLiveKitUnavailable(true);
+                setIsProcessing(false);
+                return;
+            }
+
             if (!res.ok) {
-                const errText = await res.text();
-                throw new Error(errText || `Failed to fetch token (${res.status})`);
+                throw new Error(`Failed to fetch token (${res.status})`);
             }
 
             const contentType = res.headers.get("content-type");
             if (!contentType?.includes("application/json")) {
-                throw new Error(
-                    "Server returned non-JSON. Is AI Gateway running on port 8001? " +
-                    "Restart the dev server after adding the proxy."
-                );
+                throw new Error("Server returned non-JSON. Is AI Gateway running on port 8000?");
             }
 
             const data = await res.json();
@@ -57,10 +66,7 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
             setIsProcessing(false);
         } catch (error) {
             console.error("Failed to start call:", error);
-            const message = error?.message?.includes("non-JSON")
-                ? "AI Gateway not reachable. Check it's running on port 8001 and has LIVEKIT_* in .env"
-                : "Failed to start voice agent";
-            toast.error(message);
+            toast.error("Could not connect to voice agent. Check AI Gateway is running.");
             setIsProcessing(false);
             setIsConnect(false);
         }
@@ -125,27 +131,43 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
                     </LiveKitRoom>
                 ) : (
                     <div className="flex flex-col items-center justify-center space-y-4 py-4">
-                        <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center">
-                            <Mic className="h-8 w-8 text-slate-400" />
-                        </div>
-                        <p className="text-xs text-slate-500 text-center">
-                            Connect to speak with the {agentType} agent.
-                        </p>
-                        <Button
-                            onClick={startCall}
-                            disabled={isProcessing || !isLoaded || !user?.id}
-                            className="w-full bg-green-600 hover:bg-green-700"
-                        >
-                            {isProcessing ? (
-                                <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Connecting...
-                                </>
-                            ) : (
-                                <>
-                                    <Phone className="mr-2 h-4 w-4" /> Start Call
-                                </>
-                            )}
-                        </Button>
+                        {liveKitUnavailable ? (
+                            <>
+                                <div className="h-16 w-16 rounded-full bg-amber-50 flex items-center justify-center">
+                                    <Mic className="h-8 w-8 text-amber-400" />
+                                </div>
+                                <p className="text-xs text-slate-500 text-center">
+                                    Voice calls require LiveKit configuration.
+                                </p>
+                                <p className="text-[10px] text-slate-400 text-center">
+                                    Add <code className="bg-slate-100 px-1 rounded">LIVEKIT_API_KEY</code>, <code className="bg-slate-100 px-1 rounded">LIVEKIT_API_SECRET</code> and <code className="bg-slate-100 px-1 rounded">LIVEKIT_URL</code> to your AI Gateway <code className="bg-slate-100 px-1 rounded">.env</code>
+                                </p>
+                            </>
+                        ) : (
+                            <>
+                                <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center">
+                                    <Mic className="h-8 w-8 text-slate-400" />
+                                </div>
+                                <p className="text-xs text-slate-500 text-center">
+                                    Connect to speak with the {agentType} agent.
+                                </p>
+                                <Button
+                                    onClick={startCall}
+                                    disabled={isProcessing || !isLoaded || !user?.id}
+                                    className="w-full bg-green-600 hover:bg-green-700"
+                                >
+                                    {isProcessing ? (
+                                        <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Connecting...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Phone className="mr-2 h-4 w-4" /> Start Call
+                                        </>
+                                    )}
+                                </Button>
+                            </>
+                        )}
                     </div>
                 )}
             </CardContent>

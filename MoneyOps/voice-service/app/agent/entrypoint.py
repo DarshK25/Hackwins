@@ -108,6 +108,7 @@ async def voice_session(ctx: JobContext):
         # STT: AssemblyAI for speech recognition
         stt=assemblyai.STT(
             api_key=settings.ASSEMBLYAI_API_KEY,
+            word_boost=["MoneyOps", "LedgerTalk", "financial", "invoice"],
         ),
 
         # LLM: Groq - uses MoneyOps instructions from instructions.py

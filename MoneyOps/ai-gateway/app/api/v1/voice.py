@@ -4,18 +4,20 @@ Processes voice input: Intent classification -> Entity extraction -> Agent routi
 """
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+import uuid
 
-from app.orchestrator.intent_classifier import IntentClassifier
-from app.orchestrator.entity_extractor import EntityExtractor
-from app.orchestration.agent_router import agent_router
-from app.utils.logger import get_logger
-
+from app.orchestration.intent_classifier import IntentClassifier
+from app.orchestration.entity_extractor import EntityExtractor
 from app.orchestration.agent_router import agent_router
 from app.utils.logger import get_logger
 from app.config import settings
-from livekit.api import AccessToken, VideoGrants
-import uuid
+
+try:
+    from livekit.api import AccessToken, VideoGrants
+    _LIVEKIT_AVAILABLE = True
+except ImportError:
+    _LIVEKIT_AVAILABLE = False
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -34,31 +36,33 @@ class VoiceProcessRequest(BaseModel):
 
 
 @router.get("/voice/token")
-async def get_voice_token(user_id: str = "user", room_name: str = None):
+async def get_voice_token(user_id: str = "user", room_name: Optional[str] = None):
     """
     Generate a LiveKit access token for voice chat
     """
     try:
+        if not _LIVEKIT_AVAILABLE:
+            raise HTTPException(status_code=503, detail="LiveKit SDK not installed on server")
+
         if not settings.LIVEKIT_API_KEY or not settings.LIVEKIT_API_SECRET:
             raise HTTPException(status_code=500, detail="LiveKit not configured on server")
 
         # Generate a unique room name if not provided
-        if not room_name:
-            room_name = f"voice-{user_id}-{str(uuid.uuid4())[:8]}"
+        actual_room = room_name or f"voice-{user_id}-{str(uuid.uuid4())[:8]}"
 
-        # Create access token
+        # Create access token — AccessToken is guaranteed non-None here
         token = AccessToken(settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET) \
             .with_identity(user_id) \
             .with_name(user_id) \
             .with_grants(VideoGrants(
                 room_join=True,
-                room=room_name,
+                room=actual_room,
             ))
 
         return {
             "token": token.to_jwt(),
             "url": settings.LIVEKIT_URL,
-            "room_name": room_name
+            "room_name": actual_room
         }
     except Exception as e:
         logger.error("token_generation_failed", error=str(e))
