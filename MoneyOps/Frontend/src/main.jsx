@@ -6,6 +6,9 @@ import "./index.css";
 import App from "./App.jsx";
 import { ThemeProvider } from "@/components/theme-provider";
 
+// Force dark theme always across the whole app
+document.documentElement.classList.add("dark");
+
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 if (!PUBLISHABLE_KEY) {
     throw new Error("Missing Clerk Publishable Key (VITE_CLERK_PUBLISHABLE_KEY)");
@@ -14,7 +17,7 @@ if (!PUBLISHABLE_KEY) {
 createRoot(document.getElementById("root")).render(
     <StrictMode>
         <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/">
-            <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+            <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
                 <BrowserRouter>
                     <App />
                 </BrowserRouter>
