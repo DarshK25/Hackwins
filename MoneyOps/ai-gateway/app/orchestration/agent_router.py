@@ -102,7 +102,7 @@ class AgentRouter:
             )
             return AgentResponse(
                 success=False,
-                message=f"{primary_agent_type.value} does not support {intent.value}",
+                message="I'm sorry, I'm not able to help with that right now. Is there something else I can assist you with?",
                 agent_type=primary_agent_type,
                 error="Intent not supported by this agent"
             )
@@ -146,7 +146,7 @@ class AgentRouter:
             )
             return AgentResponse(
                 success=False,
-                message=f"Agent execution failed: {str(e)}",
+                message="I ran into a problem processing your request. Please try again in a moment.",
                 error=str(e),
                 agent_type=agent.get_agent_type()
             )
@@ -210,14 +210,10 @@ class AgentRouter:
         """Build response for unavailable agent"""
         return AgentResponse(
             success=False,
-            message=f"{agent_type.value} is not available yet. Coming in v2.0!",
+            message="That feature isn't available just yet, but I can help you with invoices, payments, and financial summaries. What would you like to do?",
             agent_type=agent_type,
             implemented=False,
-            recommendations=[
-                f"{agent_type.value} will be available post-MVP",
-                "Enable it via feature flags when ready",
-                "Focus on Finance Agent operations for now"
-            ]
+            recommendations=[]
         )
     
     def list_available_agents(self) -> List[str]:

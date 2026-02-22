@@ -239,11 +239,12 @@ DEFAULT_CONVERSATIONAL = IntentRequirements(
 
 INTENT_REQUIREMENTS: Dict[Intent, IntentRequirements] = {
     Intent.INVOICE_CREATE: IntentRequirements(
-        required_entities=["client_name", "items"],
-        optional_entities=["due_date", "notes", "tax"],
-        requires_user_confirmation=True,
+        required_entities=["client_name", "amount"],
+        optional_entities=["due_date", "notes", "tax", "items"],
+        requires_user_confirmation=False,  # Voice: agent asks inline instead of formal confirm step
         minimum_confidence=0.8,
         primary_agent=AgentType.FINANCE_AGENT,
+        complexity=ComplexityLevel.MEDIUM,   # MEDIUM: regex handles most entities; LLM only when nothing found
         expected_response_format="json",
     ),
     Intent.INVOICE_QUERY: IntentRequirements(

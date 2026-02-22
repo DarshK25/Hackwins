@@ -51,24 +51,20 @@ class BackendHttpAdapter:
         method: str,
         endpoint: str,
         data: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]]=  None,
-        headers: Optional[Dict[str, Any]] = None
+        params: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, Any]] = None,
+        auth_token: Optional[str] = None,
     ) -> BackendResponse:
         """
-        Make http req to backend core
-        Args: 
-            method: Http method,
-            endpoint: API endpoint
-            data: Req body,
-            params: Query params
-            headers: Additional headers
-
-        Returns: 
-            BackendResponse
+        Make http req to backend core.
+        auth_token: per-request JWT override — takes priority over the singleton token.
         """
         url = endpoint if endpoint.startswith("/") else f"/{endpoint}"
-        # Merge headers
-        req_headers = self.client.headers.copy()
+        # Build request headers: start from client defaults
+        req_headers = dict(self.client.headers)
+        # Per-request auth override (e.g. user JWT from voice session)
+        if auth_token:
+            req_headers["Authorization"] = f"Bearer {auth_token}"
         if headers:
             req_headers.update(headers)
 
@@ -140,12 +136,12 @@ class BackendHttpAdapter:
                 status_code=500
             )            
         
-    #===========================
-    #Invoice ops
-    #===========================
+    # ===========================
+    # Invoice ops
+    # ===========================
     async def create_invoice(
         self,
-        org_id:str,
+        org_id: str,
         user_id: str,
         client_id: str,
         invoice_number: str,
@@ -153,56 +149,55 @@ class BackendHttpAdapter:
         items: List[Dict[str, Any]],
         subtotal: float,
         tax: float,
-        total:float,
-        due_date:Optional[str] = None,
+        total: float,
+        due_date: Optional[str] = None,
         notes: Optional[str] = None,
         status: str = "DRAFT",
-        currency: str = "INR"
+        currency: str = "INR",
+        auth_token: Optional[str] = None,
     ) -> BackendResponse:
-        """Create a new invoice"""
+        """Create a new invoice. auth_token is forwarded per-request so the
+        user's session JWT reaches the backend even though the adapter is a singleton."""
         payload = {
-            "clientId"  : client_id,
+            "clientId": client_id,
             "invoiceNumber": invoice_number,
             "issueDate": issue_date,
-            "items" : items,
-            "subtotal" : subtotal,
-            "gstTotal" : tax,
+            "items": items,
+            "subtotal": subtotal,
+            "gstTotal": tax,
             "totalAmount": total,
-            "dueDate" : due_date,
+            "dueDate": due_date,
             "notes": notes,
             "status": status,
-            "currency": currency
+            "currency": currency,
         }
-        
         headers = {
             "X-Org-Id": org_id,
-            "X-User-Id": user_id
+            "X-User-Id": user_id,
         }
-
-        return await self._request("POST", "/api/invoices", data=payload, headers=headers)
-
-
-
-    
+        return await self._request(
+            "POST", "/api/invoices",
+            data=payload,
+            headers=headers,
+            auth_token=auth_token,
+        )
 
     async def get_invoices(
         self,
         org_id: str,
         status: Optional[str] = None,
         client_name: Optional[str] = None,
-        limit: int = 50
+        limit: int = 50,
     ) -> BackendResponse:
         """Get invoices with optional filters"""
-        params = {
-            "organizationId" : org_id,
-            "limit" : limit
+        params: Dict[str, Any] = {
+            "organizationId": org_id,
+            "limit": limit,
         }
-
         if status:
             params["status"] = status
         if client_name:
             params["clientName"] = client_name
-
         return await self._request("GET", "/api/invoices", params=params)
 
     
@@ -270,13 +265,14 @@ class BackendHttpAdapter:
 
 
 
-    async def get_client_by_name(self, org_id: str, name: str) -> BackendResponse:
+    async def get_client_by_name(self, org_id: str, name: str, auth_token: Optional[str] = None) -> BackendResponse:
         """Get client by name"""
         return await self._request(
             "GET",
             "/api/clients/search",
             params={"q": name},
-            headers={"X-Org-Id": org_id}
+            headers={"X-Org-Id": org_id},
+            auth_token=auth_token,
         )
 
 

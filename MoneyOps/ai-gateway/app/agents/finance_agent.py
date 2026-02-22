@@ -218,10 +218,48 @@ class FinanceAgent(BaseAgent):
             handler=self._handle_check_balance
         )
         
+        # Invoice Update Tool
+        update_invoice_tool = Tool(
+            name="update_invoice",
+            description="Update fields on an existing invoice (e.g. due date, notes, status)",
+            category="finance",
+            mvp_ready=True,
+            requires_confirmation=True,
+            parameters=[
+                ToolParameters(
+                    name="invoice_id",
+                    type="string",
+                    description="ID of the invoice to update",
+                    required=True
+                ),
+                ToolParameters(
+                    name="due_date",
+                    type="string",
+                    description="New due date (ISO format)",
+                    required=False
+                ),
+                ToolParameters(
+                    name="notes",
+                    type="string",
+                    description="Updated notes",
+                    required=False
+                ),
+                ToolParameters(
+                    name="status",
+                    type="string",
+                    description="New status",
+                    required=False,
+                    enum=["DRAFT", "SENT", "PAID", "CANCELLED"]
+                ),
+            ],
+            handler=self._handle_update_invoice
+        )
+
         # Register MVP tools
         tool_registry.register_tools([
             create_invoice_tool,
             query_invoices_tool,
+            update_invoice_tool,
             record_payment_tool,
             check_balance_tool,
         ])
@@ -249,51 +287,163 @@ class FinanceAgent(BaseAgent):
     # ========================================
     # MVP TOOL HANDLERS (Operational)
     # ========================================
+
+    async def _handle_update_invoice(
+        self,
+        params: Dict[str, Any],
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Handle invoice updates (due_date, notes, status, etc.)"""
+        org_id = context.get("org_id", "default_org") if context else "default_org"
+        auth_token = context.get("auth_token") if context else None
+
+        invoice_id = params.get("invoice_id")
+        if not invoice_id:
+            raise Exception(
+                "I need the invoice number to update it. "
+                "Which invoice should I update?"
+            )
+
+        updates: Dict[str, Any] = {}
+        if params.get("due_date"):
+            updates["dueDate"] = params["due_date"]
+        if params.get("notes"):
+            updates["notes"] = params["notes"]
+        if params.get("status"):
+            updates["status"] = params["status"]
+
+        if not updates:
+            raise Exception(
+                "I didn't catch what you'd like to change on the invoice. "
+                "Please tell me the field and new value."
+            )
+
+        response = await self.backend.update_invoice(
+            invoice_id=invoice_id,
+            updates=updates
+        )
+
+        if response.success:
+            changed = ", ".join(updates.keys())
+            return {
+                "invoice_id": invoice_id,
+                "updated_fields": list(updates.keys()),
+                "status": "updated",
+                "message": f"Invoice {invoice_id} updated successfully ({changed}).",
+            }
+        else:
+            raise Exception(response.error or f"Failed to update invoice {invoice_id}")
+
     
     async def _handle_create_invoice(
         self,
         params: Dict[str, Any],
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Handle invoice creation"""
+        """Handle invoice creation.
+        
+        Accepts either:
+        - Structured: params with 'items', 'subtotal', 'total' pre-built
+        - Flat voice entities: params with 'amount', 'client_name', optionally 'entity_name' for item description
+        """
         org_id = context.get("org_id", "default_org") if context else "default_org"
-        user_id = context.get("user_id")
-        
-        if not user_id:
-            # Fallback for testing if not provided, though backend will likely reject null
-            logger.warning("user_id_missing_in_context")
-            # Try to proceed or raise? Backend adapter needs it.
-            # If we don't have it, we can't create invoice securely.
-            raise Exception("User ID is missing from context. Please ensure you are logged in.")
+        user_id = context.get("user_id") if context else None
+        # Per-request JWT forwarded from the voice session / frontend
+        auth_token = context.get("auth_token") if context else None
 
-        # 1. Lookup Client ID by Name
-        client_name = params["client_name"]
-        client_resp = await self.backend.get_client_by_name(org_id, client_name)
-        
+        # Graceful fallback: use org_id when user_id is absent (unauthenticated voice)
+        if not user_id or user_id == "unknown":
+            logger.warning("user_id_missing_falling_back_to_org_id")
+            user_id = org_id
+
+        # ── Build items/subtotal/total from flat voice entities if not pre-built ──
+        if "items" not in params or not params.get("items"):
+
+            def _to_float(val, default=0.0) -> float:
+                """Safely coerce a value to float; handles int, float, and numeric strings."""
+                if val is None:
+                    return default
+                try:
+                    return float(val)
+                except (ValueError, TypeError):
+                    return default
+
+            # Amount may come as int/float or as a string like "80000"
+            amount = _to_float(
+                params.get("amount") or params.get("total") or params.get("unit_price")
+            )
+
+            # Item description — after entity_extractor fix, stored as "item_description"
+            # Fall back to old "entity_name" key and then a generic label
+            item_description = (
+                params.get("item_description")
+                or params.get("entity_name")
+                or "Services"
+            )
+
+            # Quantity — now stored as "quantity" (after entity_extractor fix)
+            quantity = _to_float(params.get("quantity"), default=1.0) or 1.0
+
+            # Unit price — if the user gave us unit_price + quantity, derive total amount
+            unit_price_override = _to_float(params.get("unit_price"))
+            if unit_price_override and quantity and not _to_float(params.get("amount")):
+                amount = unit_price_override * quantity
+
+            unit_price = (amount / quantity) if quantity else amount
+
+            params["items"] = [{
+                "description": item_description,
+                "quantity": quantity,
+                "unitPrice": unit_price,
+                "amount": amount,
+            }]
+            params["subtotal"] = amount
+            params["tax"] = _to_float(params.get("tax"))
+            params["total"] = amount + _to_float(params.get("tax"))
+
+        # ── Require client_name ──
+        client_name = params.get("client_name")
+        if not client_name:
+            raise Exception("I need a client name to create the invoice. Who should I bill?")
+
+        # ── Due date — LLM stores it as "time_period" (mapped via DUE_DATE → TIME_PERIOD)
+        #    Also accept "due_date" for backward compatibility
+        due_date_raw = (
+            params.get("due_date")
+            or params.get("time_period")
+        )
+        if not due_date_raw:
+            due_date = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
+        else:
+            # Normalize if it looks like an ISO date, else pass through (backend handles it)
+            due_date = str(due_date_raw)
+
+
+        # 1. Lookup Client ID by Name — forward auth_token so backend doesn't 401
+        client_resp = await self.backend.get_client_by_name(org_id, client_name, auth_token=auth_token)
+
         if not client_resp.success:
-            raise Exception(f"Failed to lookup client: {client_resp.error}")
-            
+            raise Exception(f"Could not find client '{client_name}'. Please check the name and try again.")
+
         clients = client_resp.data
         if isinstance(clients, list):
             if not clients:
-                raise Exception(f"Client '{client_name}' not found. Please create the client first.")
+                raise Exception(f"No client named '{client_name}' found. Please create the client first.")
             client_id = clients[0].get("id")
         elif isinstance(clients, dict):
-             client_id = clients.get("id")
+            client_id = clients.get("id")
         else:
-             raise Exception(f"Unexpected response format for client search")
-             
+            raise Exception(f"Unexpected response looking up client '{client_name}'.")
+
         if not client_id:
-            raise Exception(f"Client ID not found for '{client_name}'")
+            raise Exception(f"Could not get an ID for client '{client_name}'.")
 
         # Generate required fields
         invoice_number = f"INV-{int(time.time())}"
         issue_date = datetime.now().strftime("%Y-%m-%d")
-        due_date = params.get("due_date")
-        if not due_date:
-            due_date = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
+        # due_date already resolved above (reads "due_date" or "time_period" with 14-day fallback)
 
-        # 2. Create Invoice
+        # 2. Create Invoice — forward auth_token so backend doesn't 401
         response = await self.backend.create_invoice(
             org_id=org_id,
             user_id=user_id,
@@ -305,21 +455,22 @@ class FinanceAgent(BaseAgent):
             tax=float(params.get("tax", 0.0)),
             total=float(params["total"]),
             due_date=due_date,
-            notes=params.get("notes")
+            notes=params.get("notes"),
+            auth_token=auth_token,
         )
 
-        
         if response.success:
-            invoice_data = response.data
+            invoice_data = response.data or {}
             return {
                 "invoice_id": invoice_data.get("id"),
-                "client_name": params["client_name"],
+                "client_name": client_name,
                 "total": params["total"],
                 "status": "created",
-                "message": f"Invoice created successfully for {params['client_name']}"
+                "message": f"Invoice created successfully for {client_name}",
             }
         else:
             raise Exception(response.error or "Failed to create invoice")
+
     
     async def _handle_query_invoices(
         self,
@@ -479,6 +630,7 @@ class FinanceAgent(BaseAgent):
         intent_to_tool = {
             Intent.INVOICE_CREATE: "create_invoice",
             Intent.INVOICE_QUERY: "query_invoices",
+            Intent.INVOICE_UPDATE: "update_invoice",   # mapped — tool registered below
             Intent.PAYMENT_RECORD: "record_payment",
             Intent.BALANCE_CHECK: "check_balance",
             
