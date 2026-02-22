@@ -32,14 +32,15 @@ class AIGatewayClient:
         org_id: str,
         session_id: str,
         conversation_history: Optional[List[Dict]] = None,
+        auth_token: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Send voice input to AI Gateway"""
+        """Send voice input to AI Gateway, forwarding the user's JWT if available."""
         logger.info(
             "calling_ai_gateway",
             text_preview=text[:100],
             user_id=user_id,
         )
-        
+
         payload = {
             "user_id": user_id,
             "org_id": org_id,
@@ -52,35 +53,40 @@ class AIGatewayClient:
             },
             "conversation_history": conversation_history or [],
         }
-        
+
+        headers = {}
+        if auth_token:
+            headers["Authorization"] = f"Bearer {auth_token}"
+
         try:
             response = await self.client.post(
                 "/api/v1/voice/process",
                 json=payload,
+                headers=headers,
             )
-            
+
             response.raise_for_status()
             result = response.json()
-            
+
             logger.info(
                 "ai_gateway_response",
                 intent=result.get("intent"),
                 confidence=result.get("confidence"),
             )
-            
+
             return result
-            
+
         except httpx.TimeoutException:
             logger.error("ai_gateway_timeout")
             return self._timeout_fallback(text)
-        
+
         except httpx.HTTPStatusError as e:
             logger.error(
                 "ai_gateway_http_error",
                 status=e.response.status_code,
             )
             return self._error_fallback()
-        
+
         except Exception as e:
             logger.error("ai_gateway_error", error=str(e))
             return self._error_fallback()
