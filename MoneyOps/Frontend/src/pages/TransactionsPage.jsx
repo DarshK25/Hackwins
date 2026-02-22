@@ -1,9 +1,4 @@
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
     Select,
     SelectContent,
@@ -32,8 +27,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
 const BLANK_TRANSACTION = {
     accountId: "",
     amount: "",
@@ -52,12 +45,8 @@ export default function TransactionsPage() {
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
     const [filterType, setFilterType] = useState("all");
-
-    // Add Transaction dialog state
     const [isAddOpen, setIsAddOpen] = useState(false);
     const [newTransaction, setNewTransaction] = useState(BLANK_TRANSACTION);
-
-    // Upload CSV dialog state
     const [isUploadOpen, setIsUploadOpen] = useState(false);
     const [uploadFile, setUploadFile] = useState(null);
     const [uploadAccountId, setUploadAccountId] = useState("");
@@ -67,8 +56,6 @@ export default function TransactionsPage() {
         fetchTransactions();
         fetchAccounts();
     }, []);
-
-    // ── API ───────────────────────────────────────────────────────────────────
 
     const fetchTransactions = async () => {
         try {
@@ -102,19 +89,13 @@ export default function TransactionsPage() {
             toast.error("Please fill in all required fields");
             return;
         }
-
         try {
             const res = await fetch("/api/transactions", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    ...newTransaction,
-                    amount: parseFloat(newTransaction.amount),
-                }),
+                body: JSON.stringify({ ...newTransaction, amount: parseFloat(newTransaction.amount) }),
             });
-
             if (!res.ok) throw new Error("Failed to create transaction");
-
             toast.success("Transaction added successfully");
             setIsAddOpen(false);
             setNewTransaction(BLANK_TRANSACTION);
@@ -129,20 +110,13 @@ export default function TransactionsPage() {
             toast.error("Please select a file and an account");
             return;
         }
-
         try {
             setIsUploading(true);
             const formData = new FormData();
             formData.append("file", uploadFile);
             formData.append("accountId", uploadAccountId);
-
-            const res = await fetch("/api/transactions/import", {
-                method: "POST",
-                body: formData,
-            });
-
+            const res = await fetch("/api/transactions/import", { method: "POST", body: formData });
             if (!res.ok) throw new Error("Upload failed");
-
             const data = await res.json();
             toast.success(data.message || "Transactions uploaded successfully");
             setIsUploadOpen(false);
@@ -158,11 +132,9 @@ export default function TransactionsPage() {
 
     const handleDeleteTransaction = async (id) => {
         if (!window.confirm("Delete this transaction? This cannot be undone.")) return;
-
         try {
             const res = await fetch(`/api/transactions?id=${id}`, { method: "DELETE" });
             if (!res.ok) throw new Error("Failed to delete transaction");
-
             toast.success("Transaction deleted successfully");
             fetchTransactions();
         } catch {
@@ -170,151 +142,133 @@ export default function TransactionsPage() {
         }
     };
 
-    // ── Derived state ─────────────────────────────────────────────────────────
-
     const filteredTransactions = transactions.filter((txn) => {
         const matchesSearch =
             !searchQuery ||
             txn.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
             txn.merchantName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
             txn.category?.toLowerCase().includes(searchQuery.toLowerCase());
-
         const matchesType = filterType === "all" || txn.type === filterType;
-
         return matchesSearch && matchesType;
     });
 
     const stats = {
         total: transactions.length,
-        income: transactions
-            .filter((t) => t.type === "credit")
-            .reduce((sum, t) => sum + Math.abs(t.amount), 0),
-        expenses: transactions
-            .filter((t) => t.type === "debit")
-            .reduce((sum, t) => sum + Math.abs(t.amount), 0),
+        income: transactions.filter((t) => t.type === "credit").reduce((sum, t) => sum + Math.abs(t.amount), 0),
+        expenses: transactions.filter((t) => t.type === "debit").reduce((sum, t) => sum + Math.abs(t.amount), 0),
     };
 
-    // ── Render ────────────────────────────────────────────────────────────────
+    const inputStyle = {
+        backgroundColor: "#1A1A1A",
+        border: "1px solid #2A2A2A",
+        borderRadius: "8px",
+        color: "#ffffff",
+        padding: "8px 12px",
+        fontSize: "14px",
+        width: "100%",
+        outline: "none",
+    };
 
     return (
-        <div className="space-y-6">
-            {/* ── Header ─────────────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-6">
+            {/* ── Header ──────────────────────────────────────────────────────── */}
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
-                    <h2 className="text-3xl font-bold tracking-tight">Transactions</h2>
-                    <p className="text-slate-500 text-sm mt-1">
-                        View and manage your transactions
-                    </p>
+                    <h1 className="mo-h1">Transactions</h1>
+                    <p className="mo-text-secondary mt-1">View and manage your transactions</p>
                 </div>
-
                 <div className="flex items-center gap-2 flex-wrap">
                     {/* Add Transaction */}
                     <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
                         <DialogTrigger asChild>
-                            <Button>
-                                <Plus className="h-4 w-4 mr-2" /> Add Transaction
-                            </Button>
+                            <button className="mo-btn-primary flex items-center gap-2">
+                                <Plus className="h-4 w-4" /> Add Transaction
+                            </button>
                         </DialogTrigger>
-                        <DialogContent className="max-h-[90vh] overflow-y-auto">
+                        <DialogContent className="max-h-[90vh] overflow-y-auto bg-[#111111] border-[#2A2A2A] text-white">
                             <DialogHeader>
-                                <DialogTitle>Add New Transaction</DialogTitle>
+                                <DialogTitle className="text-white">Add New Transaction</DialogTitle>
                             </DialogHeader>
                             <div className="grid gap-4 py-4">
-                                {/* Account */}
                                 <div className="grid gap-2">
-                                    <Label>Account *</Label>
+                                    <label className="text-sm font-medium text-[#A0A0A0]">Account *</label>
                                     <Select
                                         value={newTransaction.accountId}
-                                        onValueChange={(val) =>
-                                            setNewTransaction((p) => ({ ...p, accountId: val }))
-                                        }
+                                        onValueChange={(val) => setNewTransaction((p) => ({ ...p, accountId: val }))}
                                     >
-                                        <SelectTrigger>
+                                        <SelectTrigger className="bg-[#1A1A1A] border-[#2A2A2A] text-white">
                                             <SelectValue placeholder="Select account" />
                                         </SelectTrigger>
-                                        <SelectContent>
+                                        <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
                                             {accounts.map((acc) => (
-                                                <SelectItem key={acc.id} value={acc.id}>
+                                                <SelectItem key={acc.id} value={acc.id} className="text-white hover:bg-[#2A2A2A]">
                                                     {acc.accountName} (₹{acc.balance?.toLocaleString("en-IN")})
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>
                                     </Select>
                                 </div>
-
-                                {/* Amount + Type */}
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="grid gap-2">
-                                        <Label>Amount *</Label>
-                                        <Input
+                                        <label className="text-sm font-medium text-[#A0A0A0]">Amount *</label>
+                                        <input
                                             id="txn-amount"
                                             type="number"
                                             placeholder="0.00"
                                             value={newTransaction.amount}
-                                            onChange={(e) =>
-                                                setNewTransaction((p) => ({ ...p, amount: e.target.value }))
-                                            }
+                                            onChange={(e) => setNewTransaction((p) => ({ ...p, amount: e.target.value }))}
+                                            style={inputStyle}
                                         />
                                     </div>
                                     <div className="grid gap-2">
-                                        <Label>Type</Label>
+                                        <label className="text-sm font-medium text-[#A0A0A0]">Type</label>
                                         <Select
                                             value={newTransaction.type}
-                                            onValueChange={(val) =>
-                                                setNewTransaction((p) => ({ ...p, type: val }))
-                                            }
+                                            onValueChange={(val) => setNewTransaction((p) => ({ ...p, type: val }))}
                                         >
-                                            <SelectTrigger>
+                                            <SelectTrigger className="bg-[#1A1A1A] border-[#2A2A2A] text-white">
                                                 <SelectValue />
                                             </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="debit">Expense (Debit)</SelectItem>
-                                                <SelectItem value="credit">Income (Credit)</SelectItem>
+                                            <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
+                                                <SelectItem value="debit" className="text-white hover:bg-[#2A2A2A]">Expense (Debit)</SelectItem>
+                                                <SelectItem value="credit" className="text-white hover:bg-[#2A2A2A]">Income (Credit)</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
                                 </div>
-
-                                {/* Description */}
                                 <div className="grid gap-2">
-                                    <Label>Description *</Label>
-                                    <Input
+                                    <label className="text-sm font-medium text-[#A0A0A0]">Description *</label>
+                                    <input
                                         id="txn-description"
                                         placeholder="Transaction description"
                                         value={newTransaction.description}
-                                        onChange={(e) =>
-                                            setNewTransaction((p) => ({ ...p, description: e.target.value }))
-                                        }
+                                        onChange={(e) => setNewTransaction((p) => ({ ...p, description: e.target.value }))}
+                                        style={inputStyle}
                                     />
                                 </div>
-
-                                {/* Category */}
                                 <div className="grid gap-2">
-                                    <Label>Category</Label>
-                                    <Input
+                                    <label className="text-sm font-medium text-[#A0A0A0]">Category</label>
+                                    <input
                                         id="txn-category"
                                         placeholder="e.g., Food, Travel, Salary"
                                         value={newTransaction.category}
-                                        onChange={(e) =>
-                                            setNewTransaction((p) => ({ ...p, category: e.target.value }))
-                                        }
+                                        onChange={(e) => setNewTransaction((p) => ({ ...p, category: e.target.value }))}
+                                        style={inputStyle}
                                     />
                                 </div>
-
-                                {/* Date */}
                                 <div className="grid gap-2">
-                                    <Label>Date</Label>
-                                    <Input
+                                    <label className="text-sm font-medium text-[#A0A0A0]">Date</label>
+                                    <input
                                         id="txn-date"
                                         type="date"
                                         value={newTransaction.date}
-                                        onChange={(e) =>
-                                            setNewTransaction((p) => ({ ...p, date: e.target.value }))
-                                        }
+                                        onChange={(e) => setNewTransaction((p) => ({ ...p, date: e.target.value }))}
+                                        style={{ ...inputStyle, colorScheme: "dark" }}
                                     />
                                 </div>
-
-                                <Button onClick={handleAddTransaction}>Save Transaction</Button>
+                                <button onClick={handleAddTransaction} className="mo-btn-primary w-full">
+                                    Save Transaction
+                                </button>
                             </div>
                         </DialogContent>
                     </Dialog>
@@ -322,24 +276,24 @@ export default function TransactionsPage() {
                     {/* Upload CSV */}
                     <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
                         <DialogTrigger asChild>
-                            <Button variant="outline">
-                                <Upload className="h-4 w-4 mr-2" /> Upload CSV
-                            </Button>
+                            <button className="mo-btn-secondary flex items-center gap-2">
+                                <Upload className="h-4 w-4" /> Upload CSV
+                            </button>
                         </DialogTrigger>
-                        <DialogContent>
+                        <DialogContent className="bg-[#111111] border-[#2A2A2A] text-white">
                             <DialogHeader>
-                                <DialogTitle>Upload Transactions</DialogTitle>
+                                <DialogTitle className="text-white">Upload Transactions</DialogTitle>
                             </DialogHeader>
                             <div className="grid gap-4 py-4">
                                 <div className="grid gap-2">
-                                    <Label>Account</Label>
+                                    <label className="text-sm font-medium text-[#A0A0A0]">Account</label>
                                     <Select value={uploadAccountId} onValueChange={setUploadAccountId}>
-                                        <SelectTrigger>
+                                        <SelectTrigger className="bg-[#1A1A1A] border-[#2A2A2A] text-white">
                                             <SelectValue placeholder="Select account to import to" />
                                         </SelectTrigger>
-                                        <SelectContent>
+                                        <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
                                             {accounts.map((acc) => (
-                                                <SelectItem key={acc.id} value={acc.id}>
+                                                <SelectItem key={acc.id} value={acc.id} className="text-white hover:bg-[#2A2A2A]">
                                                     {acc.accountName}
                                                 </SelectItem>
                                             ))}
@@ -347,229 +301,202 @@ export default function TransactionsPage() {
                                     </Select>
                                 </div>
                                 <div className="grid gap-2">
-                                    <Label>CSV File</Label>
-                                    <Input
+                                    <label className="text-sm font-medium text-[#A0A0A0]">CSV File</label>
+                                    <input
                                         id="txn-upload-file"
                                         type="file"
                                         accept=".csv"
-                                        onChange={(e) =>
-                                            setUploadFile(e.target.files ? e.target.files[0] : null)
-                                        }
+                                        onChange={(e) => setUploadFile(e.target.files ? e.target.files[0] : null)}
+                                        className="text-sm text-[#A0A0A0] file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-[#4CBB17] file:text-black"
+                                        style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A", borderRadius: "8px", padding: "8px 12px" }}
                                     />
                                 </div>
-                                <Button onClick={handleUploadTransactions} disabled={isUploading}>
+                                <button
+                                    onClick={handleUploadTransactions}
+                                    disabled={isUploading}
+                                    className="mo-btn-primary w-full flex items-center justify-center gap-2"
+                                >
                                     {isUploading ? (
-                                        <>
-                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Uploading…
-                                        </>
+                                        <><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</>
                                     ) : (
                                         "Upload"
                                     )}
-                                </Button>
+                                </button>
                             </div>
                         </DialogContent>
                     </Dialog>
 
-                    <Button variant="outline" size="sm" disabled>
-                        <Filter className="h-4 w-4 mr-2" /> Filter
-                    </Button>
-                    <Button variant="outline" size="sm" disabled>
-                        <Download className="h-4 w-4 mr-2" /> Export
-                    </Button>
+                    <button className="mo-btn-secondary flex items-center gap-2 opacity-50 cursor-not-allowed" disabled>
+                        <Filter className="h-4 w-4" /> Filter
+                    </button>
+                    <button className="mo-btn-secondary flex items-center gap-2 opacity-50 cursor-not-allowed" disabled>
+                        <Download className="h-4 w-4" /> Export
+                    </button>
                 </div>
             </div>
 
-            {/* ── Stats Cards ───────────────────────────────────────────────── */}
+            {/* ── Stats ───────────────────────────────────────────────────────── */}
             <div className="grid gap-4 md:grid-cols-3">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-500">
-                            Total Transactions
-                        </CardTitle>
-                        <CreditCard className="h-4 w-4 text-slate-400" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-3xl font-bold">{stats.total}</div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-500">
-                            Total Income
-                        </CardTitle>
-                        <TrendingUp className="h-4 w-4 text-slate-400" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-3xl font-bold text-green-600">
-                            ₹{stats.income.toLocaleString("en-IN")}
-                        </div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-500">
-                            Total Expenses
-                        </CardTitle>
-                        <TrendingDown className="h-4 w-4 text-slate-400" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-3xl font-bold text-red-600">
-                            ₹{stats.expenses.toLocaleString("en-IN")}
-                        </div>
-                    </CardContent>
-                </Card>
+                <div className="mo-stat-card">
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-[#A0A0A0]">Total Transactions</p>
+                        <CreditCard className="h-4 w-4 text-[#A0A0A0]" />
+                    </div>
+                    <div className="text-3xl font-bold text-white">{stats.total}</div>
+                </div>
+                <div className="mo-stat-card">
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-[#A0A0A0]">Total Income</p>
+                        <TrendingUp className="h-4 w-4 text-[#A0A0A0]" />
+                    </div>
+                    <div className="text-3xl font-bold text-[#4CBB17]">
+                        ₹{stats.income.toLocaleString("en-IN")}
+                    </div>
+                </div>
+                <div className="mo-stat-card">
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-[#A0A0A0]">Total Expenses</p>
+                        <TrendingDown className="h-4 w-4 text-[#A0A0A0]" />
+                    </div>
+                    <div className="text-3xl font-bold text-[#CD1C18]">
+                        ₹{stats.expenses.toLocaleString("en-IN")}
+                    </div>
+                </div>
             </div>
 
-            {/* ── Search + Type Filters ─────────────────────────────────────── */}
+            {/* ── Search + Filter ──────────────────────────────────────────────── */}
             <div className="flex items-center gap-4 flex-wrap">
                 <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                    <Input
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#A0A0A0]" />
+                    <input
                         placeholder="Search transactions…"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-10"
+                        className="w-full pl-10 pr-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none"
+                        style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A", borderRadius: "8px" }}
                     />
                 </div>
-
                 <div className="flex items-center gap-2">
                     {FILTER_TYPES.map((type) => (
-                        <Button
+                        <button
                             key={type}
-                            variant={filterType === type ? "default" : "outline"}
-                            size="sm"
                             onClick={() => setFilterType(type)}
-                            className={filterType === type ? "bg-green-600 hover:bg-green-700" : ""}
+                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${filterType === type
+                                    ? "bg-[#4CBB17] text-black"
+                                    : "bg-[#1A1A1A] text-[#A0A0A0] border border-[#2A2A2A] hover:border-[#4CBB17] hover:text-white"
+                                }`}
                         >
                             {FILTER_LABELS[type]}
-                        </Button>
+                        </button>
                     ))}
                 </div>
             </div>
 
-            {/* ── Transaction List ──────────────────────────────────────────── */}
+            {/* ── Transaction List ─────────────────────────────────────────────── */}
             {loading ? (
                 <div className="flex items-center justify-center h-64">
-                    <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+                    <Loader2 className="h-8 w-8 animate-spin text-[#4CBB17]" />
                 </div>
             ) : filteredTransactions.length === 0 ? (
-                <Card className="border-dashed">
-                    <CardContent className="flex flex-col items-center justify-center py-16">
-                        <CreditCard className="h-16 w-16 text-slate-300 mb-4" />
-                        <h3 className="text-lg font-semibold mb-2">
-                            {searchQuery || filterType !== "all"
-                                ? "No transactions found"
-                                : "No transactions yet"}
-                        </h3>
-                        <p className="text-slate-400 text-sm text-center max-w-sm">
-                            {searchQuery || filterType !== "all"
-                                ? "Try adjusting your search or filters"
-                                : "Add a transaction or upload a CSV to get started"}
-                        </p>
-                        <div className="mt-6 flex gap-2">
-                            <Button onClick={() => setIsAddOpen(true)}>
-                                <Plus className="h-4 w-4 mr-2" /> Add Transaction
-                            </Button>
-                            <Button variant="outline" onClick={() => setIsUploadOpen(true)}>
-                                <Upload className="h-4 w-4 mr-2" /> Upload CSV
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
+                <div className="mo-card flex flex-col items-center justify-center py-16 border-dashed">
+                    <CreditCard className="h-16 w-16 text-[#2A2A2A] mb-4" />
+                    <h3 className="text-lg font-semibold text-white mb-2">
+                        {searchQuery || filterType !== "all"
+                            ? "No transactions found"
+                            : "No transactions yet"}
+                    </h3>
+                    <p className="text-[#A0A0A0] text-sm text-center max-w-sm">
+                        {searchQuery || filterType !== "all"
+                            ? "Try adjusting your search or filters"
+                            : "Add a transaction or upload a CSV to get started"}
+                    </p>
+                    <div className="mt-6 flex gap-2">
+                        <button onClick={() => setIsAddOpen(true)} className="mo-btn-primary flex items-center gap-2">
+                            <Plus className="h-4 w-4" /> Add Transaction
+                        </button>
+                        <button onClick={() => setIsUploadOpen(true)} className="mo-btn-secondary flex items-center gap-2">
+                            <Upload className="h-4 w-4" /> Upload CSV
+                        </button>
+                    </div>
+                </div>
             ) : (
-                <Card>
-                    <CardContent className="p-0">
-                        <div className="divide-y">
-                            {filteredTransactions.map((transaction) => (
-                                <div
-                                    key={transaction.id}
-                                    className="flex items-center justify-between p-4 hover:bg-slate-50 transition-colors group"
-                                >
-                                    {/* Left: icon + details */}
-                                    <div className="flex items-center gap-4 flex-1 min-w-0">
-                                        <div
-                                            className={`p-2 rounded-full shrink-0 ${transaction.type === "credit"
-                                                    ? "bg-green-100 text-green-600"
-                                                    : "bg-red-100 text-red-600"
-                                                }`}
-                                        >
-                                            {transaction.type === "credit" ? (
-                                                <TrendingUp className="h-4 w-4" />
-                                            ) : (
-                                                <TrendingDown className="h-4 w-4" />
-                                            )}
-                                        </div>
-
-                                        <div className="flex-1 min-w-0">
-                                            <p className="font-medium truncate">
-                                                {transaction.description ||
-                                                    transaction.merchantName ||
-                                                    "Transaction"}
-                                            </p>
-                                            <div className="flex items-center gap-2 text-sm text-slate-400 flex-wrap">
-                                                <span>{new Date(transaction.date).toLocaleDateString()}</span>
-                                                {transaction.category && (
-                                                    <>
-                                                        <span>•</span>
-                                                        <Badge variant="outline" className="text-xs">
-                                                            {transaction.category}
-                                                        </Badge>
-                                                    </>
-                                                )}
-                                                {transaction.account && (
-                                                    <>
-                                                        <span>•</span>
-                                                        <span className="text-xs">
-                                                            {transaction.account.accountName}
-                                                        </span>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
+                <div className="mo-card !p-0 overflow-hidden">
+                    <div className="divide-y divide-[#2A2A2A]">
+                        {filteredTransactions.map((transaction) => (
+                            <div
+                                key={transaction.id}
+                                className="flex items-center justify-between p-4 hover:bg-[#111111] transition-colors group"
+                            >
+                                {/* Left: icon + details */}
+                                <div className="flex items-center gap-4 flex-1 min-w-0">
+                                    <div
+                                        className={`p-2 rounded-full shrink-0 ${transaction.type === "credit"
+                                                ? "bg-[#4CBB1720] text-[#4CBB17]"
+                                                : "bg-[#CD1C1820] text-[#CD1C18]"
+                                            }`}
+                                    >
+                                        {transaction.type === "credit" ? (
+                                            <TrendingUp className="h-4 w-4" />
+                                        ) : (
+                                            <TrendingDown className="h-4 w-4" />
+                                        )}
                                     </div>
-
-                                    {/* Right: amount + status + delete */}
-                                    <div className="flex items-center gap-4 shrink-0">
-                                        <div className="text-right">
-                                            <p
-                                                className={`font-semibold ${transaction.type === "credit"
-                                                        ? "text-green-600"
-                                                        : "text-red-600"
-                                                    }`}
-                                            >
-                                                {transaction.type === "credit" ? "+" : "−"}₹
-                                                {Math.abs(transaction.amount).toLocaleString("en-IN")}
-                                            </p>
-                                            {transaction.status && (
-                                                <Badge
-                                                    variant={
-                                                        transaction.status === "completed"
-                                                            ? "default"
-                                                            : "secondary"
-                                                    }
-                                                    className="text-xs mt-1"
-                                                >
-                                                    {transaction.status}
-                                                </Badge>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-medium text-white truncate">
+                                            {transaction.description || transaction.merchantName || "Transaction"}
+                                        </p>
+                                        <div className="flex items-center gap-2 text-sm text-[#A0A0A0] flex-wrap mt-0.5">
+                                            <span>{new Date(transaction.date).toLocaleDateString()}</span>
+                                            {transaction.category && (
+                                                <>
+                                                    <span>•</span>
+                                                    <span className="text-xs px-1.5 py-0.5 rounded bg-[#2A2A2A] text-[#A0A0A0]">
+                                                        {transaction.category}
+                                                    </span>
+                                                </>
+                                            )}
+                                            {transaction.account && (
+                                                <>
+                                                    <span>•</span>
+                                                    <span className="text-xs">{transaction.account.accountName}</span>
+                                                </>
                                             )}
                                         </div>
-
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="opacity-0 group-hover:opacity-100 transition-opacity text-red-500 hover:text-red-700 hover:bg-red-50"
-                                            onClick={() => handleDeleteTransaction(transaction.id)}
-                                        >
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
                                     </div>
                                 </div>
-                            ))}
-                        </div>
-                    </CardContent>
-                </Card>
+
+                                {/* Right: amount + delete */}
+                                <div className="flex items-center gap-4 shrink-0">
+                                    <div className="text-right">
+                                        <p
+                                            className={`font-semibold ${transaction.type === "credit" ? "text-[#4CBB17]" : "text-[#CD1C18]"
+                                                }`}
+                                        >
+                                            {transaction.type === "credit" ? "+" : "−"}₹
+                                            {Math.abs(transaction.amount).toLocaleString("en-IN")}
+                                        </p>
+                                        {transaction.status && (
+                                            <span
+                                                className={`text-xs px-1.5 py-0.5 rounded mt-1 inline-block ${transaction.status === "completed"
+                                                        ? "bg-[#4CBB1720] text-[#4CBB17]"
+                                                        : "bg-[#A0A0A020] text-[#A0A0A0]"
+                                                    }`}
+                                            >
+                                                {transaction.status}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <button
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg hover:bg-[#CD1C1820] text-[#A0A0A0] hover:text-[#CD1C18]"
+                                        onClick={() => handleDeleteTransaction(transaction.id)}
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
             )}
         </div>
     );
