@@ -1,13 +1,5 @@
 import { useState, useEffect } from "react";
 import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import {
     BarChart3,
     TrendingUp,
     TrendingDown,
@@ -17,36 +9,17 @@ import {
     RefreshCw,
     Info,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { InteractiveTrendCard } from "@/components/ui/trend-card";
 
-// ── Fallback Data ─────────────────────────────────────────────────────────────
-// Used when API fails or returns empty data, ensuring the UI always looks good.
+// ── Fallback Data ──────────────────────────────────────────────────────────────
 const FALLBACK_DATA = {
     kpis: [
-        {
-            name: "Total Revenue",
-            value: "₹12,45,000",
-            trend: "up",
-            change: "+12.5%",
-        },
-        {
-            name: "Net Profit",
-            value: "₹4,20,000",
-            trend: "up",
-            change: "+8.2%",
-        },
-        {
-            name: "Expenses",
-            value: "₹8,25,000",
-            trend: "down",
-            change: "-2.1%",
-        },
-        {
-            name: "Active Clients",
-            value: "42",
-            trend: "neutral",
-            change: "0%",
-        },
+        { name: "Total Revenue", value: "₹12,45,000", trend: "up", change: "+12.5%" },
+        { name: "Net Profit", value: "₹4,20,000", trend: "up", change: "+8.2%" },
+        { name: "Expenses", value: "₹8,25,000", trend: "down", change: "-2.1%" },
+        { name: "Active Clients", value: "42", trend: "neutral", change: "0%" },
     ],
     revenueByCategory: [
         { category: "Consulting", amount: 500000, percentage: 40 },
@@ -63,30 +36,10 @@ const FALLBACK_DATA = {
         { month: "Jun", revenue: 240000, expenses: 130000 },
     ],
     clientMetrics: [
-        {
-            metric: "Client Retention Rate",
-            value: 92,
-            target: 95,
-            percentage: 92,
-        },
-        {
-            metric: "On-time Payment Rate",
-            value: 85,
-            target: 90,
-            percentage: 85,
-        },
-        {
-            metric: "Avg Project Value",
-            value: "₹2.5L",
-            target: "₹3.0L",
-            percentage: 83,
-        },
-        {
-            metric: "New Leads / Month",
-            value: 15,
-            target: 20,
-            percentage: 75,
-        },
+        { metric: "Client Retention Rate", value: 92, target: 95, percentage: 92 },
+        { metric: "On-time Payment Rate", value: 85, target: 90, percentage: 85 },
+        { metric: "Avg Project Value", value: "₹2.5L", target: "₹3.0L", percentage: 83 },
+        { metric: "New Leads / Month", value: 15, target: 20, percentage: 75 },
     ],
 };
 
@@ -101,19 +54,11 @@ export default function AnalyticsPage() {
     const fetchAnalytics = async () => {
         try {
             setLoading(true);
-            // Simulate API call - in real app, replace with actual fetch
-            // const res = await fetch('/api/analytics');
-            // const result = await res.json();
-
-            // Simulating network delay for realism
             await new Promise((resolve) => setTimeout(resolve, 800));
-
-            // Use fallback data for now since backend likely doesn't have this endpoint ready yet
             setData(FALLBACK_DATA);
         } catch (error) {
             console.error(error);
             toast.error("Failed to load analytics data");
-            // Fallback to ensure UI doesn't break
             setData(FALLBACK_DATA);
         } finally {
             setLoading(false);
@@ -123,7 +68,7 @@ export default function AnalyticsPage() {
     if (loading) {
         return (
             <div className="flex items-center justify-center h-96">
-                <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+                <Loader2 className="h-8 w-8 animate-spin text-[#4CBB17]" />
             </div>
         );
     }
@@ -131,10 +76,10 @@ export default function AnalyticsPage() {
     if (!data) {
         return (
             <div className="flex flex-col items-center justify-center h-96 gap-4">
-                <p className="text-slate-500">Failed to load analytics data</p>
-                <Button onClick={fetchAnalytics}>
-                    <RefreshCw className="mr-2 h-4 w-4" /> Retry
-                </Button>
+                <p className="text-[#A0A0A0]">Failed to load analytics data</p>
+                <button onClick={fetchAnalytics} className="mo-btn-primary flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4" /> Retry
+                </button>
             </div>
         );
     }
@@ -143,234 +88,163 @@ export default function AnalyticsPage() {
 
     return (
         <div className="flex flex-col gap-6">
-            {/* ── Header ─────────────────────────────────────────────────────── */}
+            {/* ── Header ──────────────────────────────────────────────────────── */}
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold">Analytics</h1>
-                    <p className="text-slate-500 text-sm mt-1">
-                        Business insights and performance metrics
-                    </p>
+                    <h1 className="mo-h1">Analytics</h1>
+                    <p className="mo-text-secondary mt-1">Business insights and performance metrics</p>
                 </div>
                 <div className="flex gap-2">
-                    <Button variant="outline">
-                        <Calendar className="mr-2 h-4 w-4" />
-                        Date Range
-                    </Button>
-                    <Button>
-                        <BarChart3 className="mr-2 h-4 w-4" />
-                        Export Report
-                    </Button>
+                    <button className="mo-btn-secondary flex items-center gap-2">
+                        <Calendar className="h-4 w-4" /> Date Range
+                    </button>
+                    <button className="mo-btn-primary flex items-center gap-2">
+                        <BarChart3 className="h-4 w-4" /> Export Report
+                    </button>
                 </div>
             </div>
 
-            {/* ── KPIs ───────────────────────────────────────────────────────── */}
+            {/* ── KPIs ────────────────────────────────────────────────────────── */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 {kpis.map((kpi, index) => (
-                    <Card key={index}>
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium text-slate-500">
-                                {kpi.name}
-                            </CardTitle>
+                    <div key={index} className="mo-stat-card">
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-sm text-[#A0A0A0] font-medium">{kpi.name}</span>
                             {kpi.trend === "up" ? (
-                                <TrendingUp className="h-4 w-4 text-green-600" />
+                                <TrendingUp className="h-4 w-4 text-[#4CBB17]" />
                             ) : kpi.trend === "down" ? (
-                                <TrendingDown className="h-4 w-4 text-red-600" />
+                                <TrendingDown className="h-4 w-4 text-[#CD1C18]" />
                             ) : (
-                                <Info className="h-4 w-4 text-slate-400" />
+                                <Info className="h-4 w-4 text-[#A0A0A0]" />
                             )}
-                        </CardHeader>
-                        <CardContent>
-                            <div className="text-2xl font-bold">{kpi.value}</div>
-                            <p
-                                className={`text-xs mt-1 ${kpi.trend === "up"
-                                        ? "text-green-600"
-                                        : kpi.trend === "down"
-                                            ? "text-red-600"
-                                            : "text-slate-500"
-                                    }`}
-                            >
-                                {kpi.change} {kpi.trend !== "neutral" && "from last month"}
-                            </p>
-                        </CardContent>
-                    </Card>
+                        </div>
+                        <div className="text-2xl font-bold text-white">{kpi.value}</div>
+                        <p className={`text-xs mt-1 font-medium ${kpi.trend === "up"
+                            ? "text-[#4CBB17]"
+                            : kpi.trend === "down"
+                                ? "text-[#CD1C18]"
+                                : "text-[#A0A0A0]"
+                            }`}>
+                            {kpi.change} {kpi.trend !== "neutral" && "from last month"}
+                        </p>
+                    </div>
                 ))}
             </div>
 
+            {/* ── Charts Row ──────────────────────────────────────────────────── */}
             <div className="grid gap-6 md:grid-cols-2">
-                {/* ── Revenue by Category ────────────────────────────────────── */}
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Revenue by Category</CardTitle>
-                        <CardDescription>Breakdown of revenue sources (Top 5)</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                        {revenueByCategory.length > 0 ? (
-                            revenueByCategory.map((item, index) => (
-                                <div key={index} className="space-y-2">
-                                    <div className="flex justify-between text-sm">
-                                        <span className="font-medium text-slate-700">
-                                            {item.category}
-                                        </span>
-                                        <span className="font-semibold">
-                                            ₹{item.amount.toLocaleString("en-IN")}
-                                        </span>
-                                    </div>
-                                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                                        <div
-                                            className="bg-blue-600 h-2 rounded-full transition-all duration-500 ease-out"
-                                            style={{ width: `${item.percentage}%` }}
-                                        ></div>
-                                    </div>
-                                    <div className="text-xs text-slate-400 text-right">
-                                        {item.percentage}%
-                                    </div>
-                                </div>
-                            ))
-                        ) : (
-                            <p className="text-sm text-slate-500 text-center py-8">
-                                No revenue data available
-                            </p>
-                        )}
-                    </CardContent>
-                </Card>
+                {/* Revenue Trend — InteractiveTrendCard */}
+                <InteractiveTrendCard
+                    title="Revenue"
+                    subtitle="6-Month Trend"
+                    totalValue={data.monthlyTrends.reduce((s, m) => s + m.revenue, 0)}
+                    newValue={data.monthlyTrends[data.monthlyTrends.length - 1]?.revenue ?? 0}
+                    totalValueLabel="Total Revenue"
+                    newValueLabel="Last Month"
+                    chartData={data.monthlyTrends.map(m => ({ month: m.month, value: m.revenue }))}
+                    defaultBarColor="#2A2A2A"
+                    barColor="#4CBB17"
+                    adjacentBarColor="#4CBB1760"
+                    formatValue={(v) => `₹${v.toLocaleString("en-IN")}`}
+                    formatTooltip={(v) => `₹${v.toLocaleString("en-IN")}`}
+                />
 
-                {/* ── Monthly Trends Chart ───────────────────────────────────── */}
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Monthly Trends</CardTitle>
-                        <CardDescription>Revenue vs. Expenses (Last 6 Months)</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="flex flex-col h-full justify-between gap-6">
-                            {/* Legend */}
-                            <div className="flex items-center gap-6 text-sm justify-center">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                                    <span className="text-slate-600">Revenue</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                                    <span className="text-slate-600">Expenses</span>
-                                </div>
-                            </div>
-
-                            {/* Bar Chart */}
-                            <div className="flex items-end justify-between gap-2 h-48 pt-4 pb-2">
-                                {monthlyTrends.map((month, index) => {
-                                    const maxVal = Math.max(
-                                        ...monthlyTrends.map((m) => Math.max(m.revenue, m.expenses))
-                                    ) * 1.1; // 10% headroom
-
-                                    const revHeight = (month.revenue / maxVal) * 100;
-                                    const expHeight = (month.expenses / maxVal) * 100;
-
-                                    return (
-                                        <div
-                                            key={index}
-                                            className="flex flex-col items-center gap-2 h-full justify-end flex-1"
-                                        >
-                                            <div className="flex gap-1 items-end h-full w-full justify-center">
-                                                {/* Revenue Bar */}
-                                                <div
-                                                    className="w-3 sm:w-6 bg-green-500 rounded-t transition-all hover:opacity-80"
-                                                    style={{ height: `${revHeight}%` }}
-                                                    title={`Revenue: ₹${month.revenue.toLocaleString()}`}
-                                                ></div>
-                                                {/* Expense Bar */}
-                                                <div
-                                                    className="w-3 sm:w-6 bg-red-500 rounded-t transition-all hover:opacity-80"
-                                                    style={{ height: `${expHeight}%` }}
-                                                    title={`Expenses: ₹${month.expenses.toLocaleString()}`}
-                                                ></div>
-                                            </div>
-                                            <span className="text-xs font-medium text-slate-500">
-                                                {month.month}
-                                            </span>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
+                {/* Expense Trend — InteractiveTrendCard */}
+                <InteractiveTrendCard
+                    title="Expenses"
+                    subtitle="6-Month Trend"
+                    totalValue={data.monthlyTrends.reduce((s, m) => s + m.expenses, 0)}
+                    newValue={data.monthlyTrends[data.monthlyTrends.length - 1]?.expenses ?? 0}
+                    totalValueLabel="Total Expenses"
+                    newValueLabel="Last Month"
+                    chartData={data.monthlyTrends.map(m => ({ month: m.month, value: m.expenses }))}
+                    defaultBarColor="#2A2A2A"
+                    barColor="#CD1C18"
+                    adjacentBarColor="#CD1C1860"
+                    formatValue={(v) => `₹${v.toLocaleString("en-IN")}`}
+                    formatTooltip={(v) => `₹${v.toLocaleString("en-IN")}`}
+                />
             </div>
 
-            {/* ── Client Metrics ─────────────────────────────────────────────── */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Client Performance Metrics</CardTitle>
-                    <CardDescription>
-                        Track your client-related KPIs and targets
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-                        {clientMetrics.map((metric, index) => (
-                            <div key={index} className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-sm font-medium text-slate-700">
-                                        {metric.metric}
+            {/* ── Revenue by Category ──────────────────────────────────────────── */}
+            <InteractiveTrendCard
+                title="Revenue by Category"
+                subtitle="Breakdown of sources"
+                totalValue={data.revenueByCategory.reduce((s, c) => s + c.amount, 0)}
+                newValue={Math.max(...data.revenueByCategory.map(c => c.amount))}
+                totalValueLabel="Total Revenue"
+                newValueLabel="Top Category"
+                chartData={data.revenueByCategory.map(c => ({ month: c.category.slice(0, 4), value: c.amount }))}
+                defaultBarColor="#2A2A2A"
+                barColor="#4CBB17"
+                adjacentBarColor="#4CBB1760"
+                formatValue={(v) => `₹${v.toLocaleString("en-IN")}`}
+                formatTooltip={(v) => `₹${v.toLocaleString("en-IN")}`}
+            />
+
+            {/* ── Client Metrics ───────────────────────────────────────────────── */}
+            <div className="mo-card">
+                <h2 className="mo-h2 mb-1">Client Performance Metrics</h2>
+                <p className="mo-text-secondary mb-6">Track your client-related KPIs and targets</p>
+                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+                    {clientMetrics.map((metric, index) => (
+                        <div key={index} className="space-y-3">
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium text-white">{metric.metric}</span>
+                                <Target className="h-4 w-4 text-[#A0A0A0]" />
+                            </div>
+                            <div className="space-y-1.5">
+                                <div className="flex justify-between text-sm items-end">
+                                    <span className="font-bold text-lg leading-none text-white">
+                                        {metric.value}
+                                        {metric.metric.includes("Rate") ? "%" : ""}
                                     </span>
-                                    <Target className="h-4 w-4 text-slate-400" />
+                                    <span className="text-xs text-[#A0A0A0]">
+                                        Target: {metric.target}
+                                        {metric.metric.includes("Rate") ? "%" : ""}
+                                    </span>
                                 </div>
-                                <div className="space-y-2">
-                                    <div className="flex justify-between text-sm items-end">
-                                        <span className="font-bold text-lg leading-none">
-                                            {metric.value}
-                                            {metric.metric.includes("Rate") ? "%" : ""}
-                                        </span>
-                                        <span className="text-xs text-slate-400">
-                                            Target: {metric.target}
-                                            {metric.metric.includes("Rate") ? "%" : ""}
-                                        </span>
-                                    </div>
-                                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                                        <div
-                                            className={`h-2 rounded-full transition-all duration-500 ${metric.percentage >= 90
-                                                    ? "bg-green-500"
+                                <div className="mo-progress-bg">
+                                    <div
+                                        className="h-full rounded-full transition-all duration-500"
+                                        style={{
+                                            width: `${Math.min(metric.percentage, 100)}%`,
+                                            backgroundColor:
+                                                metric.percentage >= 90
+                                                    ? "#4CBB17"
                                                     : metric.percentage >= 70
-                                                        ? "bg-yellow-500"
-                                                        : "bg-red-500"
-                                                }`}
-                                            style={{ width: `${Math.min(metric.percentage, 100)}%` }}
-                                        ></div>
-                                    </div>
-                                    <div className="text-xs text-slate-500">
-                                        {Math.round(metric.percentage)}% of target achieved
-                                    </div>
+                                                        ? "#FFB300"
+                                                        : "#CD1C18",
+                                        }}
+                                    />
+                                </div>
+                                <div className="text-xs text-[#A0A0A0]">
+                                    {Math.round(metric.percentage)}% of target achieved
                                 </div>
                             </div>
-                        ))}
-                    </div>
-                </CardContent>
-            </Card>
+                        </div>
+                    ))}
+                </div>
+            </div>
 
-            {/* ── AI Insights ────────────────────────────────────────────────── */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>AI Insights & Recommendations</CardTitle>
-                    <CardDescription>
-                        Data-driven insights to improve your business
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg flex gap-4 items-start">
-                        <div className="bg-blue-100 p-2 rounded-md shrink-0">
-                            <TrendingUp className="h-5 w-5 text-blue-600" />
-                        </div>
-                        <div>
-                            <h4 className="font-semibold text-blue-900 text-sm">
-                                Projected Growth
-                            </h4>
-                            <p className="text-sm text-blue-700 mt-1 leading-relaxed">
-                                Based on your current transaction history and invoice clearance rate,
-                                your revenue is projected to grow by <strong>18%</strong> next month.
-                                Consider increasing your retainer capacity to stabilize cash flow.
-                            </p>
-                        </div>
+            {/* ── AI Insights ─────────────────────────────────────────────────── */}
+            <div className="mo-card">
+                <h2 className="mo-h2 mb-1">AI Insights & Recommendations</h2>
+                <p className="mo-text-secondary mb-5">Data-driven insights to improve your business</p>
+                <div className="p-4 bg-[#4CBB1710] border border-[#4CBB1730] rounded-xl flex gap-4 items-start">
+                    <div className="bg-[#4CBB1720] p-2 rounded-lg shrink-0">
+                        <TrendingUp className="h-5 w-5 text-[#4CBB17]" />
                     </div>
-                </CardContent>
-            </Card>
+                    <div>
+                        <h4 className="font-semibold text-[#4CBB17] text-sm">Projected Growth</h4>
+                        <p className="text-sm text-[#A0A0A0] mt-1 leading-relaxed">
+                            Based on your current transaction history and invoice clearance rate, your revenue
+                            is projected to grow by <strong className="text-white">18%</strong> next month.
+                            Consider increasing your retainer capacity to stabilize cash flow.
+                        </p>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }

@@ -27,14 +27,14 @@ export default function SalesCRMPage() {
 
     if (!isHydrated || loading) {
         return (
-            <div className="flex items-center justify-center h-screen bg-slate-50">
-                <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+            <div className="flex items-center justify-center h-64">
+                <Loader2 className="h-8 w-8 animate-spin text-[#4CBB17]" />
             </div>
         );
     }
 
     return (
-        <div className="space-y-4 p-4 md:p-6">
+        <div className="flex flex-col gap-6">
             <SalesCRMDashboard
                 businessId={businessId}
                 data={data}

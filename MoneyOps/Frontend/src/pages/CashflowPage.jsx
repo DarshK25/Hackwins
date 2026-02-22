@@ -1,32 +1,9 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, AlertTriangle, Calendar } from "lucide-react";
 
-// ── Static data ───────────────────────────────────────────────────────────────
-
 const forecastData = [
-    {
-        period: "Next 7 days",
-        inflow: 15000,
-        outflow: 12000,
-        net: 3000,
-        status: "positive",
-    },
-    {
-        period: "Next 30 days",
-        inflow: 65000,
-        outflow: 48000,
-        net: 17000,
-        status: "positive",
-    },
-    {
-        period: "Next 90 days",
-        inflow: 195000,
-        outflow: 165000,
-        net: 30000,
-        status: "positive",
-    },
+    { period: "Next 7 days", inflow: 15000, outflow: 12000, net: 3000, status: "positive" },
+    { period: "Next 30 days", inflow: 65000, outflow: 48000, net: 17000, status: "positive" },
+    { period: "Next 90 days", inflow: 195000, outflow: 165000, net: 30000, status: "positive" },
 ];
 
 const upcomingPayments = [
@@ -42,192 +19,169 @@ const expectedIncome = [
     { id: 3, description: "Client C - Invoice #1234", amount: 15000, expectedDate: "2024-02-15" },
 ];
 
-const insightCards = [
+const insights = [
     {
-        color: "green",
+        border: "#4CBB1740",
+        bg: "#4CBB1710",
         title: "Positive Trend",
+        titleColor: "#4CBB17",
         body: "Your cashflow is trending positively with a 15% increase over the last quarter.",
     },
     {
-        color: "yellow",
+        border: "#FFB30040",
+        bg: "#FFB30010",
         title: "Optimization Opportunity",
+        titleColor: "#FFB300",
         body: "Consider negotiating extended payment terms with vendors to improve cashflow timing.",
     },
     {
-        color: "blue",
+        border: "#60A5FA40",
+        bg: "#60A5FA10",
         title: "Recommendation",
+        titleColor: "#60A5FA",
         body: "Set up automatic invoice reminders to reduce payment delays by an estimated 8 days.",
     },
 ];
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Maps priority string → Badge variant */
-const getPriorityVariant = (priority) => {
-    switch (priority) {
-        case "high": return "destructive";
-        case "medium": return "default";
-        case "low": return "secondary";
-        default: return "default";
-    }
+const PRIORITY_BADGE = {
+    high: "bg-[#CD1C1820] text-[#CD1C18] border-[#CD1C1840]",
+    medium: "bg-[#FFB30020] text-[#FFB300] border-[#FFB30040]",
+    low: "bg-[#A0A0A020] text-[#A0A0A0] border-[#A0A0A040]",
 };
-
-/** Tailwind classes for the insight color band */
-const insightColorClasses = {
-    green: { wrapper: "bg-green-50 border-green-200", heading: "text-green-800", body: "text-green-700" },
-    yellow: { wrapper: "bg-yellow-50 border-yellow-200", heading: "text-yellow-800", body: "text-yellow-700" },
-    blue: { wrapper: "bg-blue-50 border-blue-200", heading: "text-blue-800", body: "text-blue-700" },
-};
-
-// ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CashflowPage() {
     return (
         <div className="flex flex-col gap-6">
-
-            {/* ── Header ─────────────────────────────────────────────────────── */}
-            <div className="flex items-center justify-between">
+            {/* ── Header ──────────────────────────────────────────────────────── */}
+            <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold">Cashflow Management</h1>
-                    <p className="text-slate-500 text-sm mt-1">
-                        Monitor and forecast your business cashflow
-                    </p>
+                    <h1 className="mo-h1">Cash Flow</h1>
+                    <p className="mo-text-secondary mt-1">Monitor and forecast your business cashflow</p>
                 </div>
                 <div className="flex gap-2">
-                    <Button variant="outline">
-                        <Calendar className="mr-2 h-4 w-4" />
-                        Schedule Payments
-                    </Button>
-                    <Button>
-                        <TrendingUp className="mr-2 h-4 w-4" />
-                        Generate Forecast
-                    </Button>
+                    <button className="mo-btn-secondary flex items-center gap-2">
+                        <Calendar className="h-4 w-4" /> Schedule Payments
+                    </button>
+                    <button className="mo-btn-primary flex items-center gap-2">
+                        <TrendingUp className="h-4 w-4" /> Generate Forecast
+                    </button>
                 </div>
             </div>
 
             {/* ── Forecast Cards ─────────────────────────────────────────────── */}
             <div className="grid gap-4 md:grid-cols-3">
                 {forecastData.map((forecast, index) => (
-                    <Card key={index}>
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium">{forecast.period}</CardTitle>
-                            <Badge variant={forecast.status === "positive" ? "success" : "destructive"}>
+                    <div key={index} className="mo-stat-card">
+                        <div className="flex items-center justify-between mb-4">
+                            <span className="text-sm font-semibold text-white">{forecast.period}</span>
+                            <span className="text-xs px-2 py-0.5 rounded-md font-medium bg-[#4CBB1720] text-[#4CBB17] border border-[#4CBB1740]">
                                 {forecast.status}
-                            </Badge>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="space-y-2">
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-green-600">Inflow</span>
-                                    <span className="font-medium">₹{forecast.inflow.toLocaleString()}</span>
-                                </div>
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-red-600">Outflow</span>
-                                    <span className="font-medium">₹{forecast.outflow.toLocaleString()}</span>
-                                </div>
-                                <div className="flex justify-between text-lg font-bold border-t pt-2 mt-2">
-                                    <span>Net</span>
-                                    <span className={forecast.net >= 0 ? "text-green-600" : "text-red-600"}>
-                                        ₹{forecast.net.toLocaleString()}
-                                    </span>
-                                </div>
+                            </span>
+                        </div>
+                        <div className="space-y-2">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-[#A0A0A0]">Inflow</span>
+                                <span className="font-medium text-[#4CBB17]">₹{forecast.inflow.toLocaleString()}</span>
                             </div>
-                        </CardContent>
-                    </Card>
+                            <div className="flex justify-between text-sm">
+                                <span className="text-[#A0A0A0]">Outflow</span>
+                                <span className="font-medium text-[#CD1C18]">₹{forecast.outflow.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between text-base font-bold border-t border-[#2A2A2A] pt-3 mt-1">
+                                <span className="text-white">Net</span>
+                                <span style={{ color: forecast.net >= 0 ? "#4CBB17" : "#CD1C18" }}>
+                                    ₹{forecast.net.toLocaleString()}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
                 ))}
             </div>
 
             {/* ── Payments & Income ──────────────────────────────────────────── */}
             <div className="grid gap-6 md:grid-cols-2">
-
                 {/* Upcoming Payments */}
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <TrendingDown className="h-5 w-5 text-red-500" />
-                            Upcoming Payments
-                        </CardTitle>
-                        <CardDescription>Scheduled outgoing payments</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
+                <div className="mo-card">
+                    <div className="flex items-center gap-2 mb-4">
+                        <TrendingDown className="h-5 w-5 text-[#CD1C18]" />
+                        <div>
+                            <h2 className="mo-h2">Upcoming Payments</h2>
+                            <p className="mo-text-secondary">Scheduled outgoing payments</p>
+                        </div>
+                    </div>
+                    <div className="space-y-2">
                         {upcomingPayments.map((payment) => (
                             <div
                                 key={payment.id}
-                                className="flex items-center justify-between p-3 border border-slate-100 rounded-lg hover:bg-slate-50 transition-colors"
+                                className="flex items-center justify-between p-3 rounded-xl border border-[#2A2A2A] bg-[#111111] hover:border-[#3A3A3A] transition-colors"
                             >
                                 <div className="flex-1 min-w-0 mr-3">
-                                    <p className="font-medium truncate">{payment.description}</p>
-                                    <p className="text-xs text-slate-400 mt-0.5">Due: {payment.dueDate}</p>
+                                    <p className="font-medium text-white text-sm truncate">{payment.description}</p>
+                                    <p className="text-xs text-[#A0A0A0] mt-0.5">Due: {payment.dueDate}</p>
                                 </div>
                                 <div className="flex items-center gap-2 flex-shrink-0">
-                                    <Badge variant={getPriorityVariant(payment.priority)}>
+                                    <span className={`text-xs px-2 py-0.5 rounded-md font-medium border ${PRIORITY_BADGE[payment.priority]}`}>
                                         {payment.priority}
-                                    </Badge>
-                                    <span className="font-bold text-red-600 text-sm">
+                                    </span>
+                                    <span className="font-bold text-[#CD1C18] text-sm">
                                         ₹{payment.amount.toLocaleString()}
                                     </span>
                                 </div>
                             </div>
                         ))}
-                    </CardContent>
-                </Card>
+                    </div>
+                </div>
 
                 {/* Expected Income */}
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <TrendingUp className="h-5 w-5 text-green-500" />
-                            Expected Income
-                        </CardTitle>
-                        <CardDescription>Anticipated incoming payments</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
+                <div className="mo-card">
+                    <div className="flex items-center gap-2 mb-4">
+                        <TrendingUp className="h-5 w-5 text-[#4CBB17]" />
+                        <div>
+                            <h2 className="mo-h2">Expected Income</h2>
+                            <p className="mo-text-secondary">Anticipated incoming payments</p>
+                        </div>
+                    </div>
+                    <div className="space-y-2">
                         {expectedIncome.map((income) => (
                             <div
                                 key={income.id}
-                                className="flex items-center justify-between p-3 border border-slate-100 rounded-lg hover:bg-slate-50 transition-colors"
+                                className="flex items-center justify-between p-3 rounded-xl border border-[#2A2A2A] bg-[#111111] hover:border-[#3A3A3A] transition-colors"
                             >
                                 <div className="flex-1 min-w-0 mr-3">
-                                    <p className="font-medium truncate">{income.description}</p>
-                                    <p className="text-xs text-slate-400 mt-0.5">
-                                        Expected: {income.expectedDate}
-                                    </p>
+                                    <p className="font-medium text-white text-sm truncate">{income.description}</p>
+                                    <p className="text-xs text-[#A0A0A0] mt-0.5">Expected: {income.expectedDate}</p>
                                 </div>
-                                <span className="font-bold text-green-600 text-sm flex-shrink-0">
+                                <span className="font-bold text-[#4CBB17] text-sm flex-shrink-0">
                                     ₹{income.amount.toLocaleString()}
                                 </span>
                             </div>
                         ))}
-                    </CardContent>
-                </Card>
+                    </div>
+                </div>
             </div>
 
-            {/* ── AI Insights ────────────────────────────────────────────────── */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <AlertTriangle className="h-5 w-5 text-yellow-500" />
-                        Cashflow Insights
-                    </CardTitle>
-                    <CardDescription>
-                        AI-powered cashflow analysis and recommendations
-                    </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    {insightCards.map(({ color, title, body }) => {
-                        const cls = insightColorClasses[color];
-                        return (
-                            <div
-                                key={title}
-                                className={`p-4 border rounded-lg ${cls.wrapper}`}
-                            >
-                                <h4 className={`font-medium mb-1 ${cls.heading}`}>{title}</h4>
-                                <p className={`text-sm ${cls.body}`}>{body}</p>
-                            </div>
-                        );
-                    })}
-                </CardContent>
-            </Card>
+            {/* ── AI Insights ──────────────────────────────────────────────────── */}
+            <div className="mo-card">
+                <div className="flex items-center gap-2 mb-5">
+                    <AlertTriangle className="h-5 w-5 text-[#FFB300]" />
+                    <div>
+                        <h2 className="mo-h2">Cashflow Insights</h2>
+                        <p className="mo-text-secondary">AI-powered cashflow analysis and recommendations</p>
+                    </div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-3">
+                    {insights.map(({ border, bg, title, titleColor, body }) => (
+                        <div
+                            key={title}
+                            className="p-4 rounded-xl border"
+                            style={{ borderColor: border, backgroundColor: bg }}
+                        >
+                            <h4 className="font-semibold text-sm mb-1.5" style={{ color: titleColor }}>{title}</h4>
+                            <p className="text-sm text-[#A0A0A0] leading-relaxed">{body}</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
         </div>
     );
 }

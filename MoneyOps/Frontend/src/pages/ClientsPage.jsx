@@ -1,10 +1,4 @@
 import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
     Dialog,
     DialogContent,
@@ -14,6 +8,8 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
     Plus,
     Users,
@@ -28,7 +24,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-// ── Initial form state ────────────────────────────────────────────────────────
 const INITIAL_FORM = {
     name: "",
     email: "",
@@ -51,8 +46,6 @@ export default function ClientsPage() {
         fetchClients();
     }, []);
 
-    // ── API Calls ───────────────────────────────────────────────────────────────
-
     const fetchClients = async () => {
         try {
             setLoading(true);
@@ -73,7 +66,6 @@ export default function ClientsPage() {
             toast.error("Client name is required");
             return;
         }
-
         setSaving(true);
         try {
             const res = await fetch("/api/clients", {
@@ -81,12 +73,8 @@ export default function ClientsPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(formData),
             });
-
             const data = await res.json();
-            if (!res.ok || !data.success) {
-                throw new Error(data.message || "Failed to create client");
-            }
-
+            if (!res.ok || !data.success) throw new Error(data.message || "Failed to create client");
             toast.success("Client created successfully");
             setDialogOpen(false);
             setFormData(INITIAL_FORM);
@@ -97,8 +85,6 @@ export default function ClientsPage() {
             setSaving(false);
         }
     };
-
-    // ── Derived state ───────────────────────────────────────────────────────────
 
     const filteredClients = clients.filter(
         (client) =>
@@ -118,290 +104,220 @@ export default function ClientsPage() {
                 : 0,
     };
 
-    // ── Helpers ────────────────────────────────────────────────────────────────
-
-    const updateForm = (field, value) =>
-        setFormData((prev) => ({ ...prev, [field]: value }));
-
-    // ── Render ──────────────────────────────────────────────────────────────────
+    const updateForm = (field, value) => setFormData((prev) => ({ ...prev, [field]: value }));
 
     return (
-        <div className="space-y-6">
-            {/* ── Page Header ──────────────────────────────────────────────────── */}
-            <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-6">
+            {/* ── Header ──────────────────────────────────────────────────────── */}
+            <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
-                    <h2 className="text-3xl font-bold tracking-tight">Clients</h2>
-                    <p className="text-slate-500 text-sm mt-1">Manage your client relationships</p>
+                    <h1 className="mo-h1">Clients</h1>
+                    <p className="mo-text-secondary mt-1">Manage your client relationships</p>
                 </div>
-
                 <div className="flex items-center gap-2">
-                    {/* Refresh */}
-                    <Button variant="outline" size="icon" onClick={fetchClients} disabled={loading}>
+                    <button
+                        className="mo-btn-secondary flex items-center gap-2"
+                        onClick={fetchClients}
+                        disabled={loading}
+                    >
                         <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-                    </Button>
-
-                    {/* Create dialog */}
+                    </button>
                     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                         <DialogTrigger asChild>
-                            <Button className="bg-green-600 hover:bg-green-700">
-                                <Plus className="h-4 w-4 mr-2" /> New Client
-                            </Button>
+                            <button className="mo-btn-primary flex items-center gap-2">
+                                <Plus className="h-4 w-4" /> New Client
+                            </button>
                         </DialogTrigger>
-
-                        <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+                        <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto bg-[#111111] border-[#2A2A2A] text-white">
                             <DialogHeader>
-                                <DialogTitle>Create New Client</DialogTitle>
-                                <DialogDescription>
-                                    Add a new client to your database. Fill in the details below.
+                                <DialogTitle className="text-white">Create New Client</DialogTitle>
+                                <DialogDescription className="text-[#A0A0A0]">
+                                    Add a new client to your database.
                                 </DialogDescription>
                             </DialogHeader>
-
                             <div className="grid gap-4 py-4">
-                                {/* Name */}
+                                {[
+                                    { id: "client-name", label: "Name *", field: "name", placeholder: "John Doe" },
+                                    { id: "client-email", label: "Email", field: "email", type: "email", placeholder: "john@example.com" },
+                                    { id: "client-phone", label: "Phone", field: "phone", type: "tel", placeholder: "+91 98765 43210" },
+                                    { id: "client-company", label: "Company", field: "company", placeholder: "Acme Corp" },
+                                    { id: "client-gstin", label: "GST Number", field: "gstin", placeholder: "22AAAAA0000A1Z5" },
+                                ].map(({ id, label, field, type, placeholder }) => (
+                                    <div key={id} className="grid gap-2">
+                                        <label htmlFor={id} className="text-sm font-medium text-[#A0A0A0]">{label}</label>
+                                        <input
+                                            id={id}
+                                            type={type || "text"}
+                                            value={formData[field]}
+                                            onChange={(e) => updateForm(field, e.target.value)}
+                                            placeholder={placeholder}
+                                            className="px-3 py-2 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17]"
+                                            style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
+                                        />
+                                    </div>
+                                ))}
                                 <div className="grid gap-2">
-                                    <Label htmlFor="client-name">Name *</Label>
-                                    <Input
-                                        id="client-name"
-                                        value={formData.name}
-                                        onChange={(e) => updateForm("name", e.target.value)}
-                                        placeholder="John Doe"
-                                    />
-                                </div>
-
-                                {/* Email */}
-                                <div className="grid gap-2">
-                                    <Label htmlFor="client-email">Email</Label>
-                                    <Input
-                                        id="client-email"
-                                        type="email"
-                                        value={formData.email}
-                                        onChange={(e) => updateForm("email", e.target.value)}
-                                        placeholder="john@example.com"
-                                    />
-                                </div>
-
-                                {/* Phone */}
-                                <div className="grid gap-2">
-                                    <Label htmlFor="client-phone">Phone</Label>
-                                    <Input
-                                        id="client-phone"
-                                        type="tel"
-                                        value={formData.phone}
-                                        onChange={(e) => updateForm("phone", e.target.value)}
-                                        placeholder="+91 98765 43210"
-                                    />
-                                </div>
-
-                                {/* Company */}
-                                <div className="grid gap-2">
-                                    <Label htmlFor="client-company">Company</Label>
-                                    <Input
-                                        id="client-company"
-                                        value={formData.company}
-                                        onChange={(e) => updateForm("company", e.target.value)}
-                                        placeholder="Acme Corp"
-                                    />
-                                </div>
-
-                                {/* GSTIN */}
-                                <div className="grid gap-2">
-                                    <Label htmlFor="client-gstin">GST Number (GSTIN)</Label>
-                                    <Input
-                                        id="client-gstin"
-                                        value={formData.gstin}
-                                        onChange={(e) => updateForm("gstin", e.target.value.toUpperCase())}
-                                        placeholder="22AAAAA0000A1Z5"
-                                        maxLength={15}
-                                    />
-                                    <p className="text-xs text-slate-400">15-character GST Identification Number</p>
-                                </div>
-
-                                {/* Address */}
-                                <div className="grid gap-2">
-                                    <Label htmlFor="client-address">Address</Label>
+                                    <label className="text-sm font-medium text-[#A0A0A0]">Address</label>
                                     <Textarea
-                                        id="client-address"
                                         value={formData.address}
                                         onChange={(e) => updateForm("address", e.target.value)}
                                         placeholder="123 Main St, City, State"
                                         rows={2}
+                                        className="bg-[#1A1A1A] border-[#2A2A2A] text-white placeholder:text-[#A0A0A0] focus:border-[#4CBB17] resize-none"
                                     />
                                 </div>
-
-                                {/* Notes */}
                                 <div className="grid gap-2">
-                                    <Label htmlFor="client-notes">Notes</Label>
+                                    <label className="text-sm font-medium text-[#A0A0A0]">Notes</label>
                                     <Textarea
-                                        id="client-notes"
                                         value={formData.notes}
                                         onChange={(e) => updateForm("notes", e.target.value)}
                                         placeholder="Additional notes about the client"
                                         rows={2}
+                                        className="bg-[#1A1A1A] border-[#2A2A2A] text-white placeholder:text-[#A0A0A0] focus:border-[#4CBB17] resize-none"
                                     />
                                 </div>
                             </div>
-
                             <DialogFooter>
-                                <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                                <button
+                                    className="mo-btn-secondary"
+                                    onClick={() => setDialogOpen(false)}
+                                >
                                     Cancel
-                                </Button>
-                                <Button
+                                </button>
+                                <button
                                     onClick={handleCreateClient}
                                     disabled={saving}
-                                    className="bg-green-600 hover:bg-green-700"
+                                    className="mo-btn-primary flex items-center gap-2"
                                 >
-                                    {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                                     Create Client
-                                </Button>
+                                </button>
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>
                 </div>
             </div>
 
-            {/* ── Stats Cards ───────────────────────────────────────────────────── */}
+            {/* ── Stats ───────────────────────────────────────────────────────── */}
             <div className="grid gap-4 md:grid-cols-4">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-500">Total Clients</CardTitle>
-                        <Users className="h-4 w-4 text-slate-400" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-3xl font-bold">{stats.total}</div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-500">Active</CardTitle>
-                        <TrendingUp className="h-4 w-4 text-slate-400" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-3xl font-bold text-green-600">{stats.active}</div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-500">Total Revenue</CardTitle>
-                        <DollarSign className="h-4 w-4 text-slate-400" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-3xl font-bold">₹{stats.totalRevenue.toLocaleString()}</div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-500">
-                            Avg Lifetime Value
-                        </CardTitle>
-                        <TrendingUp className="h-4 w-4 text-slate-400" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-3xl font-bold">
-                            ₹{stats.avgLifetimeValue.toFixed(0)}
-                        </div>
-                    </CardContent>
-                </Card>
+                <div className="mo-stat-card">
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-[#A0A0A0]">Total Clients</p>
+                        <Users className="h-4 w-4 text-[#A0A0A0]" />
+                    </div>
+                    <div className="text-3xl font-bold text-white">{stats.total}</div>
+                </div>
+                <div className="mo-stat-card">
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-[#A0A0A0]">Active</p>
+                        <TrendingUp className="h-4 w-4 text-[#A0A0A0]" />
+                    </div>
+                    <div className="text-3xl font-bold text-[#4CBB17]">{stats.active}</div>
+                </div>
+                <div className="mo-stat-card">
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-[#A0A0A0]">Total Revenue</p>
+                        <DollarSign className="h-4 w-4 text-[#A0A0A0]" />
+                    </div>
+                    <div className="text-3xl font-bold text-white">₹{stats.totalRevenue.toLocaleString()}</div>
+                </div>
+                <div className="mo-stat-card">
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-[#A0A0A0]">Avg Lifetime Value</p>
+                        <TrendingUp className="h-4 w-4 text-[#A0A0A0]" />
+                    </div>
+                    <div className="text-3xl font-bold text-white">₹{stats.avgLifetimeValue.toFixed(0)}</div>
+                </div>
             </div>
 
-            {/* ── Search ───────────────────────────────────────────────────────── */}
+            {/* ── Search ──────────────────────────────────────────────────────── */}
             <div className="relative max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#A0A0A0]" />
+                <input
                     placeholder="Search clients…"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10"
+                    className="w-full pl-10 pr-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17]"
+                    style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
                 />
             </div>
 
-            {/* ── Client List ──────────────────────────────────────────────────── */}
+            {/* ── Client List ─────────────────────────────────────────────────── */}
             {loading ? (
                 <div className="flex items-center justify-center h-64">
-                    <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+                    <Loader2 className="h-8 w-8 animate-spin text-[#4CBB17]" />
                 </div>
             ) : filteredClients.length === 0 ? (
-                /* Empty state */
-                <Card className="border-dashed">
-                    <CardContent className="flex flex-col items-center justify-center py-16">
-                        <Users className="h-16 w-16 text-slate-300 mb-4" />
-                        <h3 className="text-lg font-semibold mb-2">
-                            {searchQuery ? "No clients found" : "No clients yet"}
-                        </h3>
-                        <p className="text-slate-500 mb-6 text-center max-w-sm text-sm">
-                            {searchQuery
-                                ? "Try adjusting your search query"
-                                : "Add your first client to start managing relationships and invoices"}
-                        </p>
-                        {!searchQuery && (
-                            <Button
-                                onClick={() => setDialogOpen(true)}
-                                className="bg-green-600 hover:bg-green-700"
-                            >
-                                <Plus className="h-4 w-4 mr-2" /> Add Your First Client
-                            </Button>
-                        )}
-                    </CardContent>
-                </Card>
+                <div className="mo-card flex flex-col items-center justify-center py-16 border-dashed">
+                    <Users className="h-16 w-16 text-[#2A2A2A] mb-4" />
+                    <h3 className="text-lg font-semibold text-white mb-2">
+                        {searchQuery ? "No clients found" : "No clients yet"}
+                    </h3>
+                    <p className="text-[#A0A0A0] mb-6 text-center max-w-sm text-sm">
+                        {searchQuery
+                            ? "Try adjusting your search query"
+                            : "Add your first client to start managing relationships and invoices"}
+                    </p>
+                    {!searchQuery && (
+                        <button
+                            onClick={() => setDialogOpen(true)}
+                            className="mo-btn-primary flex items-center gap-2"
+                        >
+                            <Plus className="h-4 w-4" /> Add Your First Client
+                        </button>
+                    )}
+                </div>
             ) : (
-                /* Client cards grid */
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                     {filteredClients.map((client) => (
-                        <Card key={client.id} className="hover:shadow-md transition-shadow cursor-pointer">
-                            <CardHeader className="pb-3">
-                                <div className="flex items-start justify-between">
-                                    <div className="flex-1 min-w-0">
-                                        <CardTitle className="text-lg truncate">{client.name}</CardTitle>
-                                        <Badge
-                                            variant={client.status === "active" ? "success" : "secondary"}
-                                            className="mt-2"
-                                        >
-                                            {client.status || "active"}
-                                        </Badge>
+                        <div key={client.id} className="mo-card cursor-pointer">
+                            <div className="flex items-start justify-between mb-3">
+                                <div>
+                                    <h3 className="text-base font-semibold text-white truncate">{client.name}</h3>
+                                    <span
+                                        className={`mt-1 inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${client.status === "active"
+                                                ? "bg-[#4CBB1720] text-[#4CBB17] border border-[#4CBB1740]"
+                                                : "bg-[#A0A0A020] text-[#A0A0A0] border border-[#A0A0A040]"
+                                            }`}
+                                    >
+                                        {client.status || "active"}
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="space-y-2 text-sm">
+                                {client.email && (
+                                    <div className="flex items-center gap-2 text-[#A0A0A0]">
+                                        <Mail className="h-3.5 w-3.5 flex-shrink-0" />
+                                        <span className="truncate">{client.email}</span>
                                     </div>
-                                </div>
-                            </CardHeader>
-
-                            <CardContent>
-                                <div className="space-y-2 text-sm">
-                                    {client.email && (
-                                        <div className="flex items-center gap-2 text-slate-500">
-                                            <Mail className="h-3.5 w-3.5 flex-shrink-0" />
-                                            <span className="truncate">{client.email}</span>
-                                        </div>
-                                    )}
-                                    {client.phone && (
-                                        <div className="flex items-center gap-2 text-slate-500">
-                                            <Phone className="h-3.5 w-3.5 flex-shrink-0" />
-                                            <span>{client.phone}</span>
-                                        </div>
-                                    )}
-                                    {client.company && (
-                                        <div className="flex items-center gap-2 text-slate-500">
-                                            <Building className="h-3.5 w-3.5 flex-shrink-0" />
-                                            <span className="truncate">{client.company}</span>
-                                        </div>
-                                    )}
-                                    {client.gstin && (
-                                        <div className="flex items-center gap-2">
-                                            <Badge variant="secondary" className="font-mono text-xs">
-                                                GST: {client.gstin}
-                                            </Badge>
-                                        </div>
-                                    )}
-                                    {client.totalRevenue > 0 && (
-                                        <div className="pt-2 mt-2 border-t border-slate-100">
-                                            <p className="text-xs text-slate-400">Total Revenue</p>
-                                            <p className="font-semibold text-slate-800">
-                                                ₹{client.totalRevenue.toLocaleString()}
-                                            </p>
-                                        </div>
-                                    )}
-                                </div>
-                            </CardContent>
-                        </Card>
+                                )}
+                                {client.phone && (
+                                    <div className="flex items-center gap-2 text-[#A0A0A0]">
+                                        <Phone className="h-3.5 w-3.5 flex-shrink-0" />
+                                        <span>{client.phone}</span>
+                                    </div>
+                                )}
+                                {client.company && (
+                                    <div className="flex items-center gap-2 text-[#A0A0A0]">
+                                        <Building className="h-3.5 w-3.5 flex-shrink-0" />
+                                        <span className="truncate">{client.company}</span>
+                                    </div>
+                                )}
+                                {client.gstin && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-mono bg-[#1A1A1A] text-[#A0A0A0] border border-[#2A2A2A]">
+                                        GST: {client.gstin}
+                                    </span>
+                                )}
+                                {client.totalRevenue > 0 && (
+                                    <div className="pt-3 mt-2 border-t border-[#2A2A2A]">
+                                        <p className="text-xs text-[#A0A0A0]">Total Revenue</p>
+                                        <p className="font-semibold text-white">
+                                            ₹{client.totalRevenue.toLocaleString()}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     ))}
                 </div>
             )}
