@@ -1,11 +1,13 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useUser } from "@clerk/clerk-react";
-import { X, Phone, PhoneOff, Mic } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { X, Phone, PhoneOff, Mic, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
     LiveKitRoom,
     RoomAudioRenderer,
     useConnectionState,
+    useRoomContext,
     ConnectionState,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
@@ -160,19 +162,15 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
                         </LiveKitRoom>
                     ) : (
                         /* Idle / pre-connect state */
-                        <div className="flex flex-col items-center gap-5">
+                        <div className="flex flex-col items-center gap-5 py-2">
                             <AIVoiceInput
                                 isActive={false}
                                 isConnecting={isProcessing}
                                 onToggle={isLoaded && user?.id ? startCall : undefined}
                             />
-                            {!isLoaded || !user?.id ? (
+                            {(!isLoaded || !user?.id) && (
                                 <p className="text-xs text-center" style={{ color: "rgba(255,255,255,0.3)" }}>
                                     Sign in to start a voice session
-                                </p>
-                            ) : (
-                                <p className="text-xs text-center" style={{ color: "rgba(255,255,255,0.3)" }}>
-                                    Speak with the <span className="text-white font-medium">{agentType}</span> agent
                                 </p>
                             )}
                         </div>
@@ -187,33 +185,129 @@ function AgentContent({ onDisconnect }) {
     const { state } = useConnectionState();
     const isConnected = state === ConnectionState.Connected;
     const isConnecting = state === ConnectionState.Connecting;
+    const isDisconnected = state === ConnectionState.Disconnected || state === ConnectionState.Reconnecting;
+
+    // ── Transcript feed ─────────────────────────────────────
+    const room = useRoomContext();
+    const [transcript, setTranscript] = useState([]);
+    const transcriptEndRef = useRef(null);
+
+    useEffect(() => {
+        if (!room) return;
+        const handler = (segments, participant) => {
+            const finalSegments = segments.filter(s => s.final && s.text?.trim());
+            if (!finalSegments.length) return;
+            // Local participant = user speech; remote/agent = agent speech
+            const isUserSpeech = participant?.isLocal === true;
+            setTranscript(prev => [
+                ...prev.slice(-20), // keep last 20 lines to avoid overflow
+                ...finalSegments.map(s => ({
+                    id: s.id,
+                    role: isUserSpeech ? "user" : "agent",
+                    text: s.text.trim(),
+                }))
+            ]);
+        };
+        room.on("transcriptionReceived", handler);
+        return () => room.off("transcriptionReceived", handler);
+    }, [room]);
+
+    // Auto-scroll transcript to bottom
+    useEffect(() => {
+        transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [transcript]);
+
+    // Single exclusive status label
+    const statusLabel = isConnecting
+        ? { text: "Connecting to room…", color: "#FFB300" }
+        : isConnected
+            ? { text: "Connected · Listening", color: "#4CBB17" }
+            : isDisconnected
+                ? { text: "Disconnected", color: "#CD1C18" }
+                : null;
 
     return (
-        <div className="flex flex-col gap-4">
-            {/* Status text */}
+        <div className="flex flex-col gap-3">
+            {/* ── Status — exactly one label at a time ── */}
             <div className="text-center h-5">
-                {isConnecting && (
-                    <p className="text-xs text-[#FFB300] animate-pulse">Connecting to room…</p>
-                )}
-                {isConnected && (
-                    <p className="text-xs text-[#4CBB17]">Connected · Listening</p>
-                )}
-                {(state === ConnectionState.Disconnected || state === ConnectionState.Reconnecting) && (
-                    <p className="text-xs text-[#CD1C18]">Disconnected</p>
+                {statusLabel && (
+                    <p
+                        className={isConnecting ? "text-xs animate-pulse" : "text-xs"}
+                        style={{ color: statusLabel.color }}
+                    >
+                        {statusLabel.text}
+                    </p>
                 )}
             </div>
 
-            {/* Voice visualizer — active while connected */}
+            {/* Voice visualizer */}
             <AIVoiceInput
                 isActive={isConnected}
                 isConnecting={isConnecting}
                 onToggle={onDisconnect}
             />
 
+            {/* ── Transcript feed ── */}
+            {(transcript.length > 0 || isConnected) && (
+                <div
+                    className="mx-3 rounded-xl overflow-hidden"
+                    style={{
+                        backgroundColor: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.06)",
+                    }}
+                >
+                    <div
+                        className="px-3 py-1.5 flex items-center gap-1.5"
+                        style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+                    >
+                        <span className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.25)" }}>
+                            Transcript
+                        </span>
+                    </div>
+                    <div
+                        className="flex flex-col gap-1.5 px-3 py-2 overflow-y-auto"
+                        style={{ maxHeight: "110px", scrollbarWidth: "none" }}
+                    >
+                        {transcript.length === 0 ? (
+                            <p className="text-[10px] text-center py-1" style={{ color: "rgba(255,255,255,0.18)" }}>
+                                Transcript will appear here…
+                            </p>
+                        ) : (
+                            transcript.map((entry) => (
+                                <div
+                                    key={entry.id}
+                                    className={`flex gap-1.5 ${entry.role === "user" ? "justify-end" : "justify-start"}`}
+                                >
+                                    <div
+                                        className="max-w-[85%] rounded-lg px-2.5 py-1 text-[10px] leading-relaxed"
+                                        style={
+                                            entry.role === "user"
+                                                ? {
+                                                    backgroundColor: "rgba(76,187,23,0.15)",
+                                                    color: "rgba(255,255,255,0.75)",
+                                                    borderRadius: "10px 10px 2px 10px",
+                                                }
+                                                : {
+                                                    backgroundColor: "rgba(255,255,255,0.06)",
+                                                    color: "rgba(255,255,255,0.55)",
+                                                    borderRadius: "10px 10px 10px 2px",
+                                                }
+                                        }
+                                    >
+                                        {entry.text}
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                        <div ref={transcriptEndRef} />
+                    </div>
+                </div>
+            )}
+
             {/* End call button */}
-            <div className="flex justify-center">
+            <div className="flex justify-center px-3">
                 <button
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all hover:opacity-90"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all hover:opacity-90"
                     style={{
                         backgroundColor: "rgba(255, 68, 68, 0.15)",
                         color: "#CD1C18",
@@ -226,7 +320,7 @@ function AgentContent({ onDisconnect }) {
                 </button>
             </div>
 
-            <p className="text-center text-[10px]" style={{ color: "rgba(255,255,255,0.2)" }}>
+            <p className="text-center text-[9px] pb-2" style={{ color: "rgba(255,255,255,0.15)" }}>
                 Powered by LiveKit
             </p>
         </div>
