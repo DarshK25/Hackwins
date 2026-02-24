@@ -44,8 +44,9 @@ jwt:
   secret: ${JWT_SECRET:my-super-secret-key-that-is-at-least-256-bits-long-for-HS256-algorithm-must-be-longer}
   expiration: ${JWT_EXPIRATION:86400000}
 
-# Internal service-to-service shared secret (validated by ServiceTokenFilter)
-INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:moneyops-internal-ai-gateway-service-secret-2024}
+# Internal service-to-service token is read directly from env var INTERNAL_SERVICE_TOKEN
+# by ServiceTokenFilter via @Value. No Spring property alias needed here — defining one
+# with ${INTERNAL_SERVICE_TOKEN:...} causes a circular placeholder error.
 
 logging:
   level:

@@ -15,7 +15,8 @@ import {
   Brain,
   Heart,
   Rocket,
-  Cog
+  Cog,
+  Bell,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -28,63 +29,44 @@ import {
   SidebarHeader,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { Bot } from "lucide-react";
 
-function SidebarNav({ className, items, ...props }) {
+function SidebarNav({ items }) {
   const { pathname } = useLocation();
 
   return (
-    <nav className={cn("flex flex-col space-y-1", className)} {...props}>
+    <nav className="flex flex-col gap-0.5">
       {items.map((item) => {
-        const isActive = pathname === item.href || (item.href !== "/analytics" && pathname.startsWith(item.href));
+        const isActive =
+          pathname === item.href ||
+          (item.href !== "/analytics" && pathname.startsWith(item.href));
 
         return (
           <Link
             key={`${item.href}-${item.title}`}
             to={item.href}
             className={cn(
-              "group relative flex items-center justify-start rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 w-full",
+              "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
               isActive
-                ? "bg-gradient-to-r from-primary/20 to-accent/10 text-primary shadow-md shadow-primary/20"
-                : "text-muted-foreground hover:bg-primary/5 hover:text-foreground",
-              item.variant === "default" && "bg-primary text-primary-foreground hover:bg-primary/90"
+                ? "bg-[#4CBB1715] text-[#4CBB17]"
+                : "text-[#A0A0A0] hover:bg-[#1A1A1A] hover:text-white"
             )}
           >
-            {/* Active indicator */}
+            {/* Active left border indicator */}
             {isActive && (
-              <div className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-gradient-to-b from-primary to-accent shadow-lg shadow-primary/50" />
+              <span
+                className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r bg-[#4CBB17]"
+                aria-hidden="true"
+              />
             )}
-
-            {/* Icon with glow */}
-            <div className={cn(
-              "mr-3 transition-all duration-200",
-              isActive && "drop-shadow-[0_0_6px_rgba(34,197,94,0.4)]"
-            )}>
-              <div className={cn(
-                "h-4 w-4 transition-all duration-200",
-                isActive && "scale-110 text-primary"
-              )}>
-                {item.icon}
-              </div>
-            </div>
-
-            {/* Text */}
-            <span className={cn(
-              "transition-all duration-200",
-              isActive && "font-semibold"
-            )}>
-              {item.title}
+            <span
+              className={cn(
+                "flex-shrink-0 transition-colors",
+                isActive ? "text-[#4CBB17]" : "text-[#A0A0A0]"
+              )}
+            >
+              {item.icon}
             </span>
-
-            {/* Hover effect */}
-            {!isActive && (
-              <div className="absolute inset-0 rounded-lg bg-gradient-to-r from-primary/0 via-primary/5 to-accent/0 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-            )}
-
-            {/* Active pulse */}
-            {isActive && (
-              <div className="absolute inset-0 rounded-lg bg-gradient-to-r from-primary/5 to-accent/5 animate-pulse" />
-            )}
+            <span>{item.title}</span>
           </Link>
         );
       })}
@@ -98,31 +80,36 @@ export function AppSidebar(props) {
       href: "/analytics",
       title: "Overview",
       icon: <Home className="h-4 w-4" />,
-      variant: "ghost",
     },
     {
       href: "/finances",
       title: "Bank Accounts",
       icon: <CreditCard className="h-4 w-4" />,
-      variant: "ghost",
     },
     {
       href: "/transactions",
       title: "Transactions",
       icon: <FileText className="h-4 w-4" />,
-      variant: "ghost",
     },
     {
       href: "/invoices",
       title: "Invoices",
       icon: <FileText className="h-4 w-4" />,
-      variant: "ghost",
     },
     {
       href: "/clients",
       title: "Clients",
       icon: <Users className="h-4 w-4" />,
-      variant: "ghost",
+    },
+    {
+      href: "/cashflow",
+      title: "Cash Flow",
+      icon: <BarChart3 className="h-4 w-4" />,
+    },
+    {
+      href: "/documents",
+      title: "Documents",
+      icon: <FileText className="h-4 w-4" />,
     },
   ];
 
@@ -131,55 +118,51 @@ export function AppSidebar(props) {
       href: "/finance-intelligence",
       title: "Finance Agent",
       icon: <Calculator className="h-4 w-4" />,
-      variant: "ghost",
     },
     {
       href: "/sales-crm",
       title: "Sales Agent",
       icon: <TrendingUp className="h-4 w-4" />,
-      variant: "ghost",
     },
     {
       href: "/strategy-agent",
       title: "Strategy Agent",
       icon: <Brain className="h-4 w-4" />,
-      variant: "ghost",
-    },
-    {
-      href: "/compliance",
-      title: "Compliance Agent",
-      icon: <Shield className="h-4 w-4" />,
-      variant: "ghost",
-    },
-    {
-      href: "/customer-agent",
-      title: "Customer Agent",
-      icon: <Heart className="h-4 w-4" />,
-      variant: "ghost",
-    },
-    {
-      href: "/growth-agent",
-      title: "Growth Agent",
-      icon: <Rocket className="h-4 w-4" />,
-      variant: "ghost",
-    },
-    {
-      href: "/operations-agent",
-      title: "Operations Agent",
-      icon: <Cog className="h-4 w-4" />,
-      variant: "ghost",
     },
     {
       href: "/market-research",
       title: "Research Agent",
       icon: <Search className="h-4 w-4" />,
-      variant: "ghost",
+    },
+    {
+      href: "/compliance",
+      title: "Compliance Agent",
+      icon: <Shield className="h-4 w-4" />,
+    },
+    {
+      href: "/alerts",
+      title: "Alert Agent",
+      icon: <Bell className="h-4 w-4" />,
+    },
+    {
+      href: "/customer-agent",
+      title: "Customer Agent",
+      icon: <Heart className="h-4 w-4" />,
+    },
+    {
+      href: "/growth-agent",
+      title: "Growth Agent",
+      icon: <Rocket className="h-4 w-4" />,
+    },
+    {
+      href: "/operations-agent",
+      title: "Operations Agent",
+      icon: <Cog className="h-4 w-4" />,
     },
     {
       href: "/orchestrator",
       title: "Orchestrator",
       icon: <GitMerge className="h-4 w-4" />,
-      variant: "ghost",
     },
   ];
 
@@ -188,50 +171,73 @@ export function AppSidebar(props) {
       href: "/teams",
       title: "Teams",
       icon: <Users className="h-4 w-4" />,
-      variant: "ghost",
     },
     {
       href: "/settings",
       title: "Settings",
       icon: <Settings className="h-4 w-4" />,
-      variant: "ghost",
     },
   ];
 
   return (
-    <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-1">
-          <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground bg-gradient-to-br from-primary to-green-600">
-            <Bot className="size-4" />
+    <Sidebar collapsible="offcanvas" {...props}>
+      {/* Logo */}
+      <SidebarHeader className="border-b border-[#2A2A2A] px-4 py-4">
+        <div className="flex items-center gap-3">
+          {/* MoneyOps logo mark */}
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#4CBB17] flex-shrink-0 overflow-hidden">
+            <svg viewBox="0 0 32 32" width="22" height="22" fill="none" xmlns="http://www.w3.org/2000/svg">
+              {/* Lightning bolt / zigzag path */}
+              <path d="M10 22 L14 14 L18 18 L22 10" stroke="#000" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+              {/* Arrow tip pointing up-right */}
+              <path d="M19 10 L22 10 L22 13" stroke="#000" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
-          <div className="grid flex-1 text-left text-sm leading-tight">
-            <span className="truncate font-semibold">MoneyOps</span>
-            <span className="truncate text-xs text-muted-foreground">Enterprise</span>
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm font-bold text-white truncate">MoneyOps</span>
+            <span className="text-xs text-[#A0A0A0] truncate">Enterprise AI Finance</span>
           </div>
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="flex-1">
-        <ScrollArea className="flex-1 px-3">
-          <div className="flex flex-col gap-6 py-4">
-            <div className="flex flex-col gap-2">
-              <h3 className="px-4 text-xs font-medium text-muted-foreground">Main</h3>
+      <SidebarContent className="flex-1 bg-[#111111]">
+        <ScrollArea className="flex-1 px-3 py-4">
+          <div className="flex flex-col gap-6">
+            {/* Finance */}
+            <div>
+              <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-[#A0A0A0]">
+                Finance
+              </p>
               <SidebarNav items={mainNavItems} />
             </div>
-            <div className="flex flex-col gap-2">
-              <h3 className="px-4 text-xs font-medium text-muted-foreground">Agents</h3>
+
+            {/* Agents */}
+            <div>
+              <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-[#A0A0A0]">
+                AI Agents
+              </p>
               <SidebarNav items={agentNavItems} />
             </div>
-            <div className="flex flex-col gap-2">
-              <h3 className="px-4 text-xs font-medium text-muted-foreground">Utilities</h3>
+
+            {/* Utilities */}
+            <div>
+              <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-[#A0A0A0]">
+                Workspace
+              </p>
               <SidebarNav items={utilityNavItems} />
             </div>
           </div>
         </ScrollArea>
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter className="border-t border-[#2A2A2A] px-4 py-3 bg-[#111111]">
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4CBB17] opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#4CBB17]" />
+          </span>
+          <span className="text-xs text-[#A0A0A0]">All systems operational</span>
+        </div>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

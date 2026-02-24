@@ -7,9 +7,9 @@ from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
-# Load the shared root .env (MoneyOps/MoneyOps/.env) using an absolute path
-# so it works regardless of the CWD when the service is started.
-_env_path = Path(__file__).resolve().parents[2] / ".env"
+# Load the global root .env at the workspace root (MoneyOps/.env, one level above MoneyOps/MoneyOps/).
+# parents[3] from config.py: voice-service/app → voice-service → MoneyOps/MoneyOps → MoneyOps (outer)
+_env_path = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(dotenv_path=_env_path, override=True)
 
 
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # AI Gateway
     AI_GATEWAY_URL: str = "http://localhost:8001"
-    AI_GATEWAY_TIMEOUT: int = 30  # seconds
+    AI_GATEWAY_TIMEOUT: int = 15  # seconds — tighter timeout so failures surface quickly
 
     # Session
     SESSION_TIMEOUT_S: int = 600  # 10 minutes
@@ -50,9 +50,15 @@ class Settings(BaseSettings):
     ASSEMBLYAI_API_KEY: Optional[str] = None
     CARTESIA_API_KEY: Optional[str] = None
 
-    # VAD (Voice Activity Detection)
-    VAD_MIN_SPEECH_DURATION: float = 0.3  # seconds
-    VAD_MIN_SILENCE_DURATION: float = 0.5  # seconds
+    # VAD (Voice Activity Detection) — tuned for natural conversation
+    # min_speech_duration LOW  → picks up speech quickly (no missed start-of-turn)
+    VAD_MIN_SPEECH_DURATION: float = 0.1   # seconds — lower picks up speech faster
+    # min_silence_duration HIGH → doesn't cut off mid-sentence (critical for UX)
+    VAD_MIN_SILENCE_DURATION: float = 0.8  # seconds — prevents premature end-of-turn
+    # activation_threshold: confidence level needed to declare speech activity (0.0–1.0)
+    VAD_ACTIVATION_THRESHOLD: float = 0.5  # standard Silero default
+    # How long (seconds) the agent waits after end-of-speech before processing
+    TURN_DETECTION_DELAY: float = 0.3      # seconds
 
     @property
     def is_production(self) -> bool:

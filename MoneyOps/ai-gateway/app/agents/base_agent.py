@@ -149,7 +149,7 @@ class BaseAgent:
         """Helper to build error response"""
         return AgentResponse(
             success=False,
-            message=f"Error:{error}",
+            message="I had trouble completing that. Could you try again or rephrase your request?",
             error=error,
             needs_clarification=needs_clarification,
             clarification_question=clarification_question,
@@ -165,12 +165,10 @@ class BaseAgent:
         """Helper to build stub response for unimplemented features"""
         return AgentResponse(
             success=False,
-            message=f"Feature {feature_name} is not available in {available_in}",
+            message="That feature isn't available just yet. I can help you with invoices, payments, and financial summaries. What would you like to do?",
             agent_type=self.get_agent_type(),
             implemented=False,
-            recommendations=[
-                f"{feature_name} is expected to be available in {available_in}"
-            ]
+            recommendations=[]
         )
 
     def __repr__(self) -> str :

@@ -9,7 +9,7 @@ from typing import Optional
 # This matches the pattern used by voice-service and ensures LiveKit credentials
 # are always present regardless of the CWD when uvicorn is started.
 from dotenv import load_dotenv as _load_dotenv
-_ROOT_ENV = Path(__file__).resolve().parents[2] / ".env"
+_ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
 _load_dotenv(dotenv_path=_ROOT_ENV, override=True)
 
 from pydantic_settings import BaseSettings, SettingsConfigDict

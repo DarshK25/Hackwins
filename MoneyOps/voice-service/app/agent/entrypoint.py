@@ -19,7 +19,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load shared .env before any app imports
-load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env", override=True)
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[4] / ".env", override=True)
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))

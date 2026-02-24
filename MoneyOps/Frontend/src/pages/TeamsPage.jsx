@@ -1,235 +1,182 @@
-import { useState, useEffect } from "react";
-import { useAuth, useUser } from "@clerk/clerk-react";
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Mail, Shield, Trash2, UserPlus, Copy, Check } from "lucide-react";
+import { useState } from "react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Users, Plus, Mail, UserCheck, Crown, MoreHorizontal, Search } from "lucide-react";
 import { toast } from "sonner";
 
+const TEAM_MEMBERS = [
+    { id: 1, name: "Paarth Kothari", email: "paarth@moneyops.io", role: "owner", status: "active", joined: "Jan 2024" },
+    { id: 2, name: "Sarah Chen", email: "sarah@company.com", role: "admin", status: "active", joined: "Feb 2024" },
+    { id: 3, name: "Raj Patel", email: "raj@company.com", role: "member", status: "active", joined: "Mar 2024" },
+    { id: 4, name: "Alex Kim", email: "alex@company.com", role: "member", status: "pending", joined: "Invited" },
+];
+
+const ROLE_STYLES = {
+    owner: "bg-[#4CBB1720] text-[#4CBB17] border-[#4CBB1740]",
+    admin: "bg-[#60A5FA20] text-[#60A5FA] border-[#60A5FA40]",
+    member: "bg-[#A0A0A020] text-[#A0A0A0] border-[#A0A0A040]",
+};
+
+const STATUS_STYLES = {
+    active: "bg-[#4CBB1720] text-[#4CBB17] border-[#4CBB1740]",
+    pending: "bg-[#FFB30020] text-[#FFB300] border-[#FFB30040]",
+};
+
 export default function TeamsPage() {
-    const { getToken, userId, orgId } = useAuth();
-    const { user: clerkUser } = useUser();
-    const [members, setMembers] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [members, setMembers] = useState(TEAM_MEMBERS);
+    const [searchQuery, setSearchQuery] = useState("");
     const [inviteEmail, setInviteEmail] = useState("");
-    const [inviting, setInviting] = useState(false);
-    const [copied, setCopied] = useState(false);
+    const [showInvite, setShowInvite] = useState(false);
 
-    const fetchMembers = async () => {
-        try {
-            setLoading(true);
-            const token = await getToken();
-            const res = await fetch("/api/users", {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "X-User-Id": userId,
-                    "X-Org-Id": orgId
-                }
-            });
-            if (!res.ok) throw new Error("Failed to fetch team members");
-            const data = await res.json();
-            setMembers(data);
-        } catch (err) {
-            console.error("Fetch error:", err);
-            toast.error("Failed to load team members");
-        } finally {
-            setLoading(false);
-        }
-    };
+    const filtered = members.filter(
+        (m) =>
+            !searchQuery ||
+            m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            m.email.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
-    useEffect(() => {
-        if (userId && orgId) {
-            fetchMembers();
-        }
-    }, [userId, orgId]);
-
-    const handleInvite = async () => {
-        if (!inviteEmail.trim()) {
-            toast.error("Please enter an email address");
+    const handleInvite = () => {
+        if (!inviteEmail.trim() || !inviteEmail.includes("@")) {
+            toast.error("Please enter a valid email address");
             return;
         }
-
-        setInviting(true);
-        try {
-            const token = await getToken();
-            const res = await fetch("/api/users/invite", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                    "X-User-Id": userId,
-                    "X-Org-Id": orgId
-                },
-                body: JSON.stringify({
-                    email: inviteEmail,
-                    role: "STAFF"
-                })
-            });
-
-            if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.message || "Failed to send invitation");
-            }
-
-            toast.success(`Invitation sent to ${inviteEmail}`);
-            setInviteEmail("");
-        } catch (err) {
-            console.error("Invite error:", err);
-            toast.error(err.message);
-        } finally {
-            setInviting(false);
-        }
+        toast.success(`Invitation sent to ${inviteEmail}`);
+        setInviteEmail("");
+        setShowInvite(false);
     };
 
-    const handleCopyInviteCode = () => {
-        if (!orgId) return;
-        navigator.clipboard.writeText(orgId);
-        setCopied(true);
-        toast.success("Invite code copied to clipboard");
-        setTimeout(() => setCopied(false), 2000);
+    const roleIcon = (role) => {
+        if (role === "owner") return <Crown className="h-3.5 w-3.5" />;
+        if (role === "admin") return <UserCheck className="h-3.5 w-3.5" />;
+        return null;
     };
 
-    const handleRemoveMember = async (targetId) => {
-        if (!window.confirm("Are you sure you want to remove this member?")) return;
-
-        try {
-            const token = await getToken();
-            const res = await fetch(`/api/users/${targetId}`, {
-                method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "X-User-Id": userId,
-                    "X-Org-Id": orgId
-                }
-            });
-
-            if (!res.ok) throw new Error("Failed to remove member");
-
-            setMembers((prev) => prev.filter((m) => m.id !== targetId));
-            toast.success("Member removed");
-        } catch (err) {
-            console.error("Delete error:", err);
-            toast.error(err.message);
-        }
-    };
+    const initials = (name) =>
+        name
+            .split(" ")
+            .map((n) => n[0])
+            .join("")
+            .toUpperCase();
 
     return (
         <div className="flex flex-col gap-6">
+            {/* ── Header ──────────────────────────────────────────────────────── */}
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold">Teams</h1>
-                    <p className="text-slate-500 text-sm mt-1">
-                        Manage your organization members and permissions
-                    </p>
+                    <h1 className="mo-h1">Team</h1>
+                    <p className="mo-text-secondary mt-1">Manage your workspace team members</p>
                 </div>
-                <div className="flex gap-2">
-                    <Card className="flex items-center px-4 py-2 bg-slate-50 border-dashed">
-                        <div className="flex flex-col mr-4">
-                            <span className="text-[10px] uppercase font-bold text-slate-400">Invite Code</span>
-                            <span className="text-sm font-mono font-medium">{orgId ? `${orgId.substring(0, 8)}...` : "Loading..."}</span>
-                        </div>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCopyInviteCode}>
-                            {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
-                        </Button>
-                    </Card>
-                    <Button onClick={() => document.getElementById("invite-email")?.focus()}>
-                        <UserPlus className="mr-2 h-4 w-4" />
-                        Add Member
-                    </Button>
+                <button
+                    onClick={() => setShowInvite(true)}
+                    className="mo-btn-primary flex items-center gap-2"
+                >
+                    <Plus className="h-4 w-4" /> Invite Member
+                </button>
+            </div>
+
+            {/* ── Stats ─────────────────────────────────────────────────────── */}
+            <div className="grid gap-4 md:grid-cols-3">
+                <div className="mo-stat-card">
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-[#A0A0A0]">Total Members</p>
+                        <Users className="h-4 w-4 text-[#A0A0A0]" />
+                    </div>
+                    <div className="text-3xl font-bold text-white">{members.length}</div>
+                </div>
+                <div className="mo-stat-card">
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-[#A0A0A0]">Active</p>
+                        <UserCheck className="h-4 w-4 text-[#A0A0A0]" />
+                    </div>
+                    <div className="text-3xl font-bold text-[#4CBB17]">
+                        {members.filter((m) => m.status === "active").length}
+                    </div>
+                </div>
+                <div className="mo-stat-card">
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-[#A0A0A0]">Pending Invitations</p>
+                        <Mail className="h-4 w-4 text-[#A0A0A0]" />
+                    </div>
+                    <div className="text-3xl font-bold text-[#FFB300]">
+                        {members.filter((m) => m.status === "pending").length}
+                    </div>
                 </div>
             </div>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Invite New Member</CardTitle>
-                    <CardDescription>Send an invitation to join your team via email</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="flex gap-3 flex-wrap">
-                        <Input
-                            id="invite-email"
+            {/* ── Invite Box ────────────────────────────────────────────────── */}
+            {showInvite && (
+                <div className="mo-card border-[#4CBB1740]">
+                    <h2 className="mo-h2 mb-4">Invite New Member</h2>
+                    <div className="flex gap-3">
+                        <input
                             type="email"
                             placeholder="colleague@company.com"
                             value={inviteEmail}
                             onChange={(e) => setInviteEmail(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && handleInvite()}
-                            className="max-w-md"
-                            disabled={inviting}
+                            className="flex-1 px-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17]"
+                            style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
                         />
-                        <Button onClick={handleInvite} disabled={inviting}>
-                            <Mail className="mr-2 h-4 w-4" />
-                            {inviting ? "Sending..." : "Send Invite"}
-                        </Button>
+                        <button onClick={handleInvite} className="mo-btn-primary flex items-center gap-2">
+                            <Mail className="h-4 w-4" /> Send Invite
+                        </button>
+                        <button onClick={() => setShowInvite(false)} className="mo-btn-secondary">
+                            Cancel
+                        </button>
                     </div>
-                </CardContent>
-            </Card>
+                </div>
+            )}
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Team Members</CardTitle>
-                    <CardDescription>
-                        {loading ? "Loading team members..." : `${members.length} ${members.length === 1 ? "person" : "people"} in this organization`}
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="divide-y">
-                        {loading ? (
-                            <div className="py-8 text-center text-slate-400">Fetching team members...</div>
-                        ) : members.length === 0 ? (
-                            <div className="py-8 text-center text-slate-400">No members found.</div>
-                        ) : (
-                            members.map((member) => (
-                                <div
-                                    key={member.id}
-                                    className="flex items-center justify-between py-4 first:pt-0 last:pb-0 gap-4"
-                                >
-                                    <div className="flex items-center gap-4 min-w-0">
-                                        <Avatar>
-                                            <AvatarFallback className="bg-blue-100 text-blue-700 font-bold">
-                                                {member.name?.substring(0, 2).toUpperCase() || "U"}
-                                            </AvatarFallback>
-                                        </Avatar>
-                                        <div className="min-w-0">
-                                            <p className="font-medium truncate">{member.name || "Unnamed User"}</p>
-                                            <p className="text-sm text-slate-400 truncate">{member.email}</p>
-                                        </div>
-                                    </div>
+            {/* ── Search ────────────────────────────────────────────────────── */}
+            <div className="relative max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#A0A0A0]" />
+                <input
+                    placeholder="Search members…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17]"
+                    style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
+                />
+            </div>
 
-                                    <div className="flex items-center gap-3 shrink-0">
-                                        <Badge
-                                            variant={member.status === "ACTIVE" ? "default" : "secondary"}
-                                        >
-                                            {member.status || "ACTIVE"}
-                                        </Badge>
-                                        <div className="flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100 px-3 py-1 rounded-full capitalize">
-                                            <Shield className="h-3 w-3" />
-                                            {member.role?.toLowerCase() || "staff"}
-                                        </div>
-                                        {member.role !== "OWNER" && (
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                onClick={() => handleRemoveMember(member.id)}
-                                            >
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
-                                        )}
+            {/* ── Members List ──────────────────────────────────────────────── */}
+            <div className="mo-card !p-0 overflow-hidden">
+                <div className="divide-y divide-[#2A2A2A]">
+                    {filtered.map((member) => (
+                        <div key={member.id} className="flex items-center justify-between p-4 hover:bg-[#111111] transition-colors">
+                            <div className="flex items-center gap-4">
+                                <Avatar className="h-10 w-10 bg-[#2A2A2A]">
+                                    <AvatarFallback className="bg-[#4CBB1720] text-[#4CBB17] font-semibold text-sm">
+                                        {initials(member.name)}
+                                    </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                    <div className="flex items-center gap-2">
+                                        <p className="text-sm font-semibold text-white">{member.name}</p>
+                                        <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border font-medium ${ROLE_STYLES[member.role]}`}>
+                                            {roleIcon(member.role)}
+                                            {member.role}
+                                        </span>
                                     </div>
+                                    <p className="text-xs text-[#A0A0A0] mt-0.5">{member.email}</p>
                                 </div>
-                            ))
-                        )}
-                    </div>
-                </CardContent>
-            </Card>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <div className="text-right hidden sm:block">
+                                    <span className={`inline-flex items-center text-xs px-2 py-0.5 rounded-md border font-medium ${STATUS_STYLES[member.status]}`}>
+                                        {member.status}
+                                    </span>
+                                    <p className="text-xs text-[#A0A0A0] mt-0.5">Joined {member.joined}</p>
+                                </div>
+                                {member.role !== "owner" && (
+                                    <button className="p-1.5 rounded-lg text-[#A0A0A0] hover:text-white hover:bg-[#2A2A2A] transition-colors">
+                                        <MoreHorizontal className="h-4 w-4" />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
         </div>
     );
 }
