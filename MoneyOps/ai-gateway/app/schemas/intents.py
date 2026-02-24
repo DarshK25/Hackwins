@@ -239,8 +239,8 @@ DEFAULT_CONVERSATIONAL = IntentRequirements(
 
 INTENT_REQUIREMENTS: Dict[Intent, IntentRequirements] = {
     Intent.INVOICE_CREATE: IntentRequirements(
-        required_entities=["client_name", "items"],
-        optional_entities=["due_date", "notes", "tax"],
+        required_entities=["client_name", "amount", "due_date", "gst_percent"],
+        optional_entities=["notes", "items"],
         requires_user_confirmation=True,
         minimum_confidence=0.8,
         primary_agent=AgentType.FINANCE_AGENT,
@@ -281,22 +281,22 @@ INTENT_REQUIREMENTS: Dict[Intent, IntentRequirements] = {
         required_entities=["client_name", "email"],
         optional_entities=["phone", "address", "gst_number"],
         requires_user_confirmation=True,
-        primary_agent=AgentType.CUSTOMER_AGENT,
+        primary_agent=AgentType.FINANCE_AGENT,
     ),
     Intent.CLIENT_UPDATE: IntentRequirements(
         required_entities=["client_id"],
         optional_entities=["email", "phone", "address"],
         requires_user_confirmation=True,
-        primary_agent=AgentType.CUSTOMER_AGENT,
+        primary_agent=AgentType.FINANCE_AGENT,
     ),
     Intent.CLIENT_DELETE: IntentRequirements(
         required_entities=["client_id"],
         requires_user_confirmation=True,
-        primary_agent=AgentType.CUSTOMER_AGENT,
+        primary_agent=AgentType.FINANCE_AGENT,
     ),
     Intent.CLIENT_QUERY: IntentRequirements(
         optional_entities=["client_id", "client_name"],
-        primary_agent=AgentType.CUSTOMER_AGENT,
+        primary_agent=AgentType.FINANCE_AGENT,
     ),
     Intent.CLIENT_HISTORY: IntentRequirements(
         required_entities=["client_id"],

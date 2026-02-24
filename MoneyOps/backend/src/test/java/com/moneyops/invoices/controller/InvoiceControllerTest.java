@@ -85,7 +85,7 @@ public class InvoiceControllerTest {
 
     @Test
     public void testGetInvoice() throws Exception {
-        UUID id = UUID.randomUUID();
+        String id = UUID.randomUUID().toString();
         UUID orgId = UUID.randomUUID();
         InvoiceDto dto = new InvoiceDto();
         dto.setId(id);

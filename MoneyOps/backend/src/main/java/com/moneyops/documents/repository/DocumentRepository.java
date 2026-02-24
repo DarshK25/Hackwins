@@ -1,14 +1,16 @@
 package com.moneyops.documents.repository;
 
-import com.moneyops.documents.entity.Document;
-import org.springframework.data.jpa.repository.JpaRepository;
+import com.moneyops.documents.entity.MoneyOpsDocument;
+import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.UUID;
 
 @Repository
-public interface DocumentRepository extends JpaRepository<Document, UUID> {
-    List<Document> findByOrgId(UUID orgId);
-    List<Document> findByLinkedEntityTypeAndLinkedEntityId(String linkedEntityType, UUID linkedEntityId);
+public interface DocumentRepository extends MongoRepository<MoneyOpsDocument, UUID> {
+
+    List<MoneyOpsDocument> findByOrgId(UUID orgId);
+
+    List<MoneyOpsDocument> findByLinkedEntityTypeAndLinkedEntityId(String linkedEntityType, UUID linkedEntityId);
 }

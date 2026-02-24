@@ -23,7 +23,7 @@ export function BusinessInfoStep({ initialData = {}, onNext, loading }) {
         primaryPhone: initialData.primaryPhone || "",
         website: initialData.website || "",
         registeredAddress: initialData.registeredAddress || "",
-        numberOfEmployees: initialData.numberOfEmployees || "",
+        numberOfEmployees: initialData.numberOfEmployees || null,
         annualTurnover: initialData.annualTurnover || "",
     });
 

@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: optional:file:../.env[.properties]
   security:
     oauth2:
       client:
@@ -11,46 +13,39 @@ spring:
               - profile
   application:
     name: moneyops-backend
-  
-  # H2 Database for now -
-  datasource:
-    url: jdbc:h2:file:./data/moneyops
-    driver-class-name: org.h2.Driver
-    username: sa
-    password: 
-  
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
-  
-  jpa:
-    hibernate:
-      ddl-auto: create-drop
-    show-sql: true
-    properties:
-      hibernate:
-        format_sql: true
-        dialect: org.hibernate.dialect.H2Dialect
+
+  # MongoDB Atlas — reads MONGODB_URI from root .env (set in environment before starting)
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/moneyops}
+      # CRITICAL: existing documents store UUIDs as BSON Binary subType 03 (JAVA_LEGACY).
+      # Without this setting, Spring Data MongoDB uses subType 04 (STANDARD) by default,
+      # making all UUID-based queries (findByOrgId, findById, etc.) silently return empty.
+      uuid-representation: java_legacy
+
 
   kafka:
     enabled: ${KAFKA_ENABLED:false}
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
-      group-id: ${KAFKA_CONSUMER_GROUP_ID:notification-group}
-    # Optional: SASL/SSL for managed Kafka (e.g. Confluent Cloud, AWS MSK)
-    # Uncomment or set via env if your broker requires auth:
-    # properties:
-    #   security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
-    #   sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
-    #   sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG}
+      group-id: ${KAFKA_CONSUMER_GROUP_ID:moneyops-group}
+      auto-offset-reset: earliest
+    producer:
+      retries: 3
+    properties:
+      security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+      sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
+      sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG:}
 
 server:
-  port: 8080
+  port: ${BACKEND_PORT:8000}
 
 jwt:
-  secret: my-super-secret-key-that-is-at-least-256-bits-long-for-HS256-algorithm-must-be-longer
-  expiration: 86400000  # 24 hours in milliseconds
+  secret: ${JWT_SECRET:my-super-secret-key-that-is-at-least-256-bits-long-for-HS256-algorithm-must-be-longer}
+  expiration: ${JWT_EXPIRATION:86400000}
+
+# Internal service-to-service shared secret (validated by ServiceTokenFilter)
+INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:moneyops-internal-ai-gateway-service-secret-2024}
 
 logging:
   level:

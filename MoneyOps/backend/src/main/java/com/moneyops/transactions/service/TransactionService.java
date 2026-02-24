@@ -8,8 +8,10 @@ import com.moneyops.transactions.mapper.TransactionMapper;
 import com.moneyops.transactions.repository.TransactionRepository;
 import com.moneyops.transactions.validator.TransactionValidator;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -36,18 +38,36 @@ public class TransactionService {
 
     public TransactionDto getTransactionById(UUID id, UUID orgId) {
         Transaction transaction = transactionRepository.findByIdAndOrgId(id, orgId)
-                .orElseThrow(() -> new RuntimeException("Transaction not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Transaction not found"));
         return transactionMapper.toDto(transaction);
     }
 
     public TransactionDto createTransaction(TransactionDto dto, UUID orgId, UUID userId) {
         transactionValidator.validate(dto);
 
-        Transaction transaction = transactionMapper.toEntity(dto);
+        Transaction transaction = new Transaction();
+
         transaction.setOrgId(orgId);
         transaction.setCreatedBy(userId);
         transaction.setCreatedAt(LocalDateTime.now());
         transaction.setUpdatedAt(LocalDateTime.now());
+
+        transaction.setClientId(dto.getClientId());
+        transaction.setInvoiceId(dto.getInvoiceId());
+
+        transaction.setType(TransactionType.valueOf(dto.getType().toUpperCase()));
+
+        transaction.setAmount(dto.getAmount());
+        transaction.setCurrency(dto.getCurrency() != null ? dto.getCurrency() : "INR");
+
+        transaction.setTransactionDate(
+                dto.getTransactionDate() != null ? dto.getTransactionDate() : LocalDate.now()
+        );
+
+        transaction.setCategory(dto.getCategory());
+        transaction.setDescription(dto.getDescription());
+        transaction.setPaymentMethod(dto.getPaymentMethod());
+        transaction.setReferenceNumber(dto.getReferenceNumber());
 
         Transaction saved = transactionRepository.save(transaction);
         return transactionMapper.toDto(saved);
@@ -55,18 +75,27 @@ public class TransactionService {
 
     public TransactionDto updateTransaction(UUID id, TransactionDto dto, UUID orgId) {
         Transaction existing = transactionRepository.findByIdAndOrgId(id, orgId)
-                .orElseThrow(() -> new RuntimeException("Transaction not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Transaction not found"));
 
         transactionValidator.validate(dto);
 
-        Transaction updated = transactionMapper.toEntity(dto);
-        updated.setId(id);
-        updated.setOrgId(orgId);
-        updated.setCreatedAt(existing.getCreatedAt());
-        updated.setCreatedBy(existing.getCreatedBy());
-        updated.setUpdatedAt(LocalDateTime.now());
+        existing.setClientId(dto.getClientId());
+        existing.setInvoiceId(dto.getInvoiceId());
 
-        Transaction saved = transactionRepository.save(updated);
+        existing.setType(TransactionType.valueOf(dto.getType().toUpperCase()));
+
+        existing.setAmount(dto.getAmount());
+        existing.setCurrency(dto.getCurrency() != null ? dto.getCurrency() : "INR");
+        existing.setTransactionDate(dto.getTransactionDate());
+
+        existing.setCategory(dto.getCategory());
+        existing.setDescription(dto.getDescription());
+        existing.setPaymentMethod(dto.getPaymentMethod());
+        existing.setReferenceNumber(dto.getReferenceNumber());
+
+        existing.setUpdatedAt(LocalDateTime.now());
+
+        Transaction saved = transactionRepository.save(existing);
         return transactionMapper.toDto(saved);
     }
 
@@ -81,19 +110,19 @@ public class TransactionService {
     }
 
     public List<TransactionDto> getTransactionsByDateRange(UUID orgId, LocalDate startDate, LocalDate endDate) {
-        return transactionRepository.findByOrgIdAndDateRange(orgId, startDate, endDate).stream()
+        return transactionRepository.findByOrgIdAndTransactionDateBetween(orgId, startDate, endDate).stream()
                 .map(transactionMapper::toDto)
                 .collect(Collectors.toList());
     }
 
     public BigDecimal getTotalIncome(UUID orgId) {
-        BigDecimal total = transactionRepository.getTotalByOrgIdAndType(orgId, TransactionType.INCOME);
-        return total != null ? total : BigDecimal.ZERO;
+        var result = transactionRepository.getTotalByOrgIdAndType(orgId, TransactionType.INCOME);
+        return (result != null && result.total() != null) ? BigDecimal.valueOf(result.total()) : BigDecimal.ZERO;
     }
 
     public BigDecimal getTotalExpense(UUID orgId) {
-        BigDecimal total = transactionRepository.getTotalByOrgIdAndType(orgId, TransactionType.EXPENSE);
-        return total != null ? total : BigDecimal.ZERO;
+        var result = transactionRepository.getTotalByOrgIdAndType(orgId, TransactionType.EXPENSE);
+        return (result != null && result.total() != null) ? BigDecimal.valueOf(result.total()) : BigDecimal.ZERO;
     }
 
     public Map<String, BigDecimal> getFinancialSummary(UUID orgId) {

@@ -6,6 +6,7 @@ import time
 import re
 from decimal import Decimal
 
+from datetime import datetime
 from app.llm.groq_client import groq_client
 from app.utils.logger import get_logger
 from app.schemas.entities import (
@@ -60,8 +61,17 @@ class EntityExtractor:
         from app.schemas.intents import get_intent_requirements, ComplexityLevel
 
         requirements = get_intent_requirements(intent)
+
+        # Force LLM for certain operational intents that usually contain names/dates regex misses
+        # e.g. "invoice for Tanoosh Jain for 10000" — regex finds amount but misses client_name
+        force_llm_intents = {
+            Intent.INVOICE_CREATE, Intent.INVOICE_UPDATE, Intent.CLIENT_CREATE,
+            Intent.TRANSACTION_CREATE, Intent.PAYMENT_RECORD
+        }
+
         call_llm = (
             self.use_llm_for_operational
+            or intent in force_llm_intents
             or requirements.complexity in {ComplexityLevel.COMPLEX, ComplexityLevel.STRATEGIC}
             or len(entities) == 0
         )
@@ -77,6 +87,15 @@ class EntityExtractor:
                 logger.warning("llm_extract_failed", error=str(e))
 
         result = self._build_response(entities, user_input)
+        
+        # 3) Normalize relative dates to ISO
+        from app.utils.date_parser import parse_relative_date
+        if result.time_period:
+            parsed = parse_relative_date(result.time_period)
+            if parsed:
+                logger.debug("normalized_date", raw=result.time_period, parsed=parsed)
+                result.time_period = parsed
+
         result.confidence_score = float(result.confidence_score)
         elapsed = int((time.time() - start_time) * 1000)
         logger.debug("entity_extraction_completed", total_entities=result.total_entities, time_ms=elapsed)
@@ -169,24 +188,29 @@ class EntityExtractor:
 
 User Input: "{user_input}"
 Intent: {intent.name}
+Today's Date: {datetime.now().strftime("%Y-%m-%d")} (use this to resolve relative dates)
 
 Return ONLY a JSON array of entities like:
 [
-  {"type": "client_name", "value": "Acme Corp", "confidence": 0.95},
-  {"type": "amount", "value": "50000", "confidence": 0.9}
+  {{"type": "client_name", "value": "Acme Corp", "confidence": 0.95}},
+  {{"type": "amount", "value": "50000", "confidence": 0.9}}
 ]
 
 Important:
 - Return [] if none found
 - Confidence 0.0 - 1.0
-- Use snake_case keys for types
+- Use snake_case types: client_name, amount, invoice_id, phone, email, gst_number, tax_id, gst_percent, due_date, company_name
+- For INVOICE_CREATE: always extract client_name, amount, and explicitly look for gst_percent (e.g. "18% GST" -> 18) and due_date.
+- For CLIENT_CREATE: extract client_name, email, phone, tax_id, and company_name
 - Extract only explicitly mentioned values (do not fabricate)
+- For dates, attempt to resolve them into ISO 8601 (YYYY-MM-DD) based on Today's Date.
 """
 
         if context:
             prompt += f"\nContext: {context}\n"
 
         return prompt
+
 
     def _parse_llm_entities(self, response: Any) -> List[Entity]:
         import json
@@ -228,7 +252,15 @@ Important:
                     "PHONE": EntityType.PHONE,
                     "EMAIL": EntityType.EMAIL,
                     "GST_NUMBER": EntityType.GST_NUMBER,
+                    "GST": EntityType.GST_NUMBER,
+                    "TAX_ID": EntityType.GST_NUMBER,
+                    "TAX": EntityType.GST_NUMBER,
                     "PERCENTAGE": EntityType.PERCENTAGE,
+                    "GST_PERCENT": EntityType.PERCENTAGE,
+                    "DUE_DATE": EntityType.TIME_PERIOD,
+                    "DATE": EntityType.TIME_PERIOD,
+                    "COMPANY_NAME": EntityType.ENTITY_NAME,
+                    "COMPANY": EntityType.ENTITY_NAME,
                     "PROBLEM_AREA": EntityType.PROBLEM_AREA,
                     "TIME_PERIOD": EntityType.TIME_PERIOD,
                     "TARGET_VALUE": EntityType.TARGET_VALUE,
@@ -281,6 +313,7 @@ Important:
         time_period = None
         competitor = None
         target_value = None
+        gst_percent = None
 
         for entity in entities:
             if entity.entity_type == EntityType.AMOUNT and amount is None:
@@ -310,6 +343,13 @@ Important:
             elif entity.entity_type == EntityType.TARGET_VALUE and target_value is None:
                 target_value = entity.value
 
+            elif entity.entity_type == EntityType.PERCENTAGE and gst_percent is None:
+                try:
+                    p_val = str(entity.value).replace("%", "").strip()
+                    gst_percent = float(p_val)
+                except Exception:
+                    gst_percent = None
+
         avg_conf = (sum(e.confidence for e in entities) / len(entities)) if entities else 0.0
 
         return ExtractedEntities(
@@ -321,6 +361,7 @@ Important:
             metric=metric,
             problem_area=problem_area,
             time_period=time_period,
+            gst_percent=gst_percent,
             competitor=competitor,
             target_value=target_value,
             total_entities=len(entities),

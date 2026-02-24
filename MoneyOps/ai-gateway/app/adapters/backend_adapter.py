@@ -31,7 +31,10 @@ class BackendHttpAdapter:
         
         default_headers = {
             "Content-Type": "application/json",
-            "User-Agent":  "MoneyOps-AI-Gateway/1.0"
+            "User-Agent":  "MoneyOps-AI-Gateway/1.0",
+            # Service-to-service token so Spring Boot's ServiceTokenFilter
+            # can authenticate requests without needing a user JWT.
+            "X-Service-Token": settings.INTERNAL_SERVICE_TOKEN,
         }
         
         # Add authorization header if token is provided
@@ -45,6 +48,7 @@ class BackendHttpAdapter:
         )
         
         logger.info("backend_adapter_initialized", base_url=self.base_url)
+
         
     async def _request(
         self,
@@ -138,10 +142,15 @@ class BackendHttpAdapter:
                 success=False,
                 error=str(e),
                 status_code=500
-            )            
-        
+            )
+
+    async def get_onboarding_status(self, clerk_id: str) -> BackendResponse:
+        """Get onboarding status and resolving user_id/org_id for a clerk_id."""
+        return await self._request("GET", "/api/onboarding/status", params={"clerkId": clerk_id})
+
     #===========================
     #Invoice ops
+
     #===========================
     async def create_invoice(
         self,
@@ -232,23 +241,31 @@ class BackendHttpAdapter:
     async def create_client(
         self,
         org_id: str,
+        user_id: str,
         name: str,
         email: str,
         phone: Optional[str] = None,
         address: Optional[str] = None,
-        gst_number: Optional[str] = None
+        tax_id: Optional[str] = None,
+        company: Optional[str] = None
     ) -> BackendResponse:
         """Create a new client"""
         payload = {
-            "organizationId": org_id,
             "name": name,
             "email": email,
-            "phone": phone,
+            "phoneNumber": phone,
             "address": address,
-            "gstNumber": gst_number
+            "taxId": tax_id,
+            "company": company,
+            "status": "ACTIVE"
+        }
+        
+        headers = {
+            "X-Org-Id": org_id,
+            "X-User-Id": user_id
         }
 
-        return await self._request("POST", "/api/clients", data=payload)
+        return await self._request("POST", "/api/clients", data=payload, headers=headers)
 
 
     async def get_clients(

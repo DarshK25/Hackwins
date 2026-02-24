@@ -1,0 +1,45 @@
+# =============================================================
+#  MoneyOps — Root .gitignore
+# =============================================================
+
+# ── Environment files (NEVER commit these) ──────────────────
+.env
+*.env.local
+*.env.*.local
+
+# Allow the template
+!.env.example
+
+# ── OS / IDE ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# ── Java / Maven ─────────────────────────────────────────────
+target/
+*.class
+*.jar
+*.war
+
+# ── Node / Frontend ──────────────────────────────────────────
+node_modules/
+dist/
+.next/
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log

@@ -7,24 +7,23 @@ from typing import Dict, Any, Optional, List
 
 from app.config import settings
 from app.utils.logger import get_logger
-from app.utils.retry import retry_on_http_error
 
 logger = get_logger(__name__)
 
 
 class AIGatewayClient:
-    """Client for AI Gateway service"""
+    """Client for AI Gateway service.
     
+    Uses a fresh httpx.AsyncClient per request to avoid the
+    'AssertionError: assert self._http_session is not None'
+    that occurs when an AsyncClient is created before the event loop
+    (which livekit-agents v1.4.2 creates its own loop for workers).
+    """
+
     def __init__(self):
         self.base_url = settings.AI_GATEWAY_URL
         self.timeout = settings.AI_GATEWAY_TIMEOUT
-        
-        self.client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=self.timeout,
-        )
-    
-    @retry_on_http_error(max_attempts=3)
+
     async def process_voice_input(
         self,
         text: str,
@@ -33,13 +32,15 @@ class AIGatewayClient:
         session_id: str,
         conversation_history: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
-        """Send voice input to AI Gateway"""
+        """Send voice input to AI Gateway for intent classification + action."""
         logger.info(
             "calling_ai_gateway",
             text_preview=text[:100],
             user_id=user_id,
+            org_id=org_id,
+            session_id=session_id,
         )
-        
+
         payload = {
             "user_id": user_id,
             "org_id": org_id,
@@ -52,67 +53,64 @@ class AIGatewayClient:
             },
             "conversation_history": conversation_history or [],
         }
-        
-        try:
-            response = await self.client.post(
-                "/api/v1/voice/process",
-                json=payload,
-            )
-            
-            response.raise_for_status()
-            result = response.json()
-            
-            logger.info(
-                "ai_gateway_response",
-                intent=result.get("intent"),
-                confidence=result.get("confidence"),
-            )
-            
-            return result
-            
-        except httpx.TimeoutException:
-            logger.error("ai_gateway_timeout")
-            return self._timeout_fallback(text)
-        
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                "ai_gateway_http_error",
-                status=e.response.status_code,
-            )
-            return self._error_fallback()
-        
-        except Exception as e:
-            logger.error("ai_gateway_error", error=str(e))
-            return self._error_fallback()
-    
+
+        # Fresh client per call — avoids event-loop mismatch in livekit-agents worker
+        async with httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=self.timeout,
+        ) as client:
+            try:
+                response = await client.post("/api/v1/voice/process", json=payload)
+                response.raise_for_status()
+                result = response.json()
+
+                logger.info(
+                    "ai_gateway_response",
+                    intent=result.get("intent"),
+                    success=result.get("success"),
+                )
+                return result
+
+            except httpx.TimeoutException:
+                logger.error("ai_gateway_timeout")
+                return self._timeout_fallback(text)
+
+            except httpx.HTTPStatusError as e:
+                logger.error("ai_gateway_http_error", status=e.response.status_code,
+                             body=e.response.text[:300])
+                return self._error_fallback()
+
+            except Exception as e:
+                logger.error("ai_gateway_error", error=str(e))
+                return self._error_fallback()
+
     def _timeout_fallback(self, text: str) -> Dict[str, Any]:
-        """Fallback when AI Gateway times out"""
         return {
             "response_text": "Processing your request. Please hold on.",
             "intent": "TIMEOUT",
             "confidence": 0.0,
         }
-    
+
     def _error_fallback(self) -> Dict[str, Any]:
-        """Fallback when AI Gateway fails"""
         return {
             "response_text": "I'm having trouble right now. Please try again.",
             "intent": "ERROR",
             "confidence": 0.0,
         }
-    
+
     async def health_check(self) -> bool:
-        """Check if AI Gateway is healthy"""
+        """Check if AI Gateway is healthy."""
         try:
-            response = await self.client.get("/api/v1/health", timeout=5.0)
-            return response.status_code == 200
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=5.0) as c:
+                r = await c.get("/api/v1/health")
+                return r.status_code == 200
         except Exception:
             return False
-    
+
     async def close(self):
-        """Cleanup"""
-        await self.client.aclose()
+        """No-op — clients are per-request now."""
+        pass
 
 
-# Singleton
+# Singleton — safe because no AsyncClient is created at module level anymore
 ai_gateway_client = AIGatewayClient()

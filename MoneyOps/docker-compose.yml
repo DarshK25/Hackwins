@@ -1,0 +1,121 @@
+# =============================================================
+#  MoneyOps — Full Project Docker Compose
+#
+#  Starts ALL services:
+#    - redis        (cache)        → localhost:6379
+#    - backend      (Spring Boot)  → localhost:8000
+#    - ai-gateway   (FastAPI)      → localhost:8001
+#    - voice-service(LiveKit)      → localhost:8003
+#    - frontend     (React/nginx)  → localhost:3000
+#
+#  Usage:
+#    Start all:    docker-compose up -d
+#    Stop all:     docker-compose down
+#    Logs:         docker-compose logs -f
+#    Rebuild one:  docker-compose up -d --build backend
+# =============================================================
+
+services:
+
+  # ── Redis (cache for AI Gateway) ────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: moneyops-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend (Spring Boot) ────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: moneyops-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Override Redis host to use Docker service name
+      REDIS_HOST: redis
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── AI Gateway (FastAPI) ─────────────────────────────────────
+  ai-gateway:
+    build:
+      context: ./ai-gateway
+      dockerfile: Dockerfile
+    container_name: moneyops-ai-gateway
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      # Override Redis host to use Docker service name
+      REDIS_HOST: redis
+      # Override backend URL to use Docker service name
+      BACKEND_BASE_URL: http://backend:8000
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8001/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── Voice Service (LiveKit Agent) ────────────────────────────
+  voice-service:
+    build:
+      context: ./voice-service
+      dockerfile: Dockerfile
+    container_name: moneyops-voice-service
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+    env_file:
+      - .env
+    environment:
+      # Override AI Gateway URL to use Docker service name
+      AI_GATEWAY_URL: http://ai-gateway:8001
+    depends_on:
+      ai-gateway:
+        condition: service_started
+
+  # ── Frontend (React → nginx) ─────────────────────────────────
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    container_name: moneyops-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+      - ai-gateway
+
+volumes:
+  redis_data:
+    driver: local

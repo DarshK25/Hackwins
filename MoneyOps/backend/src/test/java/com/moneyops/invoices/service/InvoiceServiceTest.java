@@ -6,7 +6,6 @@ import com.moneyops.invoices.entity.Invoice;
 import com.moneyops.invoices.entity.InvoiceStatus;
 import com.moneyops.invoices.mapper.InvoiceMapper;
 import com.moneyops.invoices.repository.InvoiceRepository;
-import com.moneyops.invoices.repository.InvoiceItemRepository;
 import com.moneyops.invoices.validator.InvoiceValidator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,8 +28,6 @@ public class InvoiceServiceTest {
     @Mock
     private InvoiceRepository invoiceRepository;
 
-    @Mock
-    private InvoiceItemRepository invoiceItemRepository;
 
     @Mock
     private InvoiceMapper invoiceMapper;
@@ -49,7 +46,7 @@ public class InvoiceServiceTest {
         dto.setInvoiceNumber("INV-001");
 
         Invoice invoice = new Invoice();
-        invoice.setId(UUID.randomUUID());
+        invoice.setId(UUID.randomUUID().toString());
 
         when(invoiceMapper.toEntity(dto)).thenReturn(invoice);
         when(invoiceRepository.save(any(Invoice.class))).thenReturn(invoice);
@@ -64,7 +61,7 @@ public class InvoiceServiceTest {
 
     @Test
     public void testGetInvoiceById() {
-        UUID id = UUID.randomUUID();
+        String id = UUID.randomUUID().toString();
         UUID orgId = UUID.randomUUID();
         Invoice invoice = new Invoice();
         InvoiceDto dto = new InvoiceDto();
@@ -79,7 +76,7 @@ public class InvoiceServiceTest {
 
     @Test
     public void testSendInvoice() {
-        UUID id = UUID.randomUUID();
+        String id = UUID.randomUUID().toString();
         UUID orgId = UUID.randomUUID();
         Invoice invoice = new Invoice();
         invoice.setStatus(InvoiceStatus.DRAFT);
@@ -96,7 +93,7 @@ public class InvoiceServiceTest {
 
     @Test
     public void testMarkPaid() {
-        UUID id = UUID.randomUUID();
+        String id = UUID.randomUUID().toString();
         UUID orgId = UUID.randomUUID();
         Invoice invoice = new Invoice();
         invoice.setStatus(InvoiceStatus.SENT);

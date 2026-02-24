@@ -39,7 +39,17 @@ export default function App() {
                 <Route path="/sign-in/*" element={<SignInPage />} />
                 <Route path="/sign-up/*" element={<SignUpPage />} />
 
-                {/* Dashboard Routes (Sidebar + Voice Agent) - Protected by Clerk */}
+                {/* Onboarding — protected (must be signed in) but no sidebar */}
+                <Route
+                    path="/onboarding"
+                    element={
+                        <ProtectedRoute>
+                            <OnboardingPage />
+                        </ProtectedRoute>
+                    }
+                />
+
+                {/* Dashboard Routes (Sidebar + Voice Agent) */}
                 <Route
                     element={
                         <ProtectedRoute>
@@ -47,7 +57,6 @@ export default function App() {
                         </ProtectedRoute>
                     }
                 >
-                    <Route path="/onboarding" element={<OnboardingPage />} />
                     <Route path="/clients" element={<ClientsPage />} />
                     <Route path="/cashflow" element={<CashflowPage />} />
                     <Route path="/finances" element={<FinancesPage />} />

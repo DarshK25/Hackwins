@@ -23,7 +23,7 @@ public class PageResponse<T> {
     private boolean last;
 
     public static <T> PageResponse<T> from(Page<T> page) {
-        return new PageResponse<>(
+        return new PageResponse<T>(
             page.getContent(),
             page.getNumber(),
             page.getSize(),

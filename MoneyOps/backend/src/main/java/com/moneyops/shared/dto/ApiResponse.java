@@ -15,18 +15,18 @@ public class ApiResponse<T> {
     private String timestamp;
 
     public static <T> ApiResponse<T> success(T data) {
-        return new ApiResponse<>(true, "Success", data, java.time.LocalDateTime.now().toString());
+        return new ApiResponse<T>(true, "Success", data, java.time.LocalDateTime.now().toString());
     }
 
     public static <T> ApiResponse<T> success(String message, T data) {
-        return new ApiResponse<>(true, message, data, java.time.LocalDateTime.now().toString());
+        return new ApiResponse<T>(true, message, data, java.time.LocalDateTime.now().toString());
     }
 
     public static <T> ApiResponse<T> error(String message) {
-        return new ApiResponse<>(false, message, null, java.time.LocalDateTime.now().toString());
+        return new ApiResponse<T>(false, message, null, java.time.LocalDateTime.now().toString());
     }
 
     public static ApiResponse<ErrorResponse> error(ErrorResponse errorResponse) {
-        return new ApiResponse<>(false, errorResponse.getMessage(), errorResponse, java.time.LocalDateTime.now().toString());
+        return new ApiResponse<ErrorResponse>(false, errorResponse.getMessage(), errorResponse, java.time.LocalDateTime.now().toString());
     }
 }

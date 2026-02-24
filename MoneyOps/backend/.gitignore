@@ -22,6 +22,9 @@ hs_err_pid*.log
 
 #  Logs 
 *.log
+compile_errors*.txt
+startup_log*.txt
+test_errors.txt
 
 #  IDE 
 .idea/

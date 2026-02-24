@@ -1,6 +1,6 @@
 package com.moneyops.documents.controller;
 
-import com.moneyops.documents.entity.Document;
+import com.moneyops.documents.entity.MoneyOpsDocument;
 import com.moneyops.documents.service.DocumentService;
 import com.moneyops.shared.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -22,25 +22,25 @@ public class DocumentController {
 
     @GetMapping("/org/{orgId}")
     @Operation(summary = "Get all documents for an organization")
-    public ResponseEntity<ApiResponse<List<Document>>> getDocumentsByOrg(@PathVariable UUID orgId) {
+    public ResponseEntity<ApiResponse<List<MoneyOpsDocument>>> getDocumentsByOrg(@PathVariable UUID orgId) {
         return ResponseEntity.ok(ApiResponse.success(documentService.getDocumentsByOrg(orgId)));
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "Get document by ID")
-    public ResponseEntity<ApiResponse<Document>> getDocumentById(@PathVariable UUID id) {
+    public ResponseEntity<ApiResponse<MoneyOpsDocument>> getDocumentById(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(documentService.getDocumentById(id)));
     }
 
     @PostMapping
     @Operation(summary = "Create document metadata")
-    public ResponseEntity<ApiResponse<Document>> createDocument(@RequestBody Document document) {
+    public ResponseEntity<ApiResponse<MoneyOpsDocument>> createDocument(@RequestBody MoneyOpsDocument document) {
         return ResponseEntity.ok(ApiResponse.success(documentService.createDocumentMetadata(document)));
     }
 
     @GetMapping("/entity/{entityType}/{entityId}")
     @Operation(summary = "Get documents linked to a specific entity")
-    public ResponseEntity<ApiResponse<List<Document>>> getDocumentsByEntity(
+    public ResponseEntity<ApiResponse<List<MoneyOpsDocument>>> getDocumentsByEntity(
             @PathVariable String entityType,
             @PathVariable UUID entityId) {
         return ResponseEntity.ok(ApiResponse.success(documentService.getDocumentsByEntity(entityType, entityId)));

@@ -4,8 +4,20 @@ import { AppSidebar } from "@/components/AppSidebar"
 import { Outlet } from "react-router-dom"
 import { VoiceCallAgent } from "./VoiceCallAgent"
 import { Separator } from "@/components/ui/separator"
+import { useCallback } from "react"
 
 export default function DashboardLayout() {
+    // Fired by VoiceCallAgent when an invoice is successfully created via voice.
+    // Dispatches a custom window event so any mounted page (e.g. InvoicesPage)
+    // can refresh its data without needing prop-drilling.
+    const handleVoiceAction = useCallback((action) => {
+        if (action.type === "invoice_created") {
+            window.dispatchEvent(new CustomEvent("voice:invoice-created"));
+        } else if (action.type === "client_created") {
+            window.dispatchEvent(new CustomEvent("voice:client-created"));
+        }
+    }, []);
+
     return (
         <SidebarProvider>
             <AppSidebar />
@@ -17,7 +29,7 @@ export default function DashboardLayout() {
                 <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
                     <Outlet />
                 </div>
-                <VoiceCallAgent />
+                <VoiceCallAgent onActionExec={handleVoiceAction} />
             </SidebarInset>
         </SidebarProvider>
     )

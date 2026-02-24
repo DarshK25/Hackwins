@@ -1,17 +1,14 @@
-// src/main/java/com/moneyops/audit/repository/AuditLogRepository.java
 package com.moneyops.audit.repository;
 
 import com.moneyops.audit.entity.AuditLog;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
+import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
-import java.time.LocalDateTime;
+
 import java.util.List;
 import java.util.UUID;
 
 @Repository
-public interface AuditLogRepository extends JpaRepository<AuditLog, UUID> {
+public interface AuditLogRepository extends MongoRepository<AuditLog, UUID> {
 
     List<AuditLog> findByOrgIdOrderByTimestampDesc(UUID orgId);
 
@@ -21,12 +18,7 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, UUID> {
 
     List<AuditLog> findByOrgIdAndUserIdOrderByTimestampDesc(UUID orgId, UUID userId);
 
-    @Query("SELECT a FROM AuditLog a WHERE a.orgId = :orgId AND a.timestamp BETWEEN :start AND :end ORDER BY a.timestamp DESC")
-    List<AuditLog> findByOrgIdAndTimestampBetween(@Param("orgId") UUID orgId,
-                                                  @Param("start") LocalDateTime start,
-                                                  @Param("end") LocalDateTime end);
+    List<AuditLog> findByOrgIdAndOperation(UUID orgId, AuditLog.Operation operation);
 
-    @Query("SELECT a FROM AuditLog a WHERE a.orgId = :orgId AND a.operation = :operation ORDER BY a.timestamp DESC")
-    List<AuditLog> findByOrgIdAndOperation(@Param("orgId") UUID orgId,
-                                           @Param("operation") AuditLog.Operation operation);
+    List<AuditLog> findByOrgIdAndTimestampBetween(UUID orgId, java.time.LocalDateTime start, java.time.LocalDateTime end);
 }

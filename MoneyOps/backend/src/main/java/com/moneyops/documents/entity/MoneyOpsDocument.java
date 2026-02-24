@@ -1,23 +1,18 @@
-// documents/entity/Document.java
 package com.moneyops.documents.entity;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
 import lombok.Data;
-import java.time.LocalDateTime;
-import java.util.UUID; 
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.Document;
 
-@Entity
-@Table(name = "documents")
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+@Document(collection = "documents")
 @Data
-public class Document {
+public class MoneyOpsDocument {
 
     @Id
-    @GeneratedValue
-    private UUID id;
+    private UUID id = UUID.randomUUID();
 
     private UUID orgId;
     private String name;
@@ -29,6 +24,5 @@ public class Document {
     private UUID uploadedBy;
     private String linkedEntityType;
     private UUID linkedEntityId;
-
-    private LocalDateTime createdAt;
+    private LocalDateTime createdAt = LocalDateTime.now();
 }

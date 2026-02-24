@@ -19,6 +19,10 @@ public class InvoiceMapper {
         dto.setId(invoice.getId());
         dto.setInvoiceNumber(invoice.getInvoiceNumber());
         dto.setClientId(invoice.getClientId());
+        dto.setClientName(invoice.getClientName());
+        dto.setClientEmail(invoice.getClientEmail());
+        dto.setClientCompany(invoice.getClientCompany());
+        dto.setClientPhone(invoice.getClientPhone());
         dto.setIssueDate(invoice.getIssueDate());
         dto.setDueDate(invoice.getDueDate());
         dto.setStatus(invoice.getStatus().name());
@@ -38,9 +42,15 @@ public class InvoiceMapper {
 
     public Invoice toEntity(InvoiceDto dto) {
         Invoice invoice = new Invoice();
-        invoice.setId(dto.getId());
+        if (dto.getId() != null) {
+            invoice.setId(dto.getId());
+        }
         invoice.setInvoiceNumber(dto.getInvoiceNumber());
         invoice.setClientId(dto.getClientId());
+        invoice.setClientName(dto.getClientName());
+        invoice.setClientEmail(dto.getClientEmail());
+        invoice.setClientCompany(dto.getClientCompany());
+        invoice.setClientPhone(dto.getClientPhone());
         invoice.setIssueDate(dto.getIssueDate());
         invoice.setDueDate(dto.getDueDate());
         invoice.setStatus(InvoiceStatus.valueOf(dto.getStatus()));
@@ -73,7 +83,6 @@ public class InvoiceMapper {
 
     private InvoiceItem toItemEntity(InvoiceItemDto dto, Invoice invoice) {
         InvoiceItem item = new InvoiceItem();
-        item.setInvoice(invoice);
         item.setType(InvoiceItem.ItemType.valueOf(dto.getType()));
         item.setDescription(dto.getDescription());
         item.setQuantity(dto.getQuantity());

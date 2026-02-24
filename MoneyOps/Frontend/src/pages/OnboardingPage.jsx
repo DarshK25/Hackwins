@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useUser } from "@clerk/clerk-react";
 import {
     Card,
     CardContent,
@@ -10,11 +12,14 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Building2, Users } from "lucide-react";
 import { toast } from "sonner";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 
 import { BusinessInfoStep } from "@/components/onboarding/BusinessInfoStep";
 import { RegulatoryInfoStep } from "@/components/onboarding/RegulatoryInfoStep";
 import { BusinessContextStep } from "@/components/onboarding/BusinessContextStep";
 import { InviteCodeStep } from "@/components/onboarding/InviteCodeStep";
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
 // Step sequences per mode
 const STEP_SEQUENCES = {
@@ -23,6 +28,9 @@ const STEP_SEQUENCES = {
 };
 
 export default function OnboardingPage() {
+    const { user } = useUser();
+    const navigate = useNavigate();
+    const { refetch } = useOnboardingStatus();
     const [mode, setMode] = useState("choose"); // 'choose' | 'new-business' | 'join-business'
     const [currentStep, setCurrentStep] = useState("welcome");
     const [formData, setFormData] = useState({});
@@ -66,27 +74,37 @@ export default function OnboardingPage() {
         try {
             const endpoint =
                 mode === "new-business"
-                    ? "/api/onboarding/create-business"
-                    : "/api/onboarding/join-business";
+                    ? `${BACKEND_URL}/api/onboarding/create-business`
+                    : `${BACKEND_URL}/api/onboarding/join-business`;
+
+            // Build payload:
+            // - legalName  = company name from Step 1 (sent as "name" by BusinessInfoStep)
+            // - name       = Clerk user's personal name (stored on the User document)
+            const payload = {
+                ...finalData,
+                legalName: finalData.name,          // company name from Step 1
+                clerkId: user?.id,
+                email: user?.primaryEmailAddress?.emailAddress,
+                name: user?.fullName || user?.firstName || "User", // person's name
+            };
 
             const response = await fetch(endpoint, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(finalData),
+                body: JSON.stringify(payload),
             });
 
             if (!response.ok) {
                 const error = await response.json();
-                throw new Error(error.error || "Failed to complete onboarding");
+                throw new Error(error.error || error.message || "Failed to complete onboarding");
             }
 
-            toast.success("Onboarding completed successfully! Redirecting to dashboard…");
-            setTimeout(() => {
-                window.location.href = "/dashboard";
-            }, 1500);
+            toast.success("Welcome to MoneyOps! Taking you to your dashboard…");
+            await refetch();
+            setTimeout(() => navigate("/finances", { replace: true }), 1200);
         } catch (error) {
             console.error("Onboarding error:", error);
-            toast.error(error.message || "Failed to complete onboarding");
+            toast.error(error.message || "Failed to complete onboarding. Please try again.");
         } finally {
             setLoading(false);
         }

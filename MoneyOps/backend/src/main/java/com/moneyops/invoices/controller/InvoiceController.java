@@ -1,8 +1,8 @@
-// src/main/java/com/moneyops/invoices/controller/InvoiceController.java
 package com.moneyops.invoices.controller;
 
 import com.moneyops.invoices.dto.InvoiceDto;
 import com.moneyops.invoices.service.InvoiceService;
+import com.moneyops.shared.utils.OrgContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,71 +17,69 @@ public class InvoiceController {
 
     private final InvoiceService invoiceService;
 
-    // Assume orgId and userId come from security context or headers
-    // For now, pass as headers or params, but in real app, from JWT
-
     @PostMapping
-    public ResponseEntity<InvoiceDto> createInvoice(@RequestBody InvoiceDto dto,
-                                                    @RequestHeader("X-Org-Id") UUID orgId,
-                                                    @RequestHeader("X-User-Id") UUID userId) {
+    public ResponseEntity<InvoiceDto> createInvoice(@RequestBody InvoiceDto dto) {
+        UUID orgId = OrgContext.getOrgId();
+        UUID userId = OrgContext.getUserId();
+        
+        if (orgId == null) throw new RuntimeException("Organization context missing");
+        
         InvoiceDto created = invoiceService.createInvoice(dto, orgId, userId);
         return ResponseEntity.ok(created);
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<InvoiceDto> updateInvoice(@PathVariable UUID id,
-                                                    @RequestBody InvoiceDto dto,
-                                                    @RequestHeader("X-Org-Id") UUID orgId) {
-        InvoiceDto updated = invoiceService.updateInvoice(id, dto, orgId);
-        return ResponseEntity.ok(updated);
-    }
-
-    @PatchMapping("/{id}")
-    public ResponseEntity<InvoiceDto> partialUpdateInvoice(@PathVariable UUID id,
-                                                           @RequestBody InvoiceDto dto,
-                                                           @RequestHeader("X-Org-Id") UUID orgId) {
-        // For partial update, only update provided fields
-        // But for simplicity, use full update for now
+    public ResponseEntity<InvoiceDto> updateInvoice(@PathVariable String id, @RequestBody InvoiceDto dto) {
+        UUID orgId = OrgContext.getOrgId();
         InvoiceDto updated = invoiceService.updateInvoice(id, dto, orgId);
         return ResponseEntity.ok(updated);
     }
 
     @GetMapping
-    public ResponseEntity<List<InvoiceDto>> getAllInvoices(@RequestHeader("X-Org-Id") UUID orgId) {
-        List<InvoiceDto> invoices = invoiceService.getAllInvoices(orgId);
+    public ResponseEntity<List<InvoiceDto>> getAllInvoices(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false, name = "client_name") String clientName,
+            @RequestParam(defaultValue = "50") int limit) {
+        UUID orgId = OrgContext.getOrgId();
+        if (orgId == null) return ResponseEntity.ok(List.of());
+        List<InvoiceDto> invoices = invoiceService.searchInvoices(orgId, status, clientName, limit);
         return ResponseEntity.ok(invoices);
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<InvoiceDto> getInvoice(@PathVariable UUID id,
-                                                 @RequestHeader("X-Org-Id") UUID orgId) {
+    public ResponseEntity<InvoiceDto> getInvoice(@PathVariable String id) {
+        UUID orgId = OrgContext.getOrgId();
+        if (orgId == null) {
+            return ResponseEntity.status(403).build(); // Forbidden if context is missing
+        }
         InvoiceDto invoice = invoiceService.getInvoiceById(id, orgId);
         return ResponseEntity.ok(invoice);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteInvoice(@PathVariable UUID id,
-                                              @RequestHeader("X-Org-Id") UUID orgId) {
+    public ResponseEntity<Void> deleteInvoice(@PathVariable String id) {
+        UUID orgId = OrgContext.getOrgId();
         invoiceService.deleteInvoice(id, orgId);
         return ResponseEntity.noContent().build();
     }
 
     @PatchMapping("/{id}/send")
-    public ResponseEntity<InvoiceDto> sendInvoice(@PathVariable UUID id,
-                                                  @RequestHeader("X-Org-Id") UUID orgId) {
+    public ResponseEntity<InvoiceDto> sendInvoice(@PathVariable String id) {
+        UUID orgId = OrgContext.getOrgId();
         InvoiceDto sent = invoiceService.sendInvoice(id, orgId);
         return ResponseEntity.ok(sent);
     }
 
     @PatchMapping("/{id}/mark-paid")
-    public ResponseEntity<InvoiceDto> markPaid(@PathVariable UUID id,
-                                               @RequestHeader("X-Org-Id") UUID orgId) {
+    public ResponseEntity<InvoiceDto> markPaid(@PathVariable String id) {
+        UUID orgId = OrgContext.getOrgId();
         InvoiceDto paid = invoiceService.markPaid(id, orgId);
         return ResponseEntity.ok(paid);
     }
 
     @GetMapping("/overdue")
-    public ResponseEntity<List<InvoiceDto>> getOverdueInvoices(@RequestHeader("X-Org-Id") UUID orgId) {
+    public ResponseEntity<List<InvoiceDto>> getOverdueInvoices() {
+        UUID orgId = OrgContext.getOrgId();
         List<InvoiceDto> overdue = invoiceService.getOverdueInvoices(orgId);
         return ResponseEntity.ok(overdue);
     }

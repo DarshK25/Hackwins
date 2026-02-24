@@ -17,6 +17,7 @@ import {
     Search,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -27,30 +28,45 @@ import {
 // ── Status badge styles ───────────────────────────────────────────────────────
 
 const STATUS_CLASSES = {
-    paid: "bg-green-500/10 text-green-600 hover:bg-green-500/20",
-    sent: "bg-blue-500/10 text-blue-600 hover:bg-blue-500/20",
-    overdue: "bg-red-500/10 text-red-600 hover:bg-red-500/20",
-    draft: "bg-slate-500/10 text-slate-500 hover:bg-slate-500/20",
+    PAID: "bg-green-500/10 text-green-600 hover:bg-green-500/20",
+    SENT: "bg-blue-500/10 text-blue-600 hover:bg-blue-500/20",
+    OVERDUE: "bg-red-500/10 text-red-600 hover:bg-red-500/20",
+    DRAFT: "bg-slate-500/10 text-slate-500 hover:bg-slate-500/20",
 };
 
 const getStatusClass = (status) =>
-    STATUS_CLASSES[status] ?? STATUS_CLASSES.draft;
+    STATUS_CLASSES[status] ?? STATUS_CLASSES.DRAFT;
 
 // ── Filter tab config ─────────────────────────────────────────────────────────
 
-const TABS = ["all", "draft", "sent", "paid", "overdue"];
+const TABS = ["ALL", "DRAFT", "SENT", "PAID", "OVERDUE"];
 
 export default function InvoicesPage() {
-    const { getToken } = useAuth();
+    const { getToken, isLoaded, isSignedIn, userId } = useAuth();
+    const { orgId } = useOnboardingStatus();
     const navigate = useNavigate();
     const [invoices, setInvoices] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState("all");
+    const [activeTab, setActiveTab] = useState("ALL");
     const [searchQuery, setSearchQuery] = useState("");
     const [actionLoading, setActionLoading] = useState(null);
 
     useEffect(() => {
-        fetchInvoices();
+        if (isLoaded && isSignedIn) {
+            fetchInvoices();
+        } else if (isLoaded && !isSignedIn) {
+            setInvoices([]);
+            setLoading(false);
+        }
+    }, [isLoaded, isSignedIn]);
+
+    // Auto-refresh whenever a voice invoice is created from the VoiceCallAgent
+    useEffect(() => {
+        const handler = () => {
+            fetchInvoices();
+        };
+        window.addEventListener("voice:invoice-created", handler);
+        return () => window.removeEventListener("voice:invoice-created", handler);
     }, []);
 
     // ── API ───────────────────────────────────────────────────────────────────
@@ -60,11 +76,15 @@ export default function InvoicesPage() {
             setLoading(true);
             const token = await getToken();
             const res = await fetch("/api/invoices", {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "X-User-Id": userId,
+                    "X-Org-Id": orgId || "placeholder-org"
+                }
             });
             if (!res.ok) throw new Error("Failed to fetch");
             const data = await res.json();
-            setInvoices(data.invoices || []);
+            setInvoices(Array.isArray(data) ? data : []);
         } catch {
             toast.error("Failed to load invoices");
             setInvoices([]);
@@ -88,7 +108,11 @@ export default function InvoicesPage() {
             const token = await getToken();
             const res = await fetch(`/api/invoices/${invoice.id}/send`, {
                 method: "POST",
-                headers: { Authorization: `Bearer ${token}` }
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "X-User-Id": userId,
+                    "X-Org-Id": orgId || "placeholder-org"
+                }
             });
             const data = await res.json();
             if (!res.ok || !data.success) throw new Error(data.message || "Failed to send");
@@ -108,7 +132,11 @@ export default function InvoicesPage() {
             toast.info("Generating PDF…");
             const token = await getToken();
             const res = await fetch(`/api/invoices/${invoice.id}/download`, {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "X-User-Id": userId,
+                    "X-Org-Id": orgId || "placeholder-org"
+                }
             });
             if (!res.ok) throw new Error("Failed to generate PDF");
 
@@ -134,17 +162,17 @@ export default function InvoicesPage() {
 
     const stats = {
         total: invoices.length,
-        paid: invoices.filter((inv) => inv.status === "paid").length,
-        pending: invoices.filter((inv) => inv.status === "sent" || inv.status === "draft").length,
-        overdue: invoices.filter((inv) => inv.status === "overdue").length,
+        paid: invoices.filter((inv) => inv.status === "PAID").length,
+        pending: invoices.filter((inv) => inv.status === "SENT" || inv.status === "DRAFT").length,
+        overdue: invoices.filter((inv) => inv.status === "OVERDUE").length,
         paidAmount: invoices
-            .filter((inv) => inv.status === "paid")
-            .reduce((sum, inv) => sum + (inv.total || 0), 0),
+            .filter((inv) => inv.status === "PAID")
+            .reduce((sum, inv) => sum + Number(inv.totalAmount || 0), 0),
     };
 
     const filteredInvoices = invoices.filter((invoice) => {
         const statusMatch =
-            activeTab === "all" || invoice.status === activeTab;
+            activeTab === "ALL" || invoice.status === activeTab;
 
         const searchMatch =
             !searchQuery ||
@@ -261,7 +289,7 @@ export default function InvoicesPage() {
                         </div>
                         <h3 className="text-xl font-semibold mb-2">No Invoices Found</h3>
                         <p className="text-slate-500 mb-6 text-center max-w-sm text-sm">
-                            {activeTab === "all"
+                            {activeTab === "ALL"
                                 ? "Create your first invoice to get started with billing."
                                 : `No ${activeTab} invoices found.`}
                         </p>
@@ -288,7 +316,7 @@ export default function InvoicesPage() {
                                             </Badge>
                                         </div>
                                         <p className="text-sm text-slate-500">
-                                            {invoice.client?.name || invoice.description || "No client"}
+                                            {invoice.clientName || invoice.description || "No client"}
                                         </p>
                                     </div>
 
@@ -335,7 +363,7 @@ export default function InvoicesPage() {
                                     <div>
                                         <p className="text-slate-400 mb-1">Amount</p>
                                         <p className="font-semibold text-base">
-                                            ₹{invoice.total?.toLocaleString("en-IN")}
+                                            ₹{invoice.totalAmount?.toLocaleString("en-IN")}
                                         </p>
                                     </div>
                                     <div>
@@ -353,8 +381,8 @@ export default function InvoicesPage() {
                                     <div>
                                         <p className="text-slate-400 mb-1">Payment</p>
                                         <p className="font-medium">
-                                            {invoice.paidDate
-                                                ? new Date(invoice.paidDate).toLocaleDateString()
+                                            {invoice.paymentDate
+                                                ? new Date(invoice.paymentDate).toLocaleDateString()
                                                 : "Not paid"}
                                         </p>
                                     </div>

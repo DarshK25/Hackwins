@@ -1,25 +1,20 @@
-// src/main/java/com/moneyops/organizations/repository/BusinessOrganizationRepository.java
 package com.moneyops.organizations.repository;
 
 import com.moneyops.organizations.entity.BusinessOrganization;
-import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-public interface BusinessOrganizationRepository extends JpaRepository<BusinessOrganization, UUID> {
+@Repository
+public interface BusinessOrganizationRepository extends MongoRepository<BusinessOrganization, UUID> {
 
     Optional<BusinessOrganization> findByIdAndCreatedBy(UUID id, UUID createdBy);
-
     List<BusinessOrganization> findAllByCreatedBy(UUID createdBy);
-
     void deleteByIdAndCreatedBy(UUID id, UUID createdBy);
-
     boolean existsByIdAndCreatedBy(UUID id, UUID createdBy);
-
     Optional<BusinessOrganization> findByLegalNameAndCreatedBy(String legalName, UUID createdBy);
-
-    // Search with filters
     List<BusinessOrganization> findByCreatedByAndLegalNameContainingIgnoreCase(UUID createdBy, String legalName);
 }

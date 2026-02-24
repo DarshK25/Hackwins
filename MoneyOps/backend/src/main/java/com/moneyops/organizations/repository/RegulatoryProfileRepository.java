@@ -1,13 +1,12 @@
-// src/main/java/com/moneyops/organizations/repository/RegulatoryProfileRepository.java
 package com.moneyops.organizations.repository;
 
 import com.moneyops.organizations.entity.RegulatoryProfile;
-import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.mongodb.repository.MongoRepository;
 
 import java.util.Optional;
 import java.util.UUID;
 
-public interface RegulatoryProfileRepository extends JpaRepository<RegulatoryProfile, UUID> {
+public interface RegulatoryProfileRepository extends MongoRepository<RegulatoryProfile, UUID> {
 
-    Optional<RegulatoryProfile> findByOrganizationId(UUID orgId);
+    Optional<RegulatoryProfile> findByOrgId(UUID orgId);
 }

@@ -22,6 +22,8 @@ public class ClientMapper {
         dto.setPostalCode(client.getPostalCode());
         dto.setPaymentTerms(client.getPaymentTerms());
         dto.setCurrency(client.getCurrency());
+        dto.setCompany(client.getCompany());
+        dto.setNotes(client.getNotes());
         dto.setStatus(client.getStatus().name());
         dto.setCreatedAt(client.getCreatedAt());
         dto.setUpdatedAt(client.getUpdatedAt());
@@ -32,7 +34,10 @@ public class ClientMapper {
 
     public Client toEntity(ClientDto dto) {
         Client client = new Client();
-        client.setId(dto.getId());
+        // Only set id if explicitly provided — new clients auto-generate UUID in the entity
+        if (dto.getId() != null) {
+            client.setId(dto.getId());
+        }
         client.setName(dto.getName());
         client.setTaxId(dto.getTaxId());
         client.setEmail(dto.getEmail());
@@ -44,6 +49,8 @@ public class ClientMapper {
         client.setPostalCode(dto.getPostalCode());
         client.setPaymentTerms(dto.getPaymentTerms());
         client.setCurrency(dto.getCurrency());
+        client.setCompany(dto.getCompany());
+        client.setNotes(dto.getNotes());
         if (dto.getStatus() != null) {
             client.setStatus(Client.Status.valueOf(dto.getStatus()));
         }

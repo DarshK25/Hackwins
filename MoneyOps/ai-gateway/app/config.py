@@ -1,10 +1,18 @@
 """
 Configuration management for AI Gateway
 """
-from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
-from typing import Optional
+from pathlib import Path
 from functools import lru_cache
+from typing import Optional
+
+# Load the shared root .env FIRST — before pydantic-settings reads env vars.
+# This matches the pattern used by voice-service and ensures LiveKit credentials
+# are always present regardless of the CWD when uvicorn is started.
+from dotenv import load_dotenv as _load_dotenv
+_ROOT_ENV = Path(__file__).resolve().parents[2] / ".env"
+_load_dotenv(dotenv_path=_ROOT_ENV, override=True)
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -39,12 +47,16 @@ class Settings(BaseSettings):
     # Backend Services
     BACKEND_BASE_URL: str = "http://localhost:8000"
     BACKEND_TIMEOUT: int = 30
+    # Shared secret for service-to-service auth (AI-Gateway → Spring Boot backend)
+    INTERNAL_SERVICE_TOKEN: str = "moneyops-internal-ai-gateway-service-secret-2024"
+
     
     # Redis
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[str] = None
+    REDIS_TLS: bool = False  # Set True for Upstash / cloud Redis
     
     # Cache TTL (seconds)
     CACHE_TTL_SHORT: int = 300  # 5 minutes
@@ -76,7 +88,12 @@ class Settings(BaseSettings):
     LIVEKIT_API_KEY: Optional[str] = None
     LIVEKIT_API_SECRET: Optional[str] = None
     
-    model_config = ConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=True)
+    model_config = SettingsConfigDict(
+        env_file=str(_ROOT_ENV),
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",  # silently skip VITE_*, MONGODB_URI, etc. from the shared .env
+    )
 
 
 @lru_cache()

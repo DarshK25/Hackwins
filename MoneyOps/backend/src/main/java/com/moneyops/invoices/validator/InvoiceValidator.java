@@ -12,8 +12,8 @@ import java.util.List;
 public class InvoiceValidator {
 
     public void validate(InvoiceDto dto) {
-        if (dto.getInvoiceNumber() == null || dto.getInvoiceNumber().isEmpty()) {
-            throw new IllegalArgumentException("Invoice number is required");
+        if (dto.getStatus() == null) {
+            dto.setStatus("DRAFT");
         }
         if (dto.getClientId() == null) {
             throw new IllegalArgumentException("Client ID is required");

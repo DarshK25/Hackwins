@@ -1,61 +1,40 @@
-// src/main/java/com/moneyops/transactions/entity/Transaction.java
 package com.moneyops.transactions.entity;
 
-import jakarta.persistence.*;
 import lombok.Data;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.mapping.Document;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-@Entity
-@Table(name = "transactions")
+@Document(collection = "transactions")
+@CompoundIndex(name = "org_index", def = "{'orgId': 1}")
 @Data
 public class Transaction {
+
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
+    private UUID id = UUID.randomUUID();
 
-    @Column(nullable = false)
     private UUID orgId;
-
-    private UUID clientId; // null if expense
-
-    private UUID invoiceId; // null if not related to invoice
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private TransactionType type; // INCOME or EXPENSE
-
-    @Column(nullable = false, precision = 19, scale = 2)
+    private UUID clientId;      // null if expense unrelated to a client
+    private UUID invoiceId;     // null if not linked to an invoice
+    private TransactionType type;
     private BigDecimal amount;
-
-    @Column(nullable = false)
     private String currency = "INR";
-
-    @Column(nullable = false)
     private LocalDate transactionDate;
-
-    @Column(nullable = false)
-    private String category; // e.g., "Payment Received", "Office Rent", "Salary"
-
-    @Column(columnDefinition = "TEXT")
+    private String category;
     private String description;
-
-    private String paymentMethod; // e.g., "Bank Transfer", "Cash", "UPI"
-
-    private String referenceNumber; // Transaction ID, Check number, etc.
+    private String paymentMethod;
+    private String referenceNumber;
 
     // AI classification
-    private String aiCategory; // AI suggested category
-    private Float aiConfidence; // 0.0 to 1.0
+    private String aiCategory;
+    private Float aiConfidence;
 
-    @Column(nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
-
-    @Column(nullable = false)
     private LocalDateTime updatedAt = LocalDateTime.now();
-
-    @Column(nullable = false)
     private UUID createdBy;
 }

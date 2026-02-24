@@ -44,6 +44,7 @@ class ExtractedEntities(BaseModel):
     metric: Optional[str] = None
     problem_area: Optional[str] = None
     time_period: Optional[str] = None
+    gst_percent: Optional[float] = None
     competitor: Optional[str] = None
     target_value: Optional[str] = None
 

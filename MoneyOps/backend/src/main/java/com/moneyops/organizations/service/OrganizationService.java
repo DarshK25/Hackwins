@@ -87,7 +87,7 @@ public class OrganizationService {
         orgRepository.findByIdAndCreatedBy(orgId, userId)
                 .orElseThrow(() -> new RuntimeException("Organization not found"));
 
-        RegulatoryProfile profile = regulatoryRepository.findByOrganizationId(orgId)
+        RegulatoryProfile profile = regulatoryRepository.findByOrgId(orgId)
                 .orElseThrow(() -> new RuntimeException("Regulatory profile not found"));
         return mapper.toRegulatoryDto(profile);
     }
@@ -109,7 +109,7 @@ public class OrganizationService {
 
         validator.validateRegulatory(dto);
 
-        RegulatoryProfile existing = regulatoryRepository.findByOrganizationId(orgId)
+        RegulatoryProfile existing = regulatoryRepository.findByOrgId(orgId)
                 .orElseThrow(() -> new RuntimeException("Regulatory profile not found"));
 
         RegulatoryProfile updated = mapper.toRegulatoryEntity(dto, org);

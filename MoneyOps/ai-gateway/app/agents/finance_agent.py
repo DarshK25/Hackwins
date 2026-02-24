@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 from decimal import Decimal
 from datetime import datetime, timedelta
 import time
+import re
 
 
 from app.agents.base_agent import BaseAgent, AgentResponse, ToolDefinition
@@ -49,6 +50,8 @@ class FinanceAgent(BaseAgent):
             Intent.INVOICE_QUERY,
             Intent.INVOICE_UPDATE,
             Intent.INVOICE_DELETE,
+            Intent.CLIENT_CREATE,
+            Intent.CLIENT_QUERY,
             Intent.PAYMENT_RECORD,
             Intent.PAYMENT_QUERY,
             Intent.BALANCE_CHECK,
@@ -208,6 +211,24 @@ class FinanceAgent(BaseAgent):
             handler=self._handle_record_payment
         )
         
+        # Client Create Tool
+        create_client_tool = Tool(
+            name="create_client",
+            description="Create a new client in the system",
+            category="finance",
+            mvp_ready=True,
+            requires_confirmation=True,
+            parameters=[
+                ToolParameters(name="client_name", type="string", description="Full name of the client", required=True),
+                ToolParameters(name="email", type="string", description="Email address", required=True),
+                ToolParameters(name="phone", type="string", description="Phone number", required=False),
+                ToolParameters(name="tax_id", type="string", description="GST/PAN number", required=False),
+                ToolParameters(name="address", type="string", description="Billing address", required=False),
+                ToolParameters(name="company", type="string", description="Company Name", required=False),
+            ],
+            handler=self._handle_create_client
+        )
+        
         # Balance Check Tool
         check_balance_tool = Tool(
             name="check_balance",
@@ -224,6 +245,7 @@ class FinanceAgent(BaseAgent):
             query_invoices_tool,
             record_payment_tool,
             check_balance_tool,
+            create_client_tool,
         ])
         
         # ========================================
@@ -250,6 +272,40 @@ class FinanceAgent(BaseAgent):
     # MVP TOOL HANDLERS (Operational)
     # ========================================
     
+    async def _handle_create_client(
+        self,
+        params: Dict[str, Any],
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Handle client creation"""
+        org_id = context.get("org_id", "default_org") if context else "default_org"
+        user_id = context.get("user_id") if context else None
+        
+        if not user_id:
+            raise Exception("User ID is missing from context. Please ensure you are logged in.")
+
+        response = await self.backend.create_client(
+            org_id=org_id,
+            user_id=user_id,
+            name=params["client_name"],
+            email=params["email"],
+            phone=params.get("phone") or params.get("phone_number"),
+            address=params.get("address"),
+            tax_id=params.get("tax_id") or params.get("gst_number") or params.get("gst") or params.get("tax"),
+            company=params.get("company") or params.get("company_name")
+        )
+        
+        if response.success:
+            client_data = response.data
+            return {
+                "client_id": client_data.get("id"),
+                "name": client_data.get("name"),
+                "status": "created",
+                "message": f"Client '{client_data.get('name')}' created successfully."
+            }
+        else:
+            raise Exception(response.error or "Failed to create client")
+
     async def _handle_create_invoice(
         self,
         params: Dict[str, Any],
@@ -267,58 +323,168 @@ class FinanceAgent(BaseAgent):
             raise Exception("User ID is missing from context. Please ensure you are logged in.")
 
         # 1. Lookup Client ID by Name
-        client_name = params["client_name"]
-        client_resp = await self.backend.get_client_by_name(org_id, client_name)
+        client_name_query = params["client_name"]
+        logger.info("searching_client", query=client_name_query, org_id=org_id)
+        
+        client_resp = await self.backend.get_client_by_name(org_id, client_name_query)
         
         if not client_resp.success:
             raise Exception(f"Failed to lookup client: {client_resp.error}")
             
         clients = client_resp.data
-        if isinstance(clients, list):
-            if not clients:
-                raise Exception(f"Client '{client_name}' not found. Please create the client first.")
-            client_id = clients[0].get("id")
-        elif isinstance(clients, dict):
-             client_id = clients.get("id")
-        else:
-             raise Exception(f"Unexpected response format for client search")
-             
-        if not client_id:
-            raise Exception(f"Client ID not found for '{client_name}'")
+        client_id = None
+        matched_client_name = client_name_query
 
-        # Generate required fields
+        if isinstance(clients, list) and clients:
+            top_match = clients[0]
+            client_id = top_match.get("id")
+            matched_client_name = top_match.get("name", client_name_query)
+            score = top_match.get("searchScore", 1.0) # Default 1.0 if not provided
+            
+            logger.info("client_match_details", name=matched_client_name, score=score)
+            
+            # Confidence threshold logic
+            if score < 0.85:
+                # Store potential match in state for next turn confirmation
+                # (For now, just ask the user)
+                return {
+                    "status": "partial",
+                    "needs_more_info": True,
+                    "message": f"I found a close match for '{matched_client_name}'. Is that the correct client?",
+                    "intent": "INVOICE_CREATE",
+                    "accumulated_entities": {**params, "client_name": matched_client_name}
+                }
+
+        elif isinstance(clients, dict) and clients.get("id"):
+             client_id = clients.get("id")
+             matched_client_name = clients.get("name", client_name_query)
+        
+        # Update params with canonical name for voice response later
+        params["client_name"] = matched_client_name
+
+        if not client_id:
+            raise Exception(f"Client '{client_name_query}' not found. Please ensure the client exists or create them first.")
+
+        # 2. Build Invoice Data
         invoice_number = f"INV-{int(time.time())}"
         issue_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # Expecting ISO date from voice.py / entity_extractor
         due_date = params.get("due_date")
-        if not due_date:
-            due_date = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
+        gst_percent = float(params.get("gst_percent", 0))
 
-        # 2. Create Invoice
-        response = await self.backend.create_invoice(
-            org_id=org_id,
-            user_id=user_id,
-            client_id=client_id,
-            invoice_number=invoice_number,
-            issue_date=issue_date,
-            items=params["items"],
-            subtotal=float(params["subtotal"]),
-            tax=float(params.get("tax", 0.0)),
-            total=float(params["total"]),
-            due_date=due_date,
-            notes=params.get("notes")
-        )
+        # Normalize items
+        # If no items provided (common in voice), we use the total/amount collected
+        total_amount = float(params.get("total") or params.get("amount", 0))
+        raw_items = params.get("items", [])
+        
+        if not raw_items:
+            # Create a single default item using the collected total and GST
+            subtotal = round(total_amount / (1 + gst_percent/100), 2)
+            tax_amount = round(total_amount - subtotal, 2)
+            
+            normalized_items = [{
+                "description": "General Service",
+                "type": "SERVICE",
+                "quantity": None,
+                "rate": subtotal,
+                "gstPercent": gst_percent,
+                "lineSubtotal": subtotal,
+                "lineGst": tax_amount,
+                "lineTotal": total_amount,
+            }]
+            subtotal_final = subtotal
+            tax_final = tax_amount
+        else:
+            # Process provided items
+            normalized_items = []
+            subtotal_final = 0
+            tax_final = 0
+            for item in raw_items:
+                qty = float(item.get("quantity", 1))
+                rate = float(item.get("unit_price") or item.get("rate") or item.get("amount", 0))
+                item_gst = float(item.get("gstPercent", gst_percent))
+                
+                l_sub = round(qty * rate, 2)
+                l_tax = round(l_sub * item_gst / 100, 2)
+                l_tot = round(l_sub + l_tax, 2)
+                
+                is_service = item.get("type", "SERVICE") == "SERVICE"
+                normalized_items.append({
+                    "description": item.get("description", "Service"),
+                    "type": "SERVICE" if is_service else "PRODUCT",
+                    "quantity": None if is_service else int(qty),
+                    "rate": rate,
+                    "gstPercent": item_gst,
+                    "lineSubtotal": l_sub,
+                    "lineGst": l_tax,
+                    "lineTotal": l_tot,
+                })
+                subtotal_final += l_sub
+                tax_final += l_tax
+
+        # 3. Create Invoice call
+        try:
+            logger.info("attempting_invoice_creation", client_id=client_id, total=total_amount, due_date=due_date)
+            response = await self.backend.create_invoice(
+                org_id=org_id,
+                user_id=user_id,
+                client_id=client_id,
+                invoice_number=invoice_number,
+                issue_date=issue_date,
+                items=normalized_items,
+                subtotal=subtotal_final,
+                tax=tax_final,
+                total=total_amount,
+                due_date=due_date,
+                notes=params.get("notes")
+            )
+        except Exception as e:
+            logger.error("invoice_creation_api_crash", error=str(e), payload={
+                "client_id": client_id,
+                "due_date": due_date,
+                "total": total_amount
+            }, exc_info=True)
+            raise Exception(f"Failed to reach billing service: {str(e)}")
 
         
         if response.success:
-            invoice_data = response.data
+            invoice_data = response.data or {}
+            inv_number = invoice_data.get("invoiceNumber") or invoice_data.get("id", "")
+            total_val = params.get("total", 0)
+            client = params["client_name"]
+            logger.info(
+                "invoice_created_successfully",
+                invoice_id=invoice_data.get("id"),
+                invoice_number=inv_number,
+                client_name=client,
+                total=total_val,
+                user_id=user_id,
+            )
+            # Voice-friendly confirmation message
+            try:
+                formatted_total = f"₹{float(total_val):,.0f}"
+            except Exception:
+                formatted_total = str(total_val)
+            voice_msg = f"Invoice for {formatted_total} created for {client}."
+            if inv_number:
+                voice_msg += f" Invoice number {inv_number}."
             return {
                 "invoice_id": invoice_data.get("id"),
-                "client_name": params["client_name"],
-                "total": params["total"],
+                "invoice_number": inv_number,
+                "client_name": client,
+                "total": total_val,
                 "status": "created",
-                "message": f"Invoice created successfully for {params['client_name']}"
+                "message": voice_msg,
             }
         else:
+            logger.error(
+                "invoice_creation_failed",
+                error=response.error,
+                client_name=params.get("client_name"),
+                org_id=org_id,
+                user_id=user_id,
+            )
             raise Exception(response.error or "Failed to create invoice")
     
     async def _handle_query_invoices(
@@ -424,6 +590,47 @@ class FinanceAgent(BaseAgent):
         Process a request based on intent and entities
         """
         logger.info("finance_agent_processing", intent=intent.value)
+
+        # ── Pre-process entities for voice/simplified inputs ──────────────────
+        if intent == Intent.INVOICE_CREATE:
+            # Voice inputs: map 'amount' → 'total' and 'subtotal'
+            amount_val = entities.get("amount") or entities.get("total") or entities.get("subtotal")
+            if amount_val is not None:
+                try:
+                    amount_val = float(str(amount_val).replace(",", ""))
+                except Exception:
+                    pass
+                entities.setdefault("total", amount_val)
+                entities.setdefault("subtotal", amount_val)
+
+            # Auto-generate line items from total if not provided
+            if "items" not in entities or not entities["items"]:
+                entities["items"] = [{
+                    "description": "General Service",
+                    "quantity": 1,
+                    "unit_price": entities.get("total", 0),
+                }]
+            # Map synonyms for tax/gst
+            if "gst_number" in entities and "tax_id" not in entities:
+                entities["tax_id"] = entities["gst_number"]
+            elif "gst" in entities and "tax_id" not in entities:
+                entities["tax_id"] = entities["gst"]
+            elif "tax" in entities and "tax_id" not in entities:
+                entities["tax_id"] = entities["tax"]
+
+        if intent == Intent.CLIENT_CREATE:
+            # Map synonyms for tax/gst
+            if "gst_number" in entities and "tax_id" not in entities:
+                entities["tax_id"] = entities["gst_number"]
+            elif "gst" in entities and "tax_id" not in entities:
+                entities["tax_id"] = entities["gst"]
+            elif "tax" in entities and "tax_id" not in entities:
+                entities["tax_id"] = entities["tax"]
+            
+            # Map company_name to company
+            if "company_name" in entities and "company" not in entities:
+                entities["company"] = entities["company_name"]
+        # ──────────────────────────────────────────────────────────────────────
         
         # Set auth token from context if available
         if context and context.get("auth_token"):
@@ -460,6 +667,14 @@ class FinanceAgent(BaseAgent):
             )
             
             if result.success:
+                status = result.result.get("status")
+                if status == "partial":
+                    return self._build_error_response(
+                        error=result.result.get("message", "Partial match found"),
+                        needs_clarification=True,
+                        clarification_question=result.result.get("message")
+                    )
+                
                 return self._build_success_response(
                     message=result.result.get("message", "Success"),
                     data=result.result,
@@ -479,6 +694,8 @@ class FinanceAgent(BaseAgent):
         intent_to_tool = {
             Intent.INVOICE_CREATE: "create_invoice",
             Intent.INVOICE_QUERY: "query_invoices",
+            Intent.CLIENT_CREATE: "create_client",
+            Intent.CLIENT_QUERY: "query_invoices",  # Shared query tool for now
             Intent.PAYMENT_RECORD: "record_payment",
             Intent.BALANCE_CHECK: "check_balance",
             

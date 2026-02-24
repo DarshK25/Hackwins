@@ -1,4 +1,3 @@
-// src/main/java/com/moneyops/organizations/mapper/OrganizationMapper.java
 package com.moneyops.organizations.mapper;
 
 import com.moneyops.organizations.dto.BusinessOrganizationDto;
@@ -15,20 +14,20 @@ public class OrganizationMapper {
         dto.setId(org.getId());
         dto.setLegalName(org.getLegalName());
         dto.setTradingName(org.getTradingName());
-        dto.setBusinessType(org.getBusinessType() != null ? org.getBusinessType().name() : null);
-        dto.setIndustry(org.getIndustry() != null ? org.getIndustry().name() : null);
+        dto.setBusinessType(org.getBusinessType());       // plain String now
+        dto.setIndustry(org.getIndustry());
         dto.setRegistrationDate(org.getRegistrationDate());
-        dto.setAnnualTurnoverRange(org.getAnnualTurnoverRange() != null ? org.getAnnualTurnoverRange().name() : null);
+        dto.setAnnualTurnoverRange(org.getAnnualTurnover());
         dto.setPrimaryEmail(org.getPrimaryEmail());
         dto.setPrimaryPhone(org.getPrimaryPhone());
         dto.setWebsite(org.getWebsite());
         dto.setEmployeeCount(org.getEmployeeCount());
         dto.setRegisteredAddress(org.getRegisteredAddress());
-        dto.setFinancialYearStartMonth(org.getFinancialYearStartMonth() != null ? org.getFinancialYearStartMonth().name() : null);
+        dto.setFinancialYearStartMonth(org.getFyStartMonth() != null ? String.valueOf(org.getFyStartMonth()) : null);
         dto.setPreferredLanguage(org.getPreferredLanguage());
         dto.setPrimaryActivity(org.getPrimaryActivity());
-        dto.setTargetMarket(org.getTargetMarket() != null ? org.getTargetMarket().name() : null);
-        dto.setAccountingMethod(org.getAccountingMethod() != null ? org.getAccountingMethod().name() : null);
+        dto.setTargetMarket(org.getTargetMarket());
+        dto.setAccountingMethod(org.getAccountingMethod());
         return dto;
     }
 
@@ -37,20 +36,20 @@ public class OrganizationMapper {
         org.setId(dto.getId());
         org.setLegalName(dto.getLegalName());
         org.setTradingName(dto.getTradingName());
-        org.setBusinessType(dto.getBusinessType() != null ? BusinessOrganization.BusinessType.valueOf(dto.getBusinessType()) : null);
-        org.setIndustry(dto.getIndustry() != null ? BusinessOrganization.Industry.valueOf(dto.getIndustry()) : null);
+        org.setBusinessType(dto.getBusinessType());       // plain String now
+        org.setIndustry(dto.getIndustry());
         org.setRegistrationDate(dto.getRegistrationDate());
-        org.setAnnualTurnoverRange(dto.getAnnualTurnoverRange() != null ? BusinessOrganization.TurnoverRange.valueOf(dto.getAnnualTurnoverRange()) : null);
+        org.setAnnualTurnover(dto.getAnnualTurnoverRange());
         org.setPrimaryEmail(dto.getPrimaryEmail());
         org.setPrimaryPhone(dto.getPrimaryPhone());
         org.setWebsite(dto.getWebsite());
         org.setEmployeeCount(dto.getEmployeeCount());
         org.setRegisteredAddress(dto.getRegisteredAddress());
-        org.setFinancialYearStartMonth(dto.getFinancialYearStartMonth() != null ? BusinessOrganization.Month.valueOf(dto.getFinancialYearStartMonth()) : null);
+        org.setFyStartMonth(dto.getFinancialYearStartMonth() != null ? Integer.valueOf(dto.getFinancialYearStartMonth()) : null);
         org.setPreferredLanguage(dto.getPreferredLanguage());
         org.setPrimaryActivity(dto.getPrimaryActivity());
-        org.setTargetMarket(dto.getTargetMarket() != null ? BusinessOrganization.TargetMarket.valueOf(dto.getTargetMarket()) : null);
-        org.setAccountingMethod(dto.getAccountingMethod() != null ? BusinessOrganization.AccountingMethod.valueOf(dto.getAccountingMethod()) : null);
+        org.setTargetMarket(dto.getTargetMarket());
+        org.setAccountingMethod(dto.getAccountingMethod());
         return org;
     }
 
@@ -69,7 +68,7 @@ public class OrganizationMapper {
 
     public RegulatoryProfile toRegulatoryEntity(RegulatoryProfileDto dto, BusinessOrganization org) {
         RegulatoryProfile profile = new RegulatoryProfile();
-        profile.setOrganization(org);
+        profile.setOrgId(org.getId());   // use orgId reference (not @OneToOne anymore)
         profile.setPanNumber(dto.getPanNumber());
         profile.setStateOfRegistration(dto.getStateOfRegistration());
         profile.setGstRegistered(dto.getGstRegistered());

@@ -17,7 +17,7 @@ public class InvoiceItemController {
     private final InvoiceService invoiceService;
 
     @PostMapping
-    public ResponseEntity<InvoiceItemDto> addItem(@PathVariable UUID invoiceId,
+    public ResponseEntity<InvoiceItemDto> addItem(@PathVariable String invoiceId,
                                                   @RequestBody InvoiceItemDto itemDto,
                                                   @RequestHeader("X-Org-Id") UUID orgId) {
         InvoiceItemDto added = invoiceService.addItem(invoiceId, itemDto, orgId);
@@ -25,7 +25,7 @@ public class InvoiceItemController {
     }
 
     @PatchMapping("/{itemId}")
-    public ResponseEntity<Void> updateItem(@PathVariable UUID invoiceId,
+    public ResponseEntity<Void> updateItem(@PathVariable String invoiceId,
                                            @PathVariable UUID itemId,
                                            @RequestBody InvoiceItemDto itemDto,
                                            @RequestHeader("X-Org-Id") UUID orgId) {
@@ -34,7 +34,7 @@ public class InvoiceItemController {
     }
 
     @DeleteMapping("/{itemId}")
-    public ResponseEntity<Void> deleteItem(@PathVariable UUID invoiceId,
+    public ResponseEntity<Void> deleteItem(@PathVariable String invoiceId,
                                            @PathVariable UUID itemId,
                                            @RequestHeader("X-Org-Id") UUID orgId) {
         invoiceService.deleteItem(itemId, orgId);

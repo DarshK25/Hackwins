@@ -11,7 +11,7 @@ public class ClientValidator {
         if (dto.getName() == null || dto.getName().trim().isEmpty()) {
             throw new IllegalArgumentException("Name is required");
         }
-        if (dto.getEmail() == null || !isValidEmail(dto.getEmail())) {
+        if (dto.getEmail() != null && !dto.getEmail().trim().isEmpty() && !isValidEmail(dto.getEmail())) {
             throw new IllegalArgumentException("Valid email is required");
         }
         if (dto.getStatus() == null || dto.getStatus().isEmpty()) {

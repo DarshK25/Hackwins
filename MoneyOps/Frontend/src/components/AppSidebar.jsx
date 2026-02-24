@@ -124,12 +124,6 @@ export function AppSidebar(props) {
       icon: <Users className="h-4 w-4" />,
       variant: "ghost",
     },
-    {
-      href: "/analytics",
-      title: "Analytics",
-      icon: <BarChart3 className="h-4 w-4" />,
-      variant: "ghost",
-    },
   ];
 
   const agentNavItems = [

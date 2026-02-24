@@ -1,6 +1,6 @@
 package com.moneyops.documents.service;
 
-import com.moneyops.documents.entity.Document;
+import com.moneyops.documents.entity.MoneyOpsDocument;
 import com.moneyops.documents.repository.DocumentRepository;
 import com.moneyops.shared.dto.PageResponse;
 import com.moneyops.shared.exceptions.NotFoundException;
@@ -21,17 +21,17 @@ public class DocumentService {
 
     private final DocumentRepository documentRepository;
 
-    public List<Document> getDocumentsByOrg(UUID orgId) {
+    public List<MoneyOpsDocument> getDocumentsByOrg(UUID orgId) {
         return documentRepository.findByOrgId(orgId);
     }
 
-    public Document getDocumentById(UUID id) {
+    public MoneyOpsDocument getDocumentById(UUID id) {
         return documentRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Document not found with ID: " + id));
     }
 
     @Transactional
-    public Document createDocumentMetadata(Document document) {
+    public MoneyOpsDocument createDocumentMetadata(MoneyOpsDocument document) {
         document.setCreatedAt(LocalDateTime.now());
         if (document.getId() == null) {
             document.setId(UUID.randomUUID());
@@ -39,7 +39,7 @@ public class DocumentService {
         return documentRepository.save(document);
     }
 
-    public List<Document> getDocumentsByEntity(String entityType, UUID entityId) {
+    public List<MoneyOpsDocument> getDocumentsByEntity(String entityType, UUID entityId) {
         return documentRepository.findByLinkedEntityTypeAndLinkedEntityId(entityType, entityId);
     }
 

@@ -1,6 +1,7 @@
 // src/main/java/com/moneyops/invoices/dto/InvoiceDto.java
 package com.moneyops.invoices.dto;
 
+import com.moneyops.clients.dto.ClientDto;
 import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -9,9 +10,14 @@ import java.util.UUID;
 
 @Data
 public class InvoiceDto {
-    private UUID id;
+    private String id;
     private String invoiceNumber;
     private UUID clientId;
+    private String clientName;
+    private String clientEmail;
+    private String clientCompany;
+    private String clientPhone;
+    private ClientDto client; // Optional nested details if needed
     private LocalDate issueDate;
     private LocalDate dueDate;
     private String status;

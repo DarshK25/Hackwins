@@ -5,9 +5,12 @@ import lombok.Data;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 @Data
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ClientDto {
-    private UUID id;
+    private String id;
     private String name;
     private String taxId;
     private String email;
@@ -19,9 +22,12 @@ public class ClientDto {
     private String postalCode;
     private String paymentTerms;
     private String currency;
+    private String company;
+    private String notes;
     private String status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private UUID createdBy;
     private UUID updatedBy;
+    private Double searchScore;
 }

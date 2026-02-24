@@ -1202,7 +1202,7 @@ moneyops-backend/
 │   │   │   │       ├── ErrorHandler.java
 │   │   │   │       └── ApiResponse.java
 │   │   │   ├── domain/              # Domain entities
-│   │   │   │   ├── Invoice.java
+│   │   │   │   ├── 
 │   │   │   │   ├── InvoiceRepository.java
 │   │   │   │   └── ...
 │   │   │   ├── application/         # Business logic

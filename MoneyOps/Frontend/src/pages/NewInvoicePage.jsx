@@ -23,13 +23,15 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Trash, ArrowLeft, Loader2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 
 // ── Default item shape ────────────────────────────────────────────────────────
-const BLANK_ITEM = { description: "", quantity: 1, rate: 0, gstRate: 18, isService: false };
+const BLANK_ITEM = { description: "", quantity: 1, rate: 0, gstPercent: 18, type: "PRODUCT" };
 const BLANK_CLIENT = { name: "", email: "", phone: "", company: "", gstin: "", address: "" };
 
 export default function NewInvoicePage() {
-    const { getToken } = useAuth();
+    const { getToken, isLoaded, isSignedIn, userId } = useAuth();
+    const { orgId } = useOnboardingStatus();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [previewData, setPreviewData] = useState(null);
@@ -47,8 +49,10 @@ export default function NewInvoicePage() {
     });
 
     useEffect(() => {
-        fetchClients();
-    }, []);
+        if (isLoaded && isSignedIn) {
+            fetchClients();
+        }
+    }, [isLoaded, isSignedIn]);
 
     // ── API ───────────────────────────────────────────────────────────────────
 
@@ -56,7 +60,11 @@ export default function NewInvoicePage() {
         try {
             const token = await getToken();
             const res = await fetch("/api/clients", {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "X-User-Id": userId,
+                    "X-Org-Id": orgId || "placeholder-org"
+                }
             });
             const data = await res.json();
             setClients(Array.isArray(data) ? data : []);
@@ -136,8 +144,8 @@ export default function NewInvoicePage() {
         let totalGst = 0;
 
         formData.items.forEach((item) => {
-            const itemAmount = item.isService ? item.rate : item.quantity * item.rate;
-            const itemGst = (itemAmount * item.gstRate) / 100;
+            const itemAmount = item.type === "SERVICE" ? item.rate : item.quantity * item.rate;
+            const itemGst = (itemAmount * item.gstPercent) / 100;
             subtotal += itemAmount;
             totalGst += itemGst;
         });
@@ -153,50 +161,36 @@ export default function NewInvoicePage() {
 
     const buildLineItems = () =>
         formData.items.map((item) => {
-            const itemAmount = item.isService ? item.rate : item.quantity * item.rate;
+            const itemAmount = item.type === "SERVICE" ? item.rate : item.quantity * item.rate;
             return {
                 description: item.description,
-                quantity: item.isService ? 1 : item.quantity,
+                quantity: item.type === "SERVICE" ? 1 : item.quantity,
                 rate: item.rate,
-                gstRate: item.gstRate,
-                isService: item.isService,
-                amount: itemAmount,
-                gstAmount: (itemAmount * item.gstRate) / 100,
-                total: itemAmount + (itemAmount * item.gstRate) / 100,
+                gstPercent: item.gstPercent,
+                type: item.type,
+                lineSubtotal: itemAmount,
+                lineGst: (itemAmount * item.gstPercent) / 100,
+                lineTotal: itemAmount + (itemAmount * item.gstPercent) / 100,
             };
         });
 
     // ── Preview & Submit ──────────────────────────────────────────────────────
 
     const handlePreview = async () => {
-        setLoading(true);
-        try {
-            const token = await getToken();
-            const res = await fetch("/api/invoices/preview", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    items: buildLineItems(),
-                    customerName: formData.customerName,
-                    dueDate: formData.dueDate,
-                    clientRequestId: Math.random().toString(),
-                }),
-            });
-
-            const data = await res.json();
-            if (!res.ok || !data.success) throw new Error(data.message || "Failed to preview");
-            setPreviewData(data.preview);
-        } catch (error) {
-            toast.error(error?.message || "Preview failed");
-        } finally {
-            setLoading(false);
-        }
+        // We now do preview locally via liveCalculation for instant speed
+        setPreviewData({
+            subtotal: parseFloat(liveCalculation.subtotal),
+            gstTotal: parseFloat(liveCalculation.gstTotal),
+            total: parseFloat(liveCalculation.total),
+            itemsCount: formData.items.length
+        });
     };
 
     const handleCreate = async () => {
+        if (!formData.clientId) {
+            toast.error("Please select a client for this invoice");
+            return;
+        }
         setLoading(true);
         try {
             const token = await getToken();
@@ -204,22 +198,26 @@ export default function NewInvoicePage() {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
+                    Authorization: `Bearer ${token}`,
+                    "X-User-Id": userId,
+                    "X-Org-Id": "placeholder-org"
                 },
                 body: JSON.stringify({
-                    clientId: formData.clientId || undefined,
-                    customerName: formData.customerName,
-                    dueDate: new Date(formData.dueDate),
-                    issueDate: new Date(formData.date),
+                    clientId: formData.clientId || null,
+                    dueDate: formData.dueDate,
+                    issueDate: formData.date,
                     items: buildLineItems(),
-                    clientRequestId: Math.random().toString(),
+                    status: "DRAFT",
+                    currency: "INR"
                 }),
             });
 
-            const data = await res.json();
-            if (!res.ok || !data.success) throw new Error(data.message || "Failed to create");
+            if (!res.ok) {
+                const error = await res.json().catch(() => ({ message: "Failed to create invoice" }));
+                throw new Error(error.message || "Failed to create invoice");
+            }
 
-            toast.success(data.message || "Invoice created successfully");
+            toast.success("Invoice created successfully");
             navigate("/invoices");
         } catch (error) {
             toast.error(error?.message || "Failed to create invoice");
@@ -252,24 +250,9 @@ export default function NewInvoicePage() {
                             <CardTitle>Invoice Details</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                            {/* Customer Name */}
+                            {/* Client Selection */}
                             <div className="space-y-2">
-                                <Label htmlFor="customerName">Customer Name *</Label>
-                                <Input
-                                    id="customerName"
-                                    value={formData.customerName}
-                                    onChange={(e) =>
-                                        setFormData((prev) => ({ ...prev, customerName: e.target.value, clientId: "" }))
-                                    }
-                                    placeholder="Enter name or select an existing client below"
-                                />
-                            </div>
-
-                            {/* Existing client select */}
-                            <div className="space-y-1">
-                                <p className="text-xs text-slate-400">
-                                    Or select an existing client (saves full details):
-                                </p>
+                                <Label htmlFor="clientId">Client *</Label>
                                 <div className="flex gap-2">
                                     <Select
                                         value={formData.clientId}
@@ -285,15 +268,20 @@ export default function NewInvoicePage() {
                                         <SelectTrigger className="flex-1">
                                             <SelectValue
                                                 placeholder={
-                                                    loadingClients ? "Loading…" : "Select existing client (optional)"
+                                                    loadingClients ? "Loading clients…" : "Select a client"
                                                 }
                                             />
                                         </SelectTrigger>
                                         <SelectContent>
+                                            {clients.length === 0 && !loadingClients && (
+                                                <div className="p-2 text-sm text-slate-500 text-center">
+                                                    No clients found. Add one first.
+                                                </div>
+                                            )}
                                             {clients.map((client) => (
                                                 <SelectItem key={client.id} value={client.id}>
                                                     {client.name}
-                                                    {client.company ? ` (${client.company})` : ""}
+                                                    {client.company ? ` — ${client.company}` : ""}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>
@@ -303,11 +291,17 @@ export default function NewInvoicePage() {
                                         variant="outline"
                                         size="icon"
                                         onClick={() => setClientDialogOpen(true)}
+                                        className="shrink-0"
                                         title="Add new client"
                                     >
                                         <UserPlus className="h-4 w-4" />
                                     </Button>
                                 </div>
+                                {formData.clientId && (
+                                    <p className="text-xs text-green-600 font-medium">
+                                        ✓ Linked to client: {formData.customerName}
+                                    </p>
+                                )}
                             </div>
 
                             {/* Dates */}
@@ -316,6 +310,7 @@ export default function NewInvoicePage() {
                                     <Label htmlFor="invoiceDate">Invoice Date</Label>
                                     <Input
                                         id="invoiceDate"
+                                        required
                                         type="date"
                                         value={formData.date}
                                         onChange={(e) =>
@@ -327,6 +322,7 @@ export default function NewInvoicePage() {
                                     <Label htmlFor="dueDate">Due Date</Label>
                                     <Input
                                         id="dueDate"
+                                        required
                                         type="date"
                                         value={formData.dueDate}
                                         onChange={(e) =>
@@ -353,8 +349,8 @@ export default function NewInvoicePage() {
                                     <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
                                         <input
                                             type="checkbox"
-                                            checked={item.isService}
-                                            onChange={(e) => handleItemChange(index, "isService", e.target.checked)}
+                                            checked={item.type === "SERVICE"}
+                                            onChange={(e) => handleItemChange(index, "type", e.target.checked ? "SERVICE" : "PRODUCT")}
                                             className="rounded"
                                         />
                                         Service (no quantity)
@@ -364,13 +360,14 @@ export default function NewInvoicePage() {
                                         {/* Description */}
                                         <div className="flex-1 min-w-0 space-y-1.5">
                                             <Label className="text-xs">
-                                                {item.isService ? "Service Description" : "Item Description"}
+                                                {item.type === "SERVICE" ? "Service Description" : "Item Description"}
                                             </Label>
                                             <Input
+                                                required
                                                 value={item.description}
                                                 onChange={(e) => handleItemChange(index, "description", e.target.value)}
                                                 placeholder={
-                                                    item.isService
+                                                    item.type === "SERVICE"
                                                         ? "e.g., Web Development, Consulting"
                                                         : "e.g., Product name"
                                                 }
@@ -378,7 +375,7 @@ export default function NewInvoicePage() {
                                         </div>
 
                                         {/* Quantity (products only) */}
-                                        {!item.isService && (
+                                        {item.type !== "SERVICE" && (
                                             <div className="w-20 space-y-1.5">
                                                 <Label className="text-xs">Qty</Label>
                                                 <Input
@@ -394,8 +391,9 @@ export default function NewInvoicePage() {
 
                                         {/* Rate */}
                                         <div className="w-32 space-y-1.5">
-                                            <Label className="text-xs">{item.isService ? "Amount" : "Rate"}</Label>
+                                            <Label className="text-xs">{item.type === "SERVICE" ? "Amount" : "Rate"}</Label>
                                             <Input
+                                                required
                                                 type="number"
                                                 value={item.rate}
                                                 onChange={(e) =>
@@ -410,9 +408,9 @@ export default function NewInvoicePage() {
                                             <Label className="text-xs">GST %</Label>
                                             <Input
                                                 type="number"
-                                                value={item.gstRate}
+                                                value={item.gstPercent}
                                                 onChange={(e) =>
-                                                    handleItemChange(index, "gstRate", Number(e.target.value))
+                                                    handleItemChange(index, "gstPercent", Number(e.target.value))
                                                 }
                                                 placeholder="18"
                                             />
@@ -429,7 +427,7 @@ export default function NewInvoicePage() {
                                         </Button>
                                     </div>
 
-                                    {item.isService && (
+                                    {item.type === "SERVICE" && (
                                         <p className="text-xs text-slate-400">
                                             💡 Service mode: Amount is the total price (no quantity needed)
                                         </p>
@@ -544,6 +542,7 @@ export default function NewInvoicePage() {
                             <Label htmlFor="nc-name">Name *</Label>
                             <Input
                                 id="nc-name"
+                                required
                                 value={newClientData.name}
                                 onChange={(e) =>
                                     setNewClientData((p) => ({ ...p, name: e.target.value }))

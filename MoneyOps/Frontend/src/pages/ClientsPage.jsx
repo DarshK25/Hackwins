@@ -33,15 +33,16 @@ import { toast } from "sonner";
 const INITIAL_FORM = {
     name: "",
     email: "",
-    phone: "",
+    phoneNumber: "",
     company: "",
-    gstin: "",
+    taxId: "",
     address: "",
     notes: "",
+    status: "ACTIVE",
 };
 
 export default function ClientsPage() {
-    const { getToken } = useAuth();
+    const { getToken, userId, orgId } = useAuth();
     const [clients, setClients] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
@@ -49,29 +50,43 @@ export default function ClientsPage() {
     const [saving, setSaving] = useState(false);
     const [formData, setFormData] = useState(INITIAL_FORM);
 
-    useEffect(() => {
-        fetchClients();
-    }, []);
-
-    // ── API Calls ───────────────────────────────────────────────────────────────
-
     const fetchClients = async () => {
         try {
             setLoading(true);
             const token = await getToken();
             const res = await fetch("/api/clients", {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "X-User-Id": userId,
+                    "X-Org-Id": orgId || "placeholder_org"
+                }
             });
             if (!res.ok) throw new Error("Failed to fetch");
             const data = await res.json();
             setClients(Array.isArray(data) ? data : []);
-        } catch {
+        } catch (err) {
+            console.error("Fetch error:", err);
             toast.error("Failed to load clients");
             setClients([]);
         } finally {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        if (userId) {
+            fetchClients();
+        }
+    }, [userId]);
+
+    // Auto-refresh when a client is created via voice
+    useEffect(() => {
+        const handler = () => {
+            fetchClients();
+        };
+        window.addEventListener("voice:client-created", handler);
+        return () => window.removeEventListener("voice:client-created", handler);
+    }, []);
 
     const handleCreateClient = async () => {
         if (!formData.name.trim()) {
@@ -86,13 +101,15 @@ export default function ClientsPage() {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
+                    Authorization: `Bearer ${token}`,
+                    "X-User-Id": userId,
+                    "X-Org-Id": orgId || "placeholder_org"
                 },
                 body: JSON.stringify(formData),
             });
 
             const data = await res.json();
-            if (!res.ok || !data.success) {
+            if (!res.ok) {
                 throw new Error(data.message || "Failed to create client");
             }
 
@@ -140,7 +157,7 @@ export default function ClientsPage() {
             <div className="flex items-center justify-between">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight">Clients</h2>
-                    <p className="text-slate-500 text-sm mt-1">Manage your client relationships</p>
+                    <p className="text-muted-foreground text-sm mt-1">Manage your client relationships</p>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -195,8 +212,8 @@ export default function ClientsPage() {
                                     <Input
                                         id="client-phone"
                                         type="tel"
-                                        value={formData.phone}
-                                        onChange={(e) => updateForm("phone", e.target.value)}
+                                        value={formData.phoneNumber}
+                                        onChange={(e) => updateForm("phoneNumber", e.target.value)}
                                         placeholder="+91 98765 43210"
                                     />
                                 </div>
@@ -217,12 +234,12 @@ export default function ClientsPage() {
                                     <Label htmlFor="client-gstin">GST Number (GSTIN)</Label>
                                     <Input
                                         id="client-gstin"
-                                        value={formData.gstin}
-                                        onChange={(e) => updateForm("gstin", e.target.value.toUpperCase())}
+                                        value={formData.taxId}
+                                        onChange={(e) => updateForm("taxId", e.target.value.toUpperCase())}
                                         placeholder="22AAAAA0000A1Z5"
                                         maxLength={15}
                                     />
-                                    <p className="text-xs text-slate-400">15-character GST Identification Number</p>
+                                    <p className="text-xs text-muted-foreground">15-character GST Identification Number</p>
                                 </div>
 
                                 {/* Address */}
@@ -272,8 +289,8 @@ export default function ClientsPage() {
             <div className="grid gap-4 md:grid-cols-4">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-500">Total Clients</CardTitle>
-                        <Users className="h-4 w-4 text-slate-400" />
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Total Clients</CardTitle>
+                        <Users className="h-4 w-4 text-muted-foreground/60" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-3xl font-bold">{stats.total}</div>
@@ -282,8 +299,8 @@ export default function ClientsPage() {
 
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-500">Active</CardTitle>
-                        <TrendingUp className="h-4 w-4 text-slate-400" />
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Active</CardTitle>
+                        <TrendingUp className="h-4 w-4 text-muted-foreground/60" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-3xl font-bold text-green-600">{stats.active}</div>
@@ -292,8 +309,8 @@ export default function ClientsPage() {
 
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-500">Total Revenue</CardTitle>
-                        <DollarSign className="h-4 w-4 text-slate-400" />
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Total Revenue</CardTitle>
+                        <DollarSign className="h-4 w-4 text-muted-foreground/60" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-3xl font-bold">₹{stats.totalRevenue.toLocaleString()}</div>
@@ -302,10 +319,10 @@ export default function ClientsPage() {
 
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-500">
+                        <CardTitle className="text-sm font-medium text-muted-foreground">
                             Avg Lifetime Value
                         </CardTitle>
-                        <TrendingUp className="h-4 w-4 text-slate-400" />
+                        <TrendingUp className="h-4 w-4 text-muted-foreground/60" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-3xl font-bold">
@@ -317,7 +334,7 @@ export default function ClientsPage() {
 
             {/* ── Search ───────────────────────────────────────────────────────── */}
             <div className="relative max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
                 <Input
                     placeholder="Search clients…"
                     value={searchQuery}
@@ -339,7 +356,7 @@ export default function ClientsPage() {
                         <h3 className="text-lg font-semibold mb-2">
                             {searchQuery ? "No clients found" : "No clients yet"}
                         </h3>
-                        <p className="text-slate-500 mb-6 text-center max-w-sm text-sm">
+                        <p className="text-muted-foreground mb-6 text-center max-w-sm text-sm">
                             {searchQuery
                                 ? "Try adjusting your search query"
                                 : "Add your first client to start managing relationships and invoices"}
@@ -376,27 +393,27 @@ export default function ClientsPage() {
                             <CardContent>
                                 <div className="space-y-2 text-sm">
                                     {client.email && (
-                                        <div className="flex items-center gap-2 text-slate-500">
+                                        <div className="flex items-center gap-2 text-muted-foreground">
                                             <Mail className="h-3.5 w-3.5 flex-shrink-0" />
                                             <span className="truncate">{client.email}</span>
                                         </div>
                                     )}
-                                    {client.phone && (
-                                        <div className="flex items-center gap-2 text-slate-500">
+                                    {client.phoneNumber && (
+                                        <div className="flex items-center gap-2 text-muted-foreground">
                                             <Phone className="h-3.5 w-3.5 flex-shrink-0" />
-                                            <span>{client.phone}</span>
+                                            <span>{client.phoneNumber}</span>
                                         </div>
                                     )}
                                     {client.company && (
-                                        <div className="flex items-center gap-2 text-slate-500">
+                                        <div className="flex items-center gap-2 text-muted-foreground">
                                             <Building className="h-3.5 w-3.5 flex-shrink-0" />
                                             <span className="truncate">{client.company}</span>
                                         </div>
                                     )}
-                                    {client.gstin && (
+                                    {client.taxId && (
                                         <div className="flex items-center gap-2">
                                             <Badge variant="secondary" className="font-mono text-xs">
-                                                GST: {client.gstin}
+                                                GST: {client.taxId}
                                             </Badge>
                                         </div>
                                     )}

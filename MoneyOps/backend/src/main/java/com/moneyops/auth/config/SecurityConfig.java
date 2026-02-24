@@ -4,6 +4,7 @@ package com.moneyops.auth.config;
 import com.moneyops.auth.security.AuthEntryPoint;
 import com.moneyops.auth.security.JwtFilter;
 import com.moneyops.auth.security.OAuth2SuccessHandler;
+import com.moneyops.auth.security.ServiceTokenFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,15 +24,18 @@ public class SecurityConfig {
     private final JwtFilter jwtFilter;
     private final AuthEntryPoint authEntryPoint;
     private final OAuth2SuccessHandler oAuth2SuccessHandler;
+    private final ServiceTokenFilter serviceTokenFilter;
 
     public SecurityConfig(
             JwtFilter jwtFilter,
             AuthEntryPoint authEntryPoint,
-            OAuth2SuccessHandler oAuth2SuccessHandler
+            OAuth2SuccessHandler oAuth2SuccessHandler,
+            ServiceTokenFilter serviceTokenFilter
     ) {
         this.jwtFilter = jwtFilter;
         this.authEntryPoint = authEntryPoint;
         this.oAuth2SuccessHandler = oAuth2SuccessHandler;
+        this.serviceTokenFilter = serviceTokenFilter;
     }
 
 
@@ -51,6 +55,7 @@ public class SecurityConfig {
         http.authorizeHttpRequests(auth -> auth
             .requestMatchers(
                 "/api/auth/**",
+                "/api/onboarding/**",
                 "/oauth2/**",
                 "/swagger-ui/**",
                 "/v3/api-docs/**"
@@ -62,6 +67,9 @@ public class SecurityConfig {
             oauth.successHandler(oAuth2SuccessHandler)
         );
 
+        // ServiceTokenFilter runs FIRST so internal AI-Gateway calls
+        // are authenticated before the JWT filter sees the request.
+        http.addFilterBefore(serviceTokenFilter, UsernamePasswordAuthenticationFilter.class);
         http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

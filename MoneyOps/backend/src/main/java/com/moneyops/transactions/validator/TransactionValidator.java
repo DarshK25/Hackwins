@@ -2,6 +2,7 @@
 package com.moneyops.transactions.validator;
 
 import com.moneyops.transactions.dto.TransactionDto;
+import com.moneyops.transactions.entity.TransactionType;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -10,20 +11,23 @@ import java.math.BigDecimal;
 public class TransactionValidator {
 
     public void validate(TransactionDto dto) {
-        if (dto.getType() == null || dto.getType().isEmpty()) {
+
+        if (dto.getAmount() == null || dto.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Amount must be greater than zero");
+        }
+
+        if (dto.getType() == null) {
             throw new IllegalArgumentException("Transaction type is required");
         }
-        if (!"INCOME".equals(dto.getType()) && !"EXPENSE".equals(dto.getType())) {
-            throw new IllegalArgumentException("Transaction type must be INCOME or EXPENSE");
+
+        try {
+            TransactionType.valueOf(dto.getType().toUpperCase());
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid transaction type");
         }
-        if (dto.getAmount() == null || dto.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Amount must be positive");
-        }
+
         if (dto.getTransactionDate() == null) {
             throw new IllegalArgumentException("Transaction date is required");
-        }
-        if (dto.getCategory() == null || dto.getCategory().isEmpty()) {
-            throw new IllegalArgumentException("Category is required");
         }
     }
 }
