@@ -45,14 +45,14 @@ class Settings(BaseSettings):
     LLM_MAX_RETRIES: int = 3
     
     # Backend Services
-    BACKEND_BASE_URL: str = "http://localhost:8000"
+    BACKEND_BASE_URL: str = "http://127.0.0.1:8000"
     BACKEND_TIMEOUT: int = 30
     # Shared secret for service-to-service auth (AI-Gateway → Spring Boot backend)
     INTERNAL_SERVICE_TOKEN: str = "moneyops-internal-ai-gateway-service-secret-2024"
 
     
     # Redis
-    REDIS_HOST: str = "localhost"
+    REDIS_HOST: str = "127.0.0.1"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[str] = None

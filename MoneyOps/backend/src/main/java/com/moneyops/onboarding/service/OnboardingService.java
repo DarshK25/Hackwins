@@ -60,7 +60,9 @@ public class OnboardingService {
     // ── Create business ───────────────────────────────────────────────────────
 
     public OnboardingStatusResponse createBusiness(OnboardingRequest req) {
-
+        log.info("Creating business for clerkId={}, legalName={}", req.getClerkId(), req.getLegalName());
+        log.debug("Incoming payload: {}", req);
+        
         BusinessOrganization org = new BusinessOrganization();
 
         // ── Step 1: Business Info ─────────────────────────────────────────────

@@ -14,7 +14,7 @@ import { Loader2 } from "lucide-react";
 
 export function BusinessInfoStep({ initialData = {}, onNext, loading }) {
     const [formData, setFormData] = useState({
-        name: initialData.name || "",
+        legalName: initialData.legalName || "",
         tradingName: initialData.tradingName || "",
         businessType: initialData.businessType || "",
         industry: initialData.industry || "",
@@ -47,11 +47,11 @@ export function BusinessInfoStep({ initialData = {}, onNext, loading }) {
             <div className="grid gap-4 md:grid-cols-2">
                 {/* Business Name */}
                 <div className="space-y-2">
-                    <Label htmlFor="name">Business Name *</Label>
+                    <Label htmlFor="legalName">Business Name *</Label>
                     <Input
-                        id="name"
-                        value={formData.name}
-                        onChange={(e) => updateField("name", e.target.value)}
+                        id="legalName"
+                        value={formData.legalName}
+                        onChange={(e) => updateField("legalName", e.target.value)}
                         required
                         placeholder="ABC Private Limited"
                     />

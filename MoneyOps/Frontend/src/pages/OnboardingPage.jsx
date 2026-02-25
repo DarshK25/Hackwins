@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Building2, Users, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
+import { useUser } from "@clerk/clerk-react";
 
 import { BusinessInfoStep } from "@/components/onboarding/BusinessInfoStep";
 import { RegulatoryInfoStep } from "@/components/onboarding/RegulatoryInfoStep";
@@ -14,6 +15,7 @@ const STEP_SEQUENCES = {
 };
 
 export default function OnboardingPage() {
+    const { user } = useUser();
     const [mode, setMode] = useState("choose");
     const [currentStep, setCurrentStep] = useState("welcome");
     const [formData, setFormData] = useState({});
@@ -51,20 +53,27 @@ export default function OnboardingPage() {
     const handleSubmit = async (finalData) => {
         setLoading(true);
         try {
+            const payload = {
+                ...finalData,
+                clerkId: user?.id,
+                email: user?.primaryEmailAddress?.emailAddress,
+                name: user?.fullName || user?.firstName,
+            };
+
             const endpoint = mode === "new-business"
                 ? "/api/onboarding/create-business"
                 : "/api/onboarding/join-business";
             const response = await fetch(endpoint, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(finalData),
+                body: JSON.stringify(payload),
             });
             if (!response.ok) {
                 const error = await response.json();
                 throw new Error(error.error || "Failed to complete onboarding");
             }
             toast.success("Onboarding completed! Redirecting to dashboard…");
-            setTimeout(() => { window.location.href = "/dashboard"; }, 1500);
+            setTimeout(() => { window.location.href = "/analytics"; }, 1500);
         } catch (error) {
             console.error("Onboarding error:", error);
             toast.error(error.message || "Failed to complete onboarding");

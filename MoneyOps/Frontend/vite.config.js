@@ -7,6 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // https://vitejs.dev/config/
 export default defineConfig({
+    envDir: "../../",
     plugins: [react()],
     resolve: {
         alias: {
@@ -19,12 +20,12 @@ export default defineConfig({
         proxy: {
             // Proxy /api/v1 to AI Gateway (port 8001)
             "/api/v1": {
-                target: "http://localhost:8001",
+                target: "http://127.0.0.1:8001",
                 changeOrigin: true,
             },
             // Proxy general /api to Spring Boot Backend (port 8000)
             "/api": {
-                target: "http://localhost:8000",
+                target: "http://127.0.0.1:8000",
                 changeOrigin: true,
             },
         },
