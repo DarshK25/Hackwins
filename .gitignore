@@ -16,3 +16,7 @@ Thumbs.db
 **/.env
 **/.env.local
 
+
+*.log.txt
+full_git_log.txt
+entire_git_history.txt
