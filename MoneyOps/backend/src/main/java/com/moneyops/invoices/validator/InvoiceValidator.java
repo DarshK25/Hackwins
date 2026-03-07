@@ -62,7 +62,8 @@ public class InvoiceValidator {
         for (InvoiceItemDto item : dto.getItems()) {
             BigDecimal qty = item.getType().equals("SERVICE") ? BigDecimal.ONE : BigDecimal.valueOf(item.getQuantity());
             BigDecimal lineSubtotal = item.getRate().multiply(qty);
-            BigDecimal lineGst = lineSubtotal.multiply(item.getGstPercent().divide(BigDecimal.valueOf(100)));
+            BigDecimal lineGst = lineSubtotal.multiply(item.getGstPercent())
+                    .divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
             BigDecimal lineTotal = lineSubtotal.add(lineGst);
 
             item.setLineSubtotal(lineSubtotal);

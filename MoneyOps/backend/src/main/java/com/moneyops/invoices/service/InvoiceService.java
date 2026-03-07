@@ -36,10 +36,16 @@ public class InvoiceService {
     private final InvoiceMapper invoiceMapper;
     private final ClientMapper clientMapper;
     private final InvoiceValidator invoiceValidator;
+    private final com.moneyops.audit.service.AuditLogService auditLogService;
+    private final com.moneyops.transactions.service.TransactionService transactionService;
 
     public List<InvoiceDto> getAllInvoices(UUID orgId) {
         var invoices = invoiceRepository.findAllByOrgId(orgId);
         return populateClientDetails(invoices, orgId);
+    }
+
+    public void validateAndCalculate(InvoiceDto dto) {
+        invoiceValidator.validate(dto);
     }
 
     public List<InvoiceDto> searchInvoices(UUID orgId, String status, String clientName, int limit) {
@@ -76,9 +82,22 @@ public class InvoiceService {
     }
 
     public InvoiceDto getInvoiceById(String id, UUID orgId) {
-        Invoice invoice = invoiceRepository.findByIdAndOrgId(id, orgId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));
-        return populateClientDetails(invoice);
+        try {
+            org.slf4j.LoggerFactory.getLogger(InvoiceService.class).info("Fetching invoice with id: {} and orgId: {}", id, orgId);
+            Invoice invoice = invoiceRepository.findById(id)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found with id: " + id));
+            
+            if (!orgId.equals(invoice.getOrgId())) {
+                org.slf4j.LoggerFactory.getLogger(InvoiceService.class).warn("Security Warning: Invoice {} belongs to org {}, but requested for org {}", id, invoice.getOrgId(), orgId);
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied to this invoice");
+            }
+            return populateClientDetails(invoice);
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(InvoiceService.class).error("Error in getInvoiceById", e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error processing invoice: " + e.getMessage());
+        }
     }
 
     public InvoiceDto createInvoice(InvoiceDto dto, UUID orgId, UUID userId) {
@@ -327,5 +346,53 @@ public class InvoiceService {
         return invoices.stream()
                 .map(this::populateClientDetails)
                 .collect(Collectors.toList());
+    }
+
+    public List<com.moneyops.audit.entity.AuditLog> getInvoiceLogs(String id, UUID orgId) {
+        // First verify ownership
+        getInvoiceById(id, orgId);
+        return auditLogService.getAuditLogsByEntityId(id);
+    }
+
+    public List<com.moneyops.transactions.dto.TransactionDto> getInvoicePayments(String id, UUID orgId) {
+        // First verify ownership
+        getInvoiceById(id, orgId);
+        return transactionService.getTransactionsByInvoice(id, orgId);
+    }
+
+    public com.moneyops.transactions.dto.TransactionDto recordPayment(String id, com.moneyops.transactions.dto.TransactionDto paymentDto, UUID orgId, UUID userId) {
+        Invoice invoice = invoiceRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));
+        
+        if (!orgId.equals(invoice.getOrgId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+        }
+
+        paymentDto.setInvoiceId(id);
+        paymentDto.setClientId(invoice.getClientId());
+        paymentDto.setType("INCOME");
+        if (paymentDto.getCurrency() == null) paymentDto.setCurrency(invoice.getCurrency());
+
+        com.moneyops.transactions.dto.TransactionDto saved = transactionService.createTransaction(paymentDto, orgId, userId);
+
+        // Update invoice payment info
+        invoice.setPaymentDate(paymentDto.getTransactionDate());
+        
+        // Simple heuristic: if this is the first payment or amount >= total, mark paid
+        // In a real system, we'd sum all payments.
+        BigDecimal totalPaid = transactionService.getTransactionsByInvoice(id, orgId).stream()
+                .map(com.moneyops.transactions.dto.TransactionDto::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        
+        if (totalPaid.compareTo(invoice.getTotalAmount()) >= 0) {
+            invoice.setStatus(InvoiceStatus.PAID);
+        } else if (invoice.getStatus() == InvoiceStatus.DRAFT) {
+            invoice.setStatus(InvoiceStatus.SENT); // Transition out of draft if payment received
+        }
+
+        invoice.setUpdatedAt(LocalDateTime.now());
+        invoiceRepository.save(invoice);
+        
+        return saved;
     }
 }

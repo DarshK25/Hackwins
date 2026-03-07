@@ -18,6 +18,8 @@ public interface TransactionRepository extends MongoRepository<Transaction, UUID
     boolean existsByIdAndOrgId(UUID id, UUID orgId);
 
     List<Transaction> findByOrgIdAndClientId(UUID orgId, UUID clientId);
+    
+    List<Transaction> findByOrgIdAndInvoiceId(UUID orgId, String invoiceId);
 
     List<Transaction> findByOrgIdAndType(UUID orgId, TransactionType type);
 

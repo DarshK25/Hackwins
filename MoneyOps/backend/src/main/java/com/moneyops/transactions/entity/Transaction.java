@@ -20,7 +20,7 @@ public class Transaction {
 
     private UUID orgId;
     private UUID clientId;      // null if expense unrelated to a client
-    private UUID invoiceId;     // null if not linked to an invoice
+    private String invoiceId;   // null if not linked to an invoice
     private TransactionType type;
     private BigDecimal amount;
     private String currency = "INR";

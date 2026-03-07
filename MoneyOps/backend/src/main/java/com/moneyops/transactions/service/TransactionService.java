@@ -109,6 +109,12 @@ public class TransactionService {
                 .collect(Collectors.toList());
     }
 
+    public List<TransactionDto> getTransactionsByInvoice(String invoiceId, UUID orgId) {
+        return transactionRepository.findByOrgIdAndInvoiceId(orgId, invoiceId).stream()
+                .map(transactionMapper::toDto)
+                .collect(Collectors.toList());
+    }
+
     public List<TransactionDto> getTransactionsByDateRange(UUID orgId, LocalDate startDate, LocalDate endDate) {
         return transactionRepository.findByOrgIdAndTransactionDateBetween(orgId, startDate, endDate).stream()
                 .map(transactionMapper::toDto)

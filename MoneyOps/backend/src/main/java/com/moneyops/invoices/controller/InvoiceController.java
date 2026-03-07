@@ -28,6 +28,13 @@ public class InvoiceController {
         return ResponseEntity.ok(created);
     }
 
+    @PostMapping("/preview")
+    public ResponseEntity<InvoiceDto> previewInvoice(@RequestBody InvoiceDto dto) {
+        // Run validation which also calculates totals for items and root DTO
+        invoiceService.validateAndCalculate(dto);
+        return ResponseEntity.ok(dto);
+    }
+
     @PutMapping("/{id}")
     public ResponseEntity<InvoiceDto> updateInvoice(@PathVariable String id, @RequestBody InvoiceDto dto) {
         UUID orgId = OrgContext.getOrgId();
@@ -82,5 +89,27 @@ public class InvoiceController {
         UUID orgId = OrgContext.getOrgId();
         List<InvoiceDto> overdue = invoiceService.getOverdueInvoices(orgId);
         return ResponseEntity.ok(overdue);
+    }
+
+    @GetMapping("/{id}/logs")
+    public ResponseEntity<List<com.moneyops.audit.entity.AuditLog>> getInvoiceLogs(@PathVariable String id) {
+        UUID orgId = OrgContext.getOrgId();
+        return ResponseEntity.ok(invoiceService.getInvoiceLogs(id, orgId));
+    }
+
+    @GetMapping("/{id}/payments")
+    public ResponseEntity<List<com.moneyops.transactions.dto.TransactionDto>> getInvoicePayments(@PathVariable String id) {
+        UUID orgId = OrgContext.getOrgId();
+        return ResponseEntity.ok(invoiceService.getInvoicePayments(id, orgId));
+    }
+
+    @PostMapping("/{id}/payment")
+    public ResponseEntity<com.moneyops.shared.dto.ApiResponse<com.moneyops.transactions.dto.TransactionDto>> recordPayment(
+            @PathVariable String id,
+            @RequestBody com.moneyops.transactions.dto.TransactionDto paymentDto) {
+        UUID orgId = OrgContext.getOrgId();
+        UUID userId = OrgContext.getUserId();
+        com.moneyops.transactions.dto.TransactionDto saved = invoiceService.recordPayment(id, paymentDto, orgId, userId);
+        return ResponseEntity.ok(com.moneyops.shared.dto.ApiResponse.success("Payment recorded successfully", saved));
     }
 }

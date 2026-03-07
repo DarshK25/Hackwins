@@ -10,7 +10,7 @@ import java.util.UUID;
 public class TransactionDto {
     private UUID id;
     private UUID clientId;
-    private UUID invoiceId;
+    private String invoiceId;
     private String type;
     private BigDecimal amount;
     private String currency;
