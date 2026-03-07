@@ -1,25 +1,27 @@
-import React from "react";
+"use client";
+import React, { useCallback } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
-// MoneyOps-themed hover colors — subtle, matching the dark brand palette
+// MoneyOps-themed hover colors — green + grey palette as requested
 const HOVER_COLORS = [
-    "rgba(76, 187, 23, 0.35)",   // brand green
-    "rgba(76, 187, 23, 0.18)",   // brand green soft
-    "rgba(96, 165, 250, 0.25)",  // blue-400
-    "rgba(167, 139, 250, 0.25)", // violet-400
-    "rgba(251, 191, 36, 0.25)",  // amber-400
-    "rgba(205, 28, 24, 0.20)",   // brand red
-    "rgba(52, 211, 153, 0.22)",  // emerald-400
-    "rgba(248, 113, 113, 0.18)", // red-400 soft
-    "rgba(147, 197, 253, 0.20)", // sky-300
+    "rgb(74, 222, 128)",    // green-400
+    "rgb(134, 239, 172)",   // green-300
+    "rgb(22, 163, 74)",     // green-600
+    "rgb(21, 128, 61)",     // green-700
+    "rgb(20, 83, 45)",      // green-900
+    "rgb(100, 116, 139)",   // slate-500 (grey)
+    "rgb(71, 85, 105)",     // slate-600 (grey)
+    "rgb(51, 65, 85)",      // slate-700 (dark grey)
+    "rgb(148, 163, 184)",   // slate-400 (light grey)
 ];
 
-const getRandomColor = () => HOVER_COLORS[Math.floor(Math.random() * HOVER_COLORS.length)];
+const getRandomColor = () =>
+    HOVER_COLORS[Math.floor(Math.random() * HOVER_COLORS.length)];
 
-export function BoxesCore({ className, rows = 60, cols = 40, ...rest }) {
-    const rowArr = new Array(rows).fill(1);
-    const colArr = new Array(cols).fill(1);
+export const BoxesCore = ({ className, ...rest }) => {
+    const rows = new Array(150).fill(1);
+    const cols = new Array(100).fill(1);
 
     return (
         <div
@@ -33,24 +35,23 @@ export function BoxesCore({ className, rows = 60, cols = 40, ...rest }) {
             )}
             {...rest}
         >
-            {rowArr.map((_, i) => (
+            {rows.map((_, i) => (
                 <motion.div
                     key={`row-${i}`}
-                    className="w-16 h-8 relative"
-                    style={{ borderLeft: "1px solid #2A2A2A" }}
+                    className="w-16 h-8 border-l border-slate-700 relative"
                 >
-                    {colArr.map((_, j) => (
+                    {cols.map((_, j) => (
                         <motion.div
                             key={`col-${j}`}
                             whileHover={{
                                 backgroundColor: getRandomColor(),
                                 transition: { duration: 0 },
                             }}
-                            animate={{ transition: { duration: 2 } }}
-                            className="w-16 h-8 relative"
-                            style={{ borderRight: "1px solid #2A2A2A", borderTop: "1px solid #2A2A2A" }}
+                            animate={{
+                                transition: { duration: 2 },
+                            }}
+                            className="w-16 h-8 border-r border-t border-slate-700 relative"
                         >
-                            {/* Plus intersections at every other cell */}
                             {j % 2 === 0 && i % 2 === 0 ? (
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -58,8 +59,7 @@ export function BoxesCore({ className, rows = 60, cols = 40, ...rest }) {
                                     viewBox="0 0 24 24"
                                     strokeWidth="1.5"
                                     stroke="currentColor"
-                                    className="absolute h-6 w-10 -top-[14px] -left-[22px] pointer-events-none"
-                                    style={{ color: "#2A2A2A", strokeWidth: "1px" }}
+                                    className="absolute h-6 w-10 -top-[14px] -left-[22px] text-slate-700 stroke-[1px] pointer-events-none"
                                 >
                                     <path
                                         strokeLinecap="round"
@@ -74,6 +74,6 @@ export function BoxesCore({ className, rows = 60, cols = 40, ...rest }) {
             ))}
         </div>
     );
-}
+};
 
 export const Boxes = React.memo(BoxesCore);

@@ -1,8 +1,10 @@
 import { motion } from "framer-motion";
-import { ArrowRight, Zap } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
 import AnimatedTextCycle from "@/components/ui/animated-text-cycle";
 import { Boxes } from "@/components/ui/background-boxes";
+import { SlidingNumber } from "@/components/ui/sliding-number";
 
 // Cycling words tuned to MoneyOps positioning
 const CYCLE_WORDS = [
@@ -15,18 +17,63 @@ const CYCLE_WORDS = [
     "strategy & forecasting",
 ];
 
-const stats = [
-    { label: "Invoices automated / mo", value: "12K+" },
-    { label: "Finance ops saved", value: "94%" },
-    { label: "Avg time saved", value: "18h/wk" },
+// Stat definitions — numeric value drives SlidingNumber, suffix is appended
+const STATS = [
+    { target: 12, suffix: "K+", label: "Invoices automated / mo" },
+    { target: 94, suffix: "%", label: "Finance ops saved" },
+    { target: 18, suffix: "h/wk", label: "Avg time saved" },
 ];
+
+/** Counts from 0 → target over ~1.4 s with a ease-out curve */
+function useCountUp(target, duration = 1400) {
+    const [value, setValue] = useState(0);
+
+    useEffect(() => {
+        let start = null;
+        const step = (ts) => {
+            if (!start) start = ts;
+            const progress = Math.min((ts - start) / duration, 1);
+            // ease-out cubic
+            const eased = 1 - Math.pow(1 - progress, 3);
+            setValue(Math.round(eased * target));
+            if (progress < 1) requestAnimationFrame(step);
+        };
+        // small delay so the page has loaded before counting starts
+        const timer = setTimeout(() => requestAnimationFrame(step), 600);
+        return () => clearTimeout(timer);
+    }, [target, duration]);
+
+    return value;
+}
+
+function AnimatedStat({ target, suffix, label }) {
+    const value = useCountUp(target);
+
+    return (
+        <div className="text-center">
+            <div
+                className="text-3xl font-bold text-white flex items-baseline justify-center gap-0.5"
+                style={{ fontVariantNumeric: "tabular-nums" }}
+            >
+                <SlidingNumber value={value} />
+                <span>{suffix}</span>
+            </div>
+            <div className="text-xs mt-1" style={{ color: "#A0A0A0" }}>
+                {label}
+            </div>
+        </div>
+    );
+}
 
 export default function Hero() {
     return (
         <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-16 bg-black">
 
             {/* ── Background Boxes layer ──────────────────────────────────── */}
-            {/* Vignette mask so grid fades gracefully into the content */}
+            <div className="absolute inset-0 overflow-hidden z-0">
+                <Boxes />
+            </div>
+            {/* Vignette mask */}
             <div
                 className="absolute inset-0 w-full h-full z-10 pointer-events-none"
                 style={{
@@ -34,10 +81,6 @@ export default function Hero() {
                         "radial-gradient(ellipse 75% 60% at 50% 50%, transparent 0%, #000 70%)",
                 }}
             />
-            {/* Grid boxes — lower z so the mask sits on top */}
-            <div className="absolute inset-0 overflow-hidden z-0">
-                <Boxes rows={55} cols={35} />
-            </div>
 
             {/* ── Content ─────────────────────────────────────────────────── */}
             <div className="relative z-20 container mx-auto text-center px-4">
@@ -55,7 +98,7 @@ export default function Hero() {
                 >
                     <span className="h-2 w-2 rounded-full bg-[#4CBB17] animate-pulse" />
                     <span className="text-sm font-medium" style={{ color: "#4CBB17" }}>
-                        AI-Powered Finance OS
+                        AI-Powered Invoicing
                     </span>
                 </motion.div>
 
@@ -66,9 +109,9 @@ export default function Hero() {
                     transition={{ duration: 0.6, delay: 0.1 }}
                     className="text-5xl md:text-7xl font-bold mb-5 tracking-tight text-white"
                 >
-                    Your Business{" "}
+                    Voice-To-Invoice{" "}
                     <br />
-                    <span style={{ color: "#4CBB17" }}>Financially Autonomous</span>
+                    <span style={{ color: "#4CBB17" }}>under a minute</span>
                 </motion.h1>
 
                 {/* ── AnimatedTextCycle sub-headline ──────────────────────── */}
@@ -87,16 +130,6 @@ export default function Hero() {
                     />
                 </motion.div>
 
-                {/* Body copy */}
-                <motion.p
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.6, delay: 0.3 }}
-                    className="text-base max-w-xl mx-auto mb-10"
-                    style={{ color: "#6A6A6A" }}
-                >
-                </motion.p>
-
                 {/* CTAs */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -112,43 +145,17 @@ export default function Hero() {
                             Get Started Free <ArrowRight className="w-4 h-4" />
                         </button>
                     </Link>
-                    <Link to="/analytics">
-                        <button
-                            className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-medium transition-all"
-                            style={{
-                                border: "1px solid #2A2A2A",
-                                color: "#A0A0A0",
-                                backgroundColor: "transparent",
-                            }}
-                            onMouseEnter={(e) => {
-                                e.currentTarget.style.borderColor = "#4CBB17";
-                                e.currentTarget.style.color = "#4CBB17";
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.borderColor = "#2A2A2A";
-                                e.currentTarget.style.color = "#A0A0A0";
-                            }}
-                        >
-                            <Zap className="w-4 h-4" />
-                            Try AI Assistant
-                        </button>
-                    </Link>
                 </motion.div>
 
-                {/* Stats */}
+                {/* ── Animated Stats ───────────────────────────────────────── */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.6, delay: 0.5 }}
                     className="flex flex-wrap justify-center gap-8 md:gap-16 mb-16"
                 >
-                    {stats.map((stat, i) => (
-                        <div key={i} className="text-center">
-                            <div className="text-3xl font-bold text-white">{stat.value}</div>
-                            <div className="text-xs mt-1" style={{ color: "#A0A0A0" }}>
-                                {stat.label}
-                            </div>
-                        </div>
+                    {STATS.map((stat) => (
+                        <AnimatedStat key={stat.label} {...stat} />
                     ))}
                 </motion.div>
 

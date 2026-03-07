@@ -77,16 +77,16 @@ export function AppSidebar(props) {
       title: "Overview",
       icon: <Home className="h-4 w-4" />,
     },
-    {
-      href: "/finances",
-      title: "Bank Accounts",
-      icon: <CreditCard className="h-4 w-4" />,
-    },
-    {
-      href: "/transactions",
-      title: "Transactions",
-      icon: <FileText className="h-4 w-4" />,
-    },
+    // {
+    //   href: "/finances",
+    //   title: "Bank Accounts",
+    //   icon: <CreditCard className="h-4 w-4" />,
+    // },
+    // {
+    //   href: "/transactions",
+    //   title: "Transactions",
+    //   icon: <FileText className="h-4 w-4" />,
+    // },
     {
       href: "/invoices",
       title: "Invoices",
@@ -130,11 +130,11 @@ export function AppSidebar(props) {
       title: "Compliance Agent",
       icon: <Shield className="h-4 w-4" />,
     },
-    {
-      href: "/alerts",
-      title: "Alert Agent",
-      icon: <Bell className="h-4 w-4" />,
-    },
+    // {
+    //   href: "/alerts",
+    //   title: "Alert Agent",
+    //   icon: <Bell className="h-4 w-4" />,
+    // },
     {
       href: "/orchestrator",
       title: "Orchestrator",
