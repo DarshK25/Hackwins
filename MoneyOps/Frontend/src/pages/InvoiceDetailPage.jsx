@@ -17,6 +17,7 @@ import {
 import { ArrowLeft, Send, FileText, Loader2, DollarSign, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useUser } from "@clerk/clerk-react";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 
 const STATUS_BADGE = {
     paid: "bg-[#4CBB1720] text-[#4CBB17] border-[#4CBB1740]",
@@ -50,6 +51,7 @@ function DarkInput({ ...props }) {
 export default function InvoiceDetailPage() {
     const { getToken } = useAuth();
     const { user } = useUser();
+    const { userId: internalUserId, orgId: internalOrgId } = useOnboardingStatus();
     const navigate = useNavigate();
     const { id } = useParams();
 
@@ -69,12 +71,12 @@ export default function InvoiceDetailPage() {
     });
 
     useEffect(() => {
-        if (id && user?.id) {
+        if (id && internalUserId) {
             fetchInvoice(id);
             fetchLogs(id);
             fetchPayments(id);
         }
-    }, [id, user?.id]);
+    }, [id, internalUserId]);
 
     const fetchInvoice = async (invoiceId) => {
         try {
@@ -82,7 +84,8 @@ export default function InvoiceDetailPage() {
             const res = await fetch(`/api/invoices/${invoiceId}`, {
                 headers: {
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 }
             });
             if (!res.ok) throw new Error("Failed to fetch invoice");
@@ -99,7 +102,8 @@ export default function InvoiceDetailPage() {
             const res = await fetch(`/api/invoices/${invoiceId}/logs`, {
                 headers: {
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 }
             });
             if (res.ok) setLogs(await res.json());
@@ -112,7 +116,8 @@ export default function InvoiceDetailPage() {
             const res = await fetch(`/api/invoices/${invoiceId}/payment`, {
                 headers: {
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 }
             });
             if (res.ok) setPayments(await res.json());
@@ -128,7 +133,8 @@ export default function InvoiceDetailPage() {
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 },
                 body: JSON.stringify({
                     amount: parseFloat(paymentForm.amount),
@@ -157,7 +163,8 @@ export default function InvoiceDetailPage() {
                 method: "PATCH",
                 headers: {
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 }
             });
             if (!res.ok) throw new Error("Failed to send invoice");
@@ -178,7 +185,8 @@ export default function InvoiceDetailPage() {
                 method: "DELETE",
                 headers: {
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 }
             });
             if (!res.ok) throw new Error("Failed to delete invoice");

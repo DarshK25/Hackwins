@@ -73,7 +73,7 @@ export default function DocumentsPage() {
                 method: "DELETE",
                 headers: {
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId
                 }
             });
             if (!res.ok) throw new Error("Delete failed");
