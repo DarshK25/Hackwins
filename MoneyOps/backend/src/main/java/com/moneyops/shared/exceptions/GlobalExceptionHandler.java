@@ -75,6 +75,6 @@ public class GlobalExceptionHandler {
         org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class).error("Unhandled exception", ex);
         ErrorResponse error = new ErrorResponse("INTERNAL_ERROR", "An unexpected error occurred", request.getDescription(false));
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ApiResponse.error("Internal server error"));
+                .body(ApiResponse.error(ex.getClass().getName() + ": " + ex.getMessage()));
     }
 }
