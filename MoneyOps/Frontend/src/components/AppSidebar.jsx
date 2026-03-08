@@ -106,6 +106,7 @@ export function AppSidebar(props) {
       title: "Overview",
       icon: <Home className="h-4 w-4" />,
     },
+
     {
       href: "/invoices",
       title: "Invoices",
