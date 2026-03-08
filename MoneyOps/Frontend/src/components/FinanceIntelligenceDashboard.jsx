@@ -97,10 +97,37 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                 }),
             ]);
 
-            if (metricsRes.ok) setMetrics(await metricsRes.json());
-            else setMetrics({ healthScore: 85, healthRating: "Healthy", totalRevenue: 5200000, netCashflow: 1200000, gstPayable: 450000, tdsPayable: 120000, grossProfit: 3500000, netProfit: 1800000, grossMargin: 67.3, netMargin: 34.6 });
+            if (metricsRes.ok) {
+                const data = await metricsRes.json();
+                const totalRevenue = data.revenue || 0;
+                const netProfit = data.netProfit || 0;
+                const expenses = data.expenses || 0;
+                const healthScore = totalRevenue > 0 ? Math.min(100, Math.max(0, Math.round(70 + (data.collectionRate / 2) + (netProfit > 0 ? 10 : -10)))) : 85; 
 
-            if (budgetRes.ok) { const d = await budgetRes.json(); setBudgets(Array.isArray(d) ? d : []); }
+                setMetrics({
+                    healthScore,
+                    healthRating: healthScore >= 80 ? "Healthy" : healthScore >= 60 ? "Average" : "Needs Attention",
+                    totalRevenue,
+                    expenses,
+                    netCashflow: netProfit,
+                    grossProfit: totalRevenue - (expenses * 0.4),
+                    netProfit,
+                    grossMargin: totalRevenue > 0 ? ((totalRevenue - (expenses * 0.4)) / totalRevenue) * 100 : 0,
+                    netMargin: totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0,
+                    gstPayable: data.overdueAmount * 0.18,
+                    tdsPayable: data.expenses * 0.1,
+                });
+            } else setMetrics({ healthScore: 85, healthRating: "Healthy", totalRevenue: 5200000, netCashflow: 1200000, gstPayable: 450000, tdsPayable: 120000, grossProfit: 3500000, netProfit: 1800000, grossMargin: 67.3, netMargin: 34.6 });
+
+            if (budgetRes.ok) { 
+                const d = await budgetRes.json();
+                const items = d.items || [];
+                setBudgets(items.map(b => ({
+                    ...b,
+                    variancePercent: b.budgeted > 0 ? (b.variance / b.budgeted) * 100 : (b.actual > 0 ? 100 : 0),
+                    status: b.actual > b.budgeted ? "over" : "under"
+                })));
+            }
             else setBudgets([
                 { category: "Marketing", budgeted: 500000, actual: 450000, variance: 50000, variancePercent: -10, status: "under" },
                 { category: "Operations", budgeted: 1200000, actual: 1250000, variance: -50000, variancePercent: 4.1, status: "over" },
@@ -109,13 +136,32 @@ export function FinanceIntelligenceDashboard({ businessId }) {
 
             if (insightsRes.ok) {
                 const d = await insightsRes.json();
-                setInsights(Array.isArray(d) ? d : (d.insights || []));
+                const items = Array.isArray(d) ? d : (d.insights || []);
+                setInsights(items.map((ins, i) => ({
+                    id: String(i),
+                    type: ins.type || "alert",
+                    title: ins.title,
+                    message: ins.description,
+                    priority: (ins.severity || "medium").toLowerCase(),
+                    actionable: ins.actionable,
+                    action: ins.actionable ? "View Details" : null
+                })));
             } else setInsights([
                 { id: "1", type: "suggestion", title: "Tax Optimization", message: "Consider investing in 80C instruments to save tax.", priority: "medium", actionable: true, action: "View Details" },
                 { id: "2", type: "alert", title: "High Expenses", message: "Operations expenses exceeded budget by 4.1%.", priority: "high", actionable: true, action: "Review Expenses" },
             ]);
 
-            if (ledgerRes.ok) { const d = await ledgerRes.json(); setLedgerEntries(Array.isArray(d) ? d : []); }
+            if (ledgerRes.ok) { 
+                const d = await ledgerRes.json(); 
+                const entries = d.entries || [];
+                setLedgerEntries(entries.map((e) => ({
+                    particular: e.description || e.category || "Transaction",
+                    date: e.date,
+                    debit: e.type === "EXPENSE" ? e.amount : 0,
+                    credit: e.type === "INCOME" ? e.amount : 0,
+                    balance: e.balance || 0
+                })));
+            }
             else setLedgerEntries([
                 { particular: "Sales Invoice #101", date: new Date().toISOString(), debit: 0, credit: 15000, balance: 15000 },
                 { particular: "Office Rent", date: new Date().toISOString(), debit: 50000, credit: 0, balance: -35000 },
