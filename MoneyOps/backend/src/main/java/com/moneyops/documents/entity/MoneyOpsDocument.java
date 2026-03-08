@@ -25,4 +25,8 @@ public class MoneyOpsDocument {
     private String linkedEntityType;
     private UUID linkedEntityId;
     private LocalDateTime createdAt = LocalDateTime.now();
+    private boolean isConfidential = false;
+    private String category;
+    private String contentSummary;
+    private java.util.List<String> detectedDeadlines;
 }

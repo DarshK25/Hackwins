@@ -19,7 +19,7 @@ import DocumentsPage from "@/pages/DocumentsPage";
 import SalesCRMPage from "@/pages/SalesCRMPage";
 import MarketResearchPage from "@/pages/MarketResearchPage";
 import FinanceIntelligencePage from "@/pages/FinanceIntelligencePage";
-import { ComplianceDashboard } from "@/components/ComplianceDashboard";
+import CompliancePage from "@/pages/CompliancePage";
 import { OrchestratorDashboard } from "@/components/OrchestratorDashboard";
 import DashboardLayout from "@/components/DashboardLayout";
 
@@ -67,7 +67,7 @@ export default function App() {
                     <Route path="/finance-agent" element={<FinanceIntelligencePage />} />
                     <Route path="/sales-crm" element={<SalesCRMPage />} />
                     <Route path="/market-intelligence" element={<MarketResearchPage />} />
-                    <Route path="/compliance" element={<ComplianceDashboard />} />
+                    <Route path="/compliance" element={<CompliancePage />} />
                     <Route path="/orchestrator" element={<OrchestratorDashboard />} />
                     <Route path="/teams" element={<TeamsPage />} />
                 </Route>

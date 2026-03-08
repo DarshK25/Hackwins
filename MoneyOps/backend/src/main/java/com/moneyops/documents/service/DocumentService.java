@@ -25,6 +25,16 @@ public class DocumentService {
         return documentRepository.findByOrgId(orgId);
     }
 
+    public List<MoneyOpsDocument> getVisibleDocuments(UUID orgId, UUID userId, boolean showPrivate) {
+        if (showPrivate) {
+            // Private = Only those uploaded by this user marked as confidential
+            return documentRepository.findByOrgIdAndUploadedByAndIsConfidential(orgId, userId, true);
+        } else {
+            // Shared = All documents in org NOT marked as confidential
+            return documentRepository.findByOrgIdAndIsConfidential(orgId, false);
+        }
+    }
+
     public MoneyOpsDocument getDocumentById(UUID id) {
         return documentRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Document not found with ID: " + id));

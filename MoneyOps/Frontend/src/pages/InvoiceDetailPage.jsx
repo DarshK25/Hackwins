@@ -71,12 +71,12 @@ export default function InvoiceDetailPage() {
     });
 
     useEffect(() => {
-        if (id && internalUserId) {
+        if (id && internalUserId && internalOrgId) {
             fetchInvoice(id);
             fetchLogs(id);
             fetchPayments(id);
         }
-    }, [id, internalUserId]);
+    }, [id, internalUserId, internalOrgId]);
 
     const fetchInvoice = async (invoiceId) => {
         try {
@@ -113,7 +113,7 @@ export default function InvoiceDetailPage() {
     const fetchPayments = async (invoiceId) => {
         try {
             const token = await getToken();
-            const res = await fetch(`/api/invoices/${invoiceId}/payment`, {
+            const res = await fetch(`/api/invoices/${invoiceId}/payments`, {
                 headers: {
                     "Authorization": `Bearer ${token}`,
                     "X-User-Id": internalUserId,
@@ -128,7 +128,8 @@ export default function InvoiceDetailPage() {
         e.preventDefault();
         try {
             const token = await getToken();
-            const res = await fetch(`/api/invoices/${invoice.id}/payment`, {
+            const invId = invoice.id || invoice._id;
+            const res = await fetch(`/api/invoices/${invId}/payment`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -138,10 +139,10 @@ export default function InvoiceDetailPage() {
                 },
                 body: JSON.stringify({
                     amount: parseFloat(paymentForm.amount),
-                    paymentDate: paymentForm.paymentDate,
+                    transactionDate: paymentForm.paymentDate,
                     paymentMethod: paymentForm.paymentMethod,
-                    transactionId: paymentForm.transactionId,
-                    notes: paymentForm.notes,
+                    referenceNumber: paymentForm.transactionId,
+                    description: paymentForm.notes,
                 }),
             });
             if (!res.ok) throw new Error("Failed to record payment");
@@ -181,7 +182,8 @@ export default function InvoiceDetailPage() {
         setDeleting(true);
         try {
             const token = await getToken();
-            const res = await fetch(`/api/invoices/${invoice.id}`, {
+            const invId = invoice.id || invoice._id;
+            const res = await fetch(`/api/invoices/${invId}`, {
                 method: "DELETE",
                 headers: {
                     "Authorization": `Bearer ${token}`,

@@ -11,6 +11,7 @@ import java.util.UUID;
 public interface DocumentRepository extends MongoRepository<MoneyOpsDocument, UUID> {
 
     List<MoneyOpsDocument> findByOrgId(UUID orgId);
-
+    List<MoneyOpsDocument> findByOrgIdAndIsConfidential(UUID orgId, boolean isConfidential);
+    List<MoneyOpsDocument> findByOrgIdAndUploadedByAndIsConfidential(UUID orgId, UUID uploadedBy, boolean isConfidential);
     List<MoneyOpsDocument> findByLinkedEntityTypeAndLinkedEntityId(String linkedEntityType, UUID linkedEntityId);
 }

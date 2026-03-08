@@ -103,6 +103,12 @@ public class InvoiceController {
         return ResponseEntity.ok(invoiceService.getInvoicePayments(id, orgId));
     }
 
+    // Alias for frontend mismatch
+    @GetMapping("/{id}/payment")
+    public ResponseEntity<List<com.moneyops.transactions.dto.TransactionDto>> getInvoicePaymentsSingular(@PathVariable String id) {
+        return getInvoicePayments(id);
+    }
+
     @PostMapping("/{id}/payment")
     public ResponseEntity<com.moneyops.shared.dto.ApiResponse<com.moneyops.transactions.dto.TransactionDto>> recordPayment(
             @PathVariable String id,

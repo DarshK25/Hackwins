@@ -5,6 +5,7 @@ import {
     PieChart as RePieChart, Pie, Cell,
 } from "recharts";
 import { useAuth, useUser } from "@clerk/clerk-react";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import { InteractiveTrendCard } from "@/components/ui/trend-card";
 
 const CHART_COLORS = ["#4CBB17", "#CD1C1880", "#60A5FA", "#FFB300", "#A78BFA", "#34D399"];
@@ -50,6 +51,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 export function FinanceIntelligenceDashboard({ businessId }) {
     const { getToken } = useAuth();
     const { user } = useUser();
+    const { orgId } = useOnboardingStatus();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState("insights");
@@ -61,10 +63,10 @@ export function FinanceIntelligenceDashboard({ businessId }) {
     useEffect(() => {
         if (businessId && user?.id) {
             fetchFinanceData();
-            const interval = setInterval(fetchFinanceData, 60000);
+            const interval = setInterval(fetchFinanceData, 300000); // 5 minutes refresh
             return () => clearInterval(interval);
         }
-    }, [businessId, user?.id]);
+    }, [businessId, user?.id, orgId]);
 
     async function fetchFinanceData() {
         setRefreshing(true);
@@ -74,25 +76,29 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                 fetch(`/api/finance-intelligence/metrics?businessId=${businessId}`, {
                     headers: {
                         "Authorization": `Bearer ${token}`,
-                        "X-User-Id": user?.id
+                        "X-User-Id": user?.id,
+                        "X-Org-Id": orgId
                     }
                 }),
                 fetch(`/api/finance-intelligence/budget?businessId=${businessId}`, {
                     headers: {
                         "Authorization": `Bearer ${token}`,
-                        "X-User-Id": user?.id
+                        "X-User-Id": user?.id,
+                        "X-Org-Id": orgId
                     }
                 }),
                 fetch(`/api/finance-intelligence/insights?businessId=${businessId}`, {
                     headers: {
                         "Authorization": `Bearer ${token}`,
-                        "X-User-Id": user?.id
+                        "X-User-Id": user?.id,
+                        "X-Org-Id": orgId
                     }
                 }),
                 fetch(`/api/finance-intelligence/ledger?businessId=${businessId}`, {
                     headers: {
                         "Authorization": `Bearer ${token}`,
-                        "X-User-Id": user?.id
+                        "X-User-Id": user?.id,
+                        "X-Org-Id": orgId
                     }
                 }),
             ]);

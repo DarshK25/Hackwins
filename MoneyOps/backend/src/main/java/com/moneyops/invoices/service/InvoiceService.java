@@ -83,19 +83,16 @@ public class InvoiceService {
 
     public InvoiceDto getInvoiceById(String id, UUID orgId) {
         try {
-            org.slf4j.LoggerFactory.getLogger(InvoiceService.class).info("Fetching invoice with id: {} and orgId: {}", id, orgId);
-            Invoice invoice = invoiceRepository.findById(id)
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found with id: " + id));
+            org.slf4j.LoggerFactory.getLogger(InvoiceService.class).info("Fetching invoice with id [{}] for orgId [{}]", id, orgId);
             
-            if (!orgId.equals(invoice.getOrgId())) {
-                org.slf4j.LoggerFactory.getLogger(InvoiceService.class).warn("Security Warning: Invoice {} belongs to org {}, but requested for org {}", id, invoice.getOrgId(), orgId);
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied to this invoice");
-            }
+            Invoice invoice = invoiceRepository.findByIdAndOrgId(id, orgId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found with id: " + id));
+
             return populateClientDetails(invoice);
         } catch (ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
-            org.slf4j.LoggerFactory.getLogger(InvoiceService.class).error("Error in getInvoiceById", e);
+            org.slf4j.LoggerFactory.getLogger(InvoiceService.class).error("Unexpected error in getInvoiceById for id " + id, e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error processing invoice: " + e.getMessage());
         }
     }
@@ -372,6 +369,11 @@ public class InvoiceService {
         paymentDto.setClientId(invoice.getClientId());
         paymentDto.setType("INCOME");
         if (paymentDto.getCurrency() == null) paymentDto.setCurrency(invoice.getCurrency());
+        
+        // Ensure transaction date is present for validation
+        if (paymentDto.getTransactionDate() == null) {
+            paymentDto.setTransactionDate(LocalDate.now());
+        }
 
         com.moneyops.transactions.dto.TransactionDto saved = transactionService.createTransaction(paymentDto, orgId, userId);
 

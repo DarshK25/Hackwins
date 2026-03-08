@@ -9,57 +9,53 @@ import {
     RefreshCw,
     Info,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { InteractiveTrendCard } from "@/components/ui/trend-card";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import { useAuth, useUser } from "@clerk/clerk-react";
 
-// ── Fallback Data ──────────────────────────────────────────────────────────────
+// ── Fallback Data (only used when API fails) ────────────────────────────────
 const FALLBACK_DATA = {
     kpis: [
-        { name: "Total Revenue", value: "₹12,45,000", trend: "up", change: "+12.5%" },
-        { name: "Net Profit", value: "₹4,20,000", trend: "up", change: "+8.2%" },
-        { name: "Expenses", value: "₹8,25,000", trend: "down", change: "-2.1%" },
-        { name: "Active Clients", value: "42", trend: "neutral", change: "0%" },
+        { name: "Total Revenue", value: "₹0", trend: "neutral", change: "0%" },
+        { name: "Net Profit", value: "₹0", trend: "neutral", change: "0%" },
+        { name: "Expenses", value: "₹0", trend: "neutral", change: "0%" },
+        { name: "Active Clients", value: "0", trend: "neutral", change: "0%" },
     ],
-    revenueByCategory: [
-        { category: "Consulting", amount: 500000, percentage: 40 },
-        { category: "Development", amount: 450000, percentage: 36 },
-        { category: "Retainers", amount: 200000, percentage: 16 },
-        { category: "Workshops", amount: 95000, percentage: 8 },
-    ],
+    revenueByCategory: [],
     monthlyTrends: [
-        { month: "Jan", revenue: 150000, expenses: 100000 },
-        { month: "Feb", revenue: 180000, expenses: 110000 },
-        { month: "Mar", revenue: 160000, expenses: 95000 },
-        { month: "Apr", revenue: 210000, expenses: 120000 },
-        { month: "May", revenue: 190000, expenses: 105000 },
-        { month: "Jun", revenue: 240000, expenses: 130000 },
+        { month: "Jan", revenue: 0, expenses: 0 },
+        { month: "Feb", revenue: 0, expenses: 0 },
+        { month: "Mar", revenue: 0, expenses: 0 },
     ],
     clientMetrics: [
-        { metric: "Client Retention Rate", value: 92, target: 95, percentage: 92 },
-        { metric: "On-time Payment Rate", value: 85, target: 90, percentage: 85 },
-        { metric: "Avg Project Value", value: "₹2.5L", target: "₹3.0L", percentage: 83 },
-        { metric: "New Leads / Month", value: 15, target: 20, percentage: 75 },
+        { metric: "Client Retention Rate", value: 0, target: 95, percentage: 0 },
+        { metric: "On-time Payment Rate", value: 0, target: 90, percentage: 0 },
+        { metric: "Avg Project Value", value: "₹0", target: "₹3.0L", percentage: 0 },
+        { metric: "New Leads / Month", value: 0, target: 20, percentage: 0 },
     ],
 };
 
 export default function AnalyticsPage() {
     const { userId, orgId } = useOnboardingStatus();
+    const { getToken } = useAuth();
+    const { user } = useUser();
     const [data, setData] = useState(null);
     const [orgName, setOrgName] = useState("Your Business");
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetchAnalytics();
-        fetchOrgName();
-    }, [orgId, userId]);
+        if (user?.id) {
+            fetchAnalytics();
+            fetchOrgName();
+        }
+    }, [orgId, userId, user?.id]);
 
     const fetchOrgName = async () => {
         if (!userId) return;
         try {
             const res = await fetch(`/api/org/my`, {
-                headers: { "X-User-Id": userId }
+                headers: { "X-User-Id": userId, "X-Org-Id": orgId }
             });
             if (res.ok) {
                 const result = await res.json();
@@ -73,10 +69,90 @@ export default function AnalyticsPage() {
     const fetchAnalytics = async () => {
         try {
             setLoading(true);
-            await new Promise((resolve) => setTimeout(resolve, 800));
-            setData(FALLBACK_DATA);
+            const token = await getToken();
+            const headers = {
+                "Authorization": `Bearer ${token}`,
+                "X-User-Id": user?.id,
+                "X-Org-Id": orgId
+            };
+
+            // Fetch all data in parallel from our backend
+            const [metricsRes, budgetRes, ledgerRes, clientsRes, invoicesRes] = await Promise.all([
+                fetch(`/api/finance-intelligence/metrics?businessId=1`, { headers }),
+                fetch(`/api/finance-intelligence/budget?businessId=1`, { headers }),
+                fetch(`/api/finance-intelligence/ledger?businessId=1`, { headers }),
+                fetch(`/api/clients`, { headers }),
+                fetch(`/api/invoices`, { headers }),
+            ]);
+
+            let metrics = null, budget = null, ledger = null, clients = [], invoices = [];
+
+            if (metricsRes.ok) metrics = await metricsRes.json();
+            if (budgetRes.ok) budget = await budgetRes.json();
+            if (ledgerRes.ok) ledger = await ledgerRes.json();
+            if (clientsRes.ok) {
+                const cr = await clientsRes.json();
+                clients = cr.data || cr || [];
+            }
+            if (invoicesRes.ok) {
+                const ir = await invoicesRes.json();
+                invoices = ir.data || ir || [];
+            }
+
+            const revenue = metrics?.revenue || 0;
+            const expenses = metrics?.expenses || 0;
+            const netProfit = metrics?.netProfit || 0;
+            const collectionRate = metrics?.collectionRate || 0;
+            const totalClients = Array.isArray(clients) ? clients.length : 0;
+
+            // Build KPIs from real data
+            const kpis = [
+                { name: "Total Revenue", value: `₹${revenue.toLocaleString("en-IN")}`, trend: revenue > 0 ? "up" : "neutral", change: revenue > 0 ? `+${collectionRate.toFixed(0)}% collected` : "0%" },
+                { name: "Net Profit", value: `₹${netProfit.toLocaleString("en-IN")}`, trend: netProfit > 0 ? "up" : netProfit < 0 ? "down" : "neutral", change: revenue > 0 ? `${((netProfit / revenue) * 100).toFixed(1)}% margin` : "0%" },
+                { name: "Expenses", value: `₹${expenses.toLocaleString("en-IN")}`, trend: expenses > 0 ? "down" : "neutral", change: revenue > 0 ? `${((expenses / revenue) * 100).toFixed(1)}% of revenue` : "0%" },
+                { name: "Active Clients", value: String(totalClients), trend: totalClients > 0 ? "up" : "neutral", change: `${metrics?.totalInvoices || 0} invoices` },
+            ];
+
+            // Build revenue by category from budget data
+            const budgetItems = budget?.items || [];
+            const revenueByCategory = budgetItems.length > 0
+                ? budgetItems.map(b => ({
+                    category: b.category,
+                    amount: b.actual || 0,
+                    percentage: budget.totalActual > 0 ? Math.round((b.actual / budget.totalActual) * 100) : 0,
+                }))
+                : FALLBACK_DATA.revenueByCategory;
+
+            // Build monthly trends from ledger entries
+            const entries = ledger?.entries || [];
+            const monthMap = {};
+            entries.forEach(e => {
+                const d = new Date(e.date);
+                const key = d.toLocaleString("en-US", { month: "short" });
+                if (!monthMap[key]) monthMap[key] = { month: key, revenue: 0, expenses: 0 };
+                if (e.type === "INCOME") monthMap[key].revenue += e.amount || 0;
+                else monthMap[key].expenses += e.amount || 0;
+            });
+            const monthlyTrends = Object.values(monthMap).length > 0
+                ? Object.values(monthMap)
+                : FALLBACK_DATA.monthlyTrends;
+
+            // Build client metrics from real data
+            const paidInvoices = metrics?.paidCount || 0;
+            const totalInvoices = metrics?.totalInvoices || 0;
+            const paymentRate = totalInvoices > 0 ? Math.round((paidInvoices / totalInvoices) * 100) : 0;
+            const avgValue = totalClients > 0 ? Math.round(revenue / totalClients) : 0;
+
+            const clientMetrics = [
+                { metric: "Collection Rate", value: collectionRate, target: 90, percentage: collectionRate },
+                { metric: "On-time Payment Rate", value: paymentRate, target: 90, percentage: paymentRate },
+                { metric: "Avg Client Value", value: `₹${avgValue.toLocaleString("en-IN")}`, target: "₹1,00,000", percentage: Math.min(100, Math.round((avgValue / 100000) * 100)) },
+                { metric: "Total Invoices", value: totalInvoices, target: 20, percentage: Math.min(100, Math.round((totalInvoices / 20) * 100)) },
+            ];
+
+            setData({ kpis, revenueByCategory, monthlyTrends, clientMetrics });
         } catch (error) {
-            console.error(error);
+            console.error("Failed to load analytics:", error);
             toast.error("Failed to load analytics data");
             setData(FALLBACK_DATA);
         } finally {
@@ -114,8 +190,8 @@ export default function AnalyticsPage() {
                     <p className="mo-text-secondary mt-1">Performance metrics for {orgName}</p>
                 </div>
                 <div className="flex gap-2">
-                    <button className="mo-btn-secondary flex items-center gap-2">
-                        <Calendar className="h-4 w-4" /> Date Range
+                    <button onClick={fetchAnalytics} className="mo-btn-secondary flex items-center gap-2">
+                        <RefreshCw className="h-4 w-4" /> Refresh
                     </button>
                     <button className="mo-btn-primary flex items-center gap-2">
                         <BarChart3 className="h-4 w-4" /> Export Report
@@ -144,7 +220,7 @@ export default function AnalyticsPage() {
                                 ? "text-[#CD1C18]"
                                 : "text-[#A0A0A0]"
                             }`}>
-                            {kpi.change} {kpi.trend !== "neutral" && "from last month"}
+                            {kpi.change}
                         </p>
                     </div>
                 ))}
@@ -155,12 +231,12 @@ export default function AnalyticsPage() {
                 {/* Revenue Trend — InteractiveTrendCard */}
                 <InteractiveTrendCard
                     title="Revenue"
-                    subtitle="6-Month Trend"
-                    totalValue={data.monthlyTrends.reduce((s, m) => s + m.revenue, 0)}
-                    newValue={data.monthlyTrends[data.monthlyTrends.length - 1]?.revenue ?? 0}
+                    subtitle="Transaction Trend"
+                    totalValue={monthlyTrends.reduce((s, m) => s + m.revenue, 0)}
+                    newValue={monthlyTrends[monthlyTrends.length - 1]?.revenue ?? 0}
                     totalValueLabel="Total Revenue"
                     newValueLabel="Last Month"
-                    chartData={data.monthlyTrends.map(m => ({ month: m.month, value: m.revenue }))}
+                    chartData={monthlyTrends.map(m => ({ month: m.month, value: m.revenue }))}
                     defaultBarColor="#2A2A2A"
                     barColor="#4CBB17"
                     adjacentBarColor="#4CBB1760"
@@ -171,12 +247,12 @@ export default function AnalyticsPage() {
                 {/* Expense Trend — InteractiveTrendCard */}
                 <InteractiveTrendCard
                     title="Expenses"
-                    subtitle="6-Month Trend"
-                    totalValue={data.monthlyTrends.reduce((s, m) => s + m.expenses, 0)}
-                    newValue={data.monthlyTrends[data.monthlyTrends.length - 1]?.expenses ?? 0}
+                    subtitle="Transaction Trend"
+                    totalValue={monthlyTrends.reduce((s, m) => s + m.expenses, 0)}
+                    newValue={monthlyTrends[monthlyTrends.length - 1]?.expenses ?? 0}
                     totalValueLabel="Total Expenses"
                     newValueLabel="Last Month"
-                    chartData={data.monthlyTrends.map(m => ({ month: m.month, value: m.expenses }))}
+                    chartData={monthlyTrends.map(m => ({ month: m.month, value: m.expenses }))}
                     defaultBarColor="#2A2A2A"
                     barColor="#CD1C18"
                     adjacentBarColor="#CD1C1860"
@@ -185,21 +261,23 @@ export default function AnalyticsPage() {
                 />
             </div>
 
-            {/* ── Revenue by Category ──────────────────────────────────────────── */}
-            <InteractiveTrendCard
-                title="Revenue by Category"
-                subtitle="Breakdown of sources"
-                totalValue={data.revenueByCategory.reduce((s, c) => s + c.amount, 0)}
-                newValue={Math.max(...data.revenueByCategory.map(c => c.amount))}
-                totalValueLabel="Total Revenue"
-                newValueLabel="Top Category"
-                chartData={data.revenueByCategory.map(c => ({ month: c.category.slice(0, 4), value: c.amount }))}
-                defaultBarColor="#2A2A2A"
-                barColor="#4CBB17"
-                adjacentBarColor="#4CBB1760"
-                formatValue={(v) => `₹${v.toLocaleString("en-IN")}`}
-                formatTooltip={(v) => `₹${v.toLocaleString("en-IN")}`}
-            />
+            {/* ── Expense by Category ──────────────────────────────────────────── */}
+            {revenueByCategory.length > 0 && (
+                <InteractiveTrendCard
+                    title="Expense by Category"
+                    subtitle="Breakdown of spending"
+                    totalValue={revenueByCategory.reduce((s, c) => s + c.amount, 0)}
+                    newValue={Math.max(...revenueByCategory.map(c => c.amount))}
+                    totalValueLabel="Total Spend"
+                    newValueLabel="Top Category"
+                    chartData={revenueByCategory.map(c => ({ month: c.category.slice(0, 4), value: c.amount }))}
+                    defaultBarColor="#2A2A2A"
+                    barColor="#4CBB17"
+                    adjacentBarColor="#4CBB1760"
+                    formatValue={(v) => `₹${v.toLocaleString("en-IN")}`}
+                    formatTooltip={(v) => `₹${v.toLocaleString("en-IN")}`}
+                />
+            )}
 
             {/* ── Client Metrics ───────────────────────────────────────────────── */}
             <div className="mo-card">
@@ -249,17 +327,18 @@ export default function AnalyticsPage() {
             {/* ── AI Insights ─────────────────────────────────────────────────── */}
             <div className="mo-card">
                 <h2 className="mo-h2 mb-1">AI Insights & Recommendations</h2>
-                <p className="mo-text-secondary mb-5">Data-driven insights to improve your business</p>
+                <p className="mo-text-secondary mb-5">Data-driven insights from your live financial data</p>
                 <div className="p-4 bg-[#4CBB1710] border border-[#4CBB1730] rounded-xl flex gap-4 items-start">
                     <div className="bg-[#4CBB1720] p-2 rounded-lg shrink-0">
                         <TrendingUp className="h-5 w-5 text-[#4CBB17]" />
                     </div>
                     <div>
-                        <h4 className="font-semibold text-[#4CBB17] text-sm">Projected Growth</h4>
+                        <h4 className="font-semibold text-[#4CBB17] text-sm">Live Financial Summary</h4>
                         <p className="text-sm text-[#A0A0A0] mt-1 leading-relaxed">
-                            Based on your current transaction history and invoice clearance rate, your revenue
-                            is projected to grow by <strong className="text-white">18%</strong> next month.
-                            Consider increasing your retainer capacity to stabilize cash flow.
+                            Your collection rate is <strong className="text-white">{(data?.kpis?.[0]?.change) || "N/A"}</strong>.
+                            {" "}You have <strong className="text-white">{data?.kpis?.[3]?.value || 0} clients</strong> generating
+                            {" "}<strong className="text-white">{data?.kpis?.[0]?.value || "₹0"}</strong> in revenue.
+                            Focus on clearing overdue invoices to improve cashflow.
                         </p>
                     </div>
                 </div>

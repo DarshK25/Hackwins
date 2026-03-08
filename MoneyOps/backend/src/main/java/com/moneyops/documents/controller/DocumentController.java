@@ -20,6 +20,20 @@ public class DocumentController {
 
     private final DocumentService documentService;
 
+    @GetMapping
+    @Operation(summary = "Get filtered documents (shared or private)")
+    public ResponseEntity<ApiResponse<java.util.Map<String, List<MoneyOpsDocument>>>> getVisibleDocuments(
+            @RequestParam UUID businessId,
+            @RequestParam(defaultValue = "false") boolean showPrivate) {
+        
+        UUID effectiveOrgId = com.moneyops.shared.utils.OrgContext.getOrgId() != null 
+                ? com.moneyops.shared.utils.OrgContext.getOrgId() : businessId;
+        UUID effectiveUserId = com.moneyops.shared.utils.OrgContext.getUserId();
+
+        List<MoneyOpsDocument> docs = documentService.getVisibleDocuments(effectiveOrgId, effectiveUserId, showPrivate);
+        return ResponseEntity.ok(ApiResponse.success(java.util.Map.of("documents", docs)));
+    }
+
     @GetMapping("/org/{orgId}")
     @Operation(summary = "Get all documents for an organization")
     public ResponseEntity<ApiResponse<List<MoneyOpsDocument>>> getDocumentsByOrg(@PathVariable UUID orgId) {

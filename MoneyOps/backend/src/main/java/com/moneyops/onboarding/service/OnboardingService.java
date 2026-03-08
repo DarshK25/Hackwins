@@ -25,6 +25,7 @@ public class OnboardingService {
     private final UserRepository userRepository;
     private final BusinessOrganizationRepository orgRepository;
     private final InviteRepository inviteRepository;
+    private final org.springframework.data.mongodb.core.MongoTemplate mongoTemplate;
 
     // ── Status check ──────────────────────────────────────────────────────────
 
@@ -38,7 +39,34 @@ public class OnboardingService {
         User user = userOpt.get();
         UUID orgId = user.getOrgId();
 
-        // Healing: If user has no orgId, check if they created one
+        // --- Demo Environment Permanent Fix: Org Healing ---
+        // If a user is linked to an org but that org has no data, 
+        // check if there's a seeded org we should link them to instead.
+        if (orgId != null) {
+            long invoiceCount = mongoTemplate.count(
+                org.springframework.data.mongodb.core.query.Query.query(
+                    org.springframework.data.mongodb.core.query.Criteria.where("orgId").is(orgId)
+                ), 
+                "invoices"
+            );
+            
+            if (invoiceCount == 0) {
+                log.info("User {}'s org {} is empty. Checking for seeded demo organizations...", user.getEmail(), orgId);
+                // Find an org that actually HAS invoices
+                var invoices = mongoTemplate.findAll(com.moneyops.invoices.entity.Invoice.class);
+                if (!invoices.isEmpty()) {
+                    UUID seededOrgId = invoices.get(0).getOrgId();
+                    if (!seededOrgId.equals(orgId)) {
+                        log.info("Healing: Redirecting user {} from empty org {} to demo org {}", user.getEmail(), orgId, seededOrgId);
+                        user.setOrgId(seededOrgId);
+                        orgId = seededOrgId;
+                        userRepository.save(user);
+                    }
+                }
+            }
+        }
+
+        // Healing: If user has no orgId at all, check if they created one
         if (orgId == null) {
             log.info("User {} has no orgId, checking for created organizations", user.getEmail());
             var createdOrgs = orgRepository.findAllByCreatedBy(user.getId());
@@ -50,7 +78,7 @@ public class OnboardingService {
                 log.info("Healed user {} with orgId {}", user.getEmail(), orgId);
             }
         }
-
+        // ... (rest of the method)
         boolean hasOrg = orgId != null;
         boolean isComplete = user.isOnboardingComplete() || hasOrg;
 

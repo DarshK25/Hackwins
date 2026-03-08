@@ -15,7 +15,6 @@ import java.util.UUID;
 public class Invoice {
 
     @Id
-    @org.springframework.data.mongodb.core.mapping.Field("_id")
     private String id;
 
     private UUID orgId;

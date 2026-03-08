@@ -76,6 +76,15 @@ public class JwtFilter extends OncePerRequestFilter {
                         OrgContext.setUserId(user.getId());
                         if (user.getOrgId() != null) {
                             OrgContext.setOrgId(user.getOrgId());
+                        } else {
+                            // Fallback: Check header if user record hasn't been linked to an org yet
+                            String orgIdHeader = request.getHeader("X-Org-Id");
+                            if (orgIdHeader != null && !orgIdHeader.startsWith("placeholder")) {
+                                try {
+                                    OrgContext.setOrgId(UUID.fromString(orgIdHeader));
+                                    log.debug("Assigned orgId {} from header to user {}", orgIdHeader, user.getId());
+                                } catch (Exception e) {}
+                            }
                         }
                     }, () -> {
                         OrgContext.setUserId(internalId);
@@ -86,12 +95,22 @@ public class JwtFilter extends OncePerRequestFilter {
                         OrgContext.setUserId(user.getId());
                         if (user.getOrgId() != null) {
                             OrgContext.setOrgId(user.getOrgId());
+                        } else {
+                            // Fallback: Check header
+                            String orgIdHeader = request.getHeader("X-Org-Id");
+                            if (orgIdHeader != null && !orgIdHeader.startsWith("placeholder")) {
+                                try {
+                                    OrgContext.setOrgId(UUID.fromString(orgIdHeader));
+                                    log.debug("Assigned orgId {} from header to user {}", orgIdHeader, user.getId());
+                                } catch (Exception e) {}
+                            }
                         }
                     }, () -> {
                         log.warn("Authenticated token sub '{}' is not a UUID and no matching user record found", finalUserId);
                     });
                 }
 
+                log.debug("Final context - User: {}, Org: {}", OrgContext.getUserId(), OrgContext.getOrgId());
                 filterChain.doFilter(request, response);
             } finally {
                 OrgContext.clear();

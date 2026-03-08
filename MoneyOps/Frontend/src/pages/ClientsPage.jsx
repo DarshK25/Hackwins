@@ -21,9 +21,18 @@ import {
     Search,
     TrendingUp,
     DollarSign,
+    MoreVertical,
+    Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useUser } from "@clerk/clerk-react";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const INITIAL_FORM = {
     name: "",
@@ -38,6 +47,7 @@ const INITIAL_FORM = {
 export default function ClientsPage() {
     const { getToken } = useAuth();
     const { user } = useUser();
+    const { userId: internalUserId, orgId: internalOrgId } = useOnboardingStatus();
     const [clients, setClients] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
@@ -46,10 +56,10 @@ export default function ClientsPage() {
     const [formData, setFormData] = useState(INITIAL_FORM);
 
     useEffect(() => {
-        if (user?.id) {
+        if (internalUserId && internalOrgId) {
             fetchClients();
         }
-    }, [user?.id]);
+    }, [internalUserId, internalOrgId]);
 
     const fetchClients = async () => {
         try {
@@ -58,7 +68,8 @@ export default function ClientsPage() {
             const res = await fetch("/api/clients", {
                 headers: {
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 }
             });
             if (!res.ok) throw new Error("Failed to fetch");
@@ -85,7 +96,8 @@ export default function ClientsPage() {
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 },
                 body: JSON.stringify(formData),
             });
@@ -97,6 +109,31 @@ export default function ClientsPage() {
             fetchClients();
         } catch (error) {
             toast.error(error?.message || "Failed to create client");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDeleteClient = async (client) => {
+        const id = client.id || client._id;
+        if (!window.confirm(`Are you sure you want to delete client "${client.name}"? This cannot be undone.`)) return;
+
+        setSaving(true);
+        try {
+            const token = await getToken();
+            const res = await fetch(`/api/clients/${id}`, {
+                method: "DELETE",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
+                }
+            });
+            if (!res.ok) throw new Error("Failed to delete client");
+            toast.success("Client deleted successfully");
+            fetchClients();
+        } catch (error) {
+            toast.error(error.message);
         } finally {
             setSaving(false);
         }
@@ -299,6 +336,21 @@ export default function ClientsPage() {
                                         {client.status || "active"}
                                     </span>
                                 </div>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button className="p-1 rounded-md hover:bg-[#2A2A2A] text-[#A0A0A0] hover:text-white transition-colors">
+                                            <MoreVertical className="h-4 w-4" />
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="bg-[#1A1A1A] border-[#2A2A2A]">
+                                        <DropdownMenuItem
+                                            onClick={() => handleDeleteClient(client)}
+                                            className="text-red-500 hover:bg-[#CD1C1820] cursor-pointer"
+                                        >
+                                            <Trash2 className="h-4 w-4 mr-2" /> Delete
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
                             </div>
                             <div className="space-y-2 text-sm">
                                 {client.email && (

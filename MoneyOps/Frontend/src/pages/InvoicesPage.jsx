@@ -7,6 +7,7 @@ import {
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
+    DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
     Plus,
@@ -18,9 +19,11 @@ import {
     Download,
     MoreVertical,
     Search,
+    Trash2
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useUser } from "@clerk/clerk-react";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 
 const STATUS_STYLES = {
     paid: "mo-badge-success",
@@ -45,6 +48,7 @@ const TABS = ["all", "draft", "sent", "paid", "overdue"];
 export default function InvoicesPage() {
     const { getToken } = useAuth();
     const { user } = useUser();
+    const { userId: internalUserId, orgId: internalOrgId } = useOnboardingStatus();
     const navigate = useNavigate();
     const [invoices, setInvoices] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -53,10 +57,10 @@ export default function InvoicesPage() {
     const [actionLoading, setActionLoading] = useState(null);
 
     useEffect(() => {
-        if (user?.id) {
+        if (internalUserId && internalOrgId) {
             fetchInvoices();
         }
-    }, [user?.id]);
+    }, [internalUserId, internalOrgId]);
 
     const fetchInvoices = async () => {
         try {
@@ -65,7 +69,8 @@ export default function InvoicesPage() {
             const res = await fetch("/api/invoices", {
                 headers: {
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 }
             });
             if (!res.ok) throw new Error("Failed to fetch");
@@ -85,6 +90,31 @@ export default function InvoicesPage() {
         if (id) navigate(`/invoices/${id}`);
     };
 
+    const handleDeleteInvoice = async (invoice) => {
+        const id = invoice.id || invoice._id;
+        if (!window.confirm(`Delete invoice #${invoice.invoiceNumber}?`)) return;
+
+        setActionLoading(id);
+        try {
+            const token = await getToken();
+            const res = await fetch(`/api/invoices/${id}`, {
+                method: "DELETE",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
+                }
+            });
+            if (!res.ok) throw new Error("Failed to delete invoice");
+            toast.success("Invoice deleted");
+            fetchInvoices();
+        } catch (error) {
+            toast.error(error.message);
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
     const handleSendInvoice = async (invoice) => {
         if (!invoice.clientEmail && !invoice.notes?.includes("@")) {
             toast.error("No email address found for this client");
@@ -98,7 +128,8 @@ export default function InvoicesPage() {
                 method: "PATCH",
                 headers: {
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 }
             });
             if (!res.ok) throw new Error("Failed to send");
@@ -120,7 +151,8 @@ export default function InvoicesPage() {
             const res = await fetch(`/api/invoices/${id}/download`, {
                 headers: {
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 }
             });
             if (!res.ok) throw new Error("Failed to generate PDF");
@@ -354,6 +386,14 @@ export default function InvoicesPage() {
                                                         <Download className="h-4 w-4 mr-2" />
                                                     )}
                                                     Download
+                                                </DropdownMenuItem>
+                                                <DropdownMenuSeparator className="bg-[#2A2A2A]" />
+                                                <DropdownMenuItem
+                                                    onClick={(e) => { e.stopPropagation(); handleDeleteInvoice(invoice); }}
+                                                    disabled={actionLoading === (invoice.id || invoice._id)}
+                                                    className="text-red-500 hover:bg-[#CD1C1820] cursor-pointer"
+                                                >
+                                                    <Trash2 className="h-4 w-4 mr-2" /> Delete
                                                 </DropdownMenuItem>
                                             </DropdownMenuContent>
                                         </DropdownMenu>
