@@ -114,7 +114,7 @@ public class UserService {
                 .collect(Collectors.toList());
     }
 
-    public void createInvite(CreateInviteRequest request, UUID orgId, UUID createdBy) {
+    public Invite createInvite(CreateInviteRequest request, UUID orgId, UUID createdBy) {
         userValidator.validateInvite(request);
         if (inviteRepository.existsByEmailAndOrgIdAndStatus(request.getEmail(), orgId, Invite.InviteStatus.PENDING)) {
             throw new RuntimeException("Invite already exists for this email");
@@ -123,14 +123,14 @@ public class UserService {
         Invite invite = new Invite();
         invite.setEmail(request.getEmail());
         invite.setRole(User.Role.valueOf(request.getRole()));
-        invite.setToken(UUID.randomUUID().toString());
+        invite.setToken(UUID.randomUUID().toString().substring(0, 8).toUpperCase()); // Shorter, more sharable code
         invite.setExpiresAt(LocalDateTime.now().plusDays(7));
         invite.setStatus(Invite.InviteStatus.PENDING);
         invite.setOrgId(orgId);
         invite.setCreatedBy(createdBy);
         invite.setCreatedAt(LocalDateTime.now());
 
-        inviteRepository.save(invite);
+        return inviteRepository.save(invite);
     }
 
     public UserDto acceptInvite(AcceptInviteRequest request) {

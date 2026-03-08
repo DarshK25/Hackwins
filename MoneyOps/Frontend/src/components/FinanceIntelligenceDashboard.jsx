@@ -4,6 +4,7 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
     PieChart as RePieChart, Pie, Cell,
 } from "recharts";
+import { useAuth, useUser } from "@clerk/clerk-react";
 import { InteractiveTrendCard } from "@/components/ui/trend-card";
 
 const CHART_COLORS = ["#4CBB17", "#CD1C1880", "#60A5FA", "#FFB300", "#A78BFA", "#34D399"];
@@ -47,6 +48,8 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 export function FinanceIntelligenceDashboard({ businessId }) {
+    const { getToken } = useAuth();
+    const { user } = useUser();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState("insights");
@@ -56,19 +59,42 @@ export function FinanceIntelligenceDashboard({ businessId }) {
     const [ledgerEntries, setLedgerEntries] = useState([]);
 
     useEffect(() => {
-        fetchFinanceData();
-        const interval = setInterval(fetchFinanceData, 60000);
-        return () => clearInterval(interval);
-    }, [businessId]);
+        if (businessId && user?.id) {
+            fetchFinanceData();
+            const interval = setInterval(fetchFinanceData, 60000);
+            return () => clearInterval(interval);
+        }
+    }, [businessId, user?.id]);
 
     async function fetchFinanceData() {
         setRefreshing(true);
         try {
+            const token = await getToken();
             const [metricsRes, budgetRes, insightsRes, ledgerRes] = await Promise.all([
-                fetch(`/api/finance-intelligence/metrics?businessId=${businessId}`),
-                fetch(`/api/finance-intelligence/budget?businessId=${businessId}`),
-                fetch(`/api/finance-intelligence/insights?businessId=${businessId}`),
-                fetch(`/api/finance-intelligence/ledger?businessId=${businessId}`),
+                fetch(`/api/finance-intelligence/metrics?businessId=${businessId}`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": user?.id
+                    }
+                }),
+                fetch(`/api/finance-intelligence/budget?businessId=${businessId}`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": user?.id
+                    }
+                }),
+                fetch(`/api/finance-intelligence/insights?businessId=${businessId}`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": user?.id
+                    }
+                }),
+                fetch(`/api/finance-intelligence/ledger?businessId=${businessId}`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": user?.id
+                    }
+                }),
             ]);
 
             if (metricsRes.ok) setMetrics(await metricsRes.json());

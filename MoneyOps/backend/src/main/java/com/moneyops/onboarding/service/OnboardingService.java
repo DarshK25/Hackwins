@@ -5,11 +5,15 @@ import com.moneyops.onboarding.dto.OnboardingStatusResponse;
 import com.moneyops.organizations.entity.BusinessOrganization;
 import com.moneyops.organizations.repository.BusinessOrganizationRepository;
 import com.moneyops.users.entity.User;
+import com.moneyops.users.entity.Invite;
 import com.moneyops.users.repository.UserRepository;
+import com.moneyops.users.repository.InviteRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -20,39 +24,40 @@ public class OnboardingService {
 
     private final UserRepository userRepository;
     private final BusinessOrganizationRepository orgRepository;
+    private final InviteRepository inviteRepository;
 
     // ── Status check ──────────────────────────────────────────────────────────
 
-    /**
-     * Check if a Clerk user has already completed onboarding.
-     * Called on every sign-in to decide which screen to show.
-     */
     public OnboardingStatusResponse getStatus(String clerkId) {
         Optional<User> userOpt = userRepository.findByClerkId(clerkId);
 
         if (userOpt.isEmpty()) {
-            // Brand new user — never seen before
             return new OnboardingStatusResponse(false, null, null, "New user — onboarding required");
         }
 
         User user = userOpt.get();
+        UUID orgId = user.getOrgId();
 
-        // If the user has an orgId, they have completed onboarding — even if the flag
-        // was never explicitly set to true (e.g. legacy records or interrupted flows).
-        boolean hasOrg = user.getOrgId() != null;
-        boolean isComplete = user.isOnboardingComplete() || hasOrg;
-
-        // Auto-heal: persist the corrected flag so future checks are instant
-        if (hasOrg && !user.isOnboardingComplete()) {
-            log.info("Auto-healing onboardingComplete flag for clerkId={}", clerkId);
-            user.setOnboardingComplete(true);
-            userRepository.save(user);
+        // Healing: If user has no orgId, check if they created one
+        if (orgId == null) {
+            log.info("User {} has no orgId, checking for created organizations", user.getEmail());
+            var createdOrgs = orgRepository.findAllByCreatedBy(user.getId());
+            if (!createdOrgs.isEmpty()) {
+                orgId = createdOrgs.get(0).getId();
+                user.setOrgId(orgId);
+                user.setOnboardingComplete(true);
+                userRepository.save(user);
+                log.info("Healed user {} with orgId {}", user.getEmail(), orgId);
+            }
         }
+
+        boolean hasOrg = orgId != null;
+        boolean isComplete = user.isOnboardingComplete() || hasOrg;
 
         return new OnboardingStatusResponse(
                 isComplete,
                 user.getId().toString(),
-                hasOrg ? user.getOrgId().toString() : null,
+                hasOrg ? orgId.toString() : null,
                 isComplete ? "Onboarding complete" : "Onboarding incomplete"
         );
     }
@@ -61,26 +66,23 @@ public class OnboardingService {
 
     public OnboardingStatusResponse createBusiness(OnboardingRequest req) {
         log.info("Creating business for clerkId={}, legalName={}", req.getClerkId(), req.getLegalName());
-        log.debug("Incoming payload: {}", req);
         
         BusinessOrganization org = new BusinessOrganization();
-
-        // ── Step 1: Business Info ─────────────────────────────────────────────
         org.setLegalName(req.getLegalName());
         org.setTradingName(req.getTradingName());
-        org.setBusinessType(req.getBusinessType());       // stored as-is: "sole_proprietorship" etc.
-        org.setIndustry(req.getIndustry());               // stored as-is: "it_software" etc.
+        org.setBusinessType(req.getBusinessType());
+        org.setIndustry(req.getIndustry());
         if (req.getRegistrationDate() != null && !req.getRegistrationDate().isEmpty()) {
             org.setRegistrationDate(java.time.LocalDate.parse(req.getRegistrationDate()));
         }
-        org.setAnnualTurnover(req.getAnnualTurnover());   // stored as-is: "below_10l" etc.
+        org.setAnnualTurnover(req.getAnnualTurnover());
         org.setPrimaryEmail(req.getPrimaryEmail());
         org.setPrimaryPhone(req.getPrimaryPhone());
         org.setWebsite(req.getWebsite());
         org.setEmployeeCount(req.getNumberOfEmployees());
         org.setRegisteredAddress(req.getRegisteredAddress());
 
-        // ── Step 2: Regulatory Info ───────────────────────────────────────────
+        // Regulatory info
         org.setPanNumber(req.getPanNumber());
         org.setStateOfRegistration(req.getStateOfRegistration());
         org.setGstRegistered(Boolean.TRUE.equals(req.getGstRegistered()));
@@ -93,24 +95,19 @@ public class OnboardingService {
         org.setIecCode(req.getIecCode());
         org.setProfessionalTaxReg(req.getProfessionalTaxReg());
 
-        // ── Step 3: Business Context ──────────────────────────────────────────
+        // Context
         org.setPrimaryActivity(req.getPrimaryActivity());
-        org.setTargetMarket(req.getTargetMarket());       // stored as-is: "B2B" | "B2C" | "B2G"
+        org.setTargetMarket(req.getTargetMarket());
         org.setKeyProducts(req.getKeyProducts());
         org.setCurrentChallenges(req.getCurrentChallenges());
-        org.setAccountingMethod(req.getAccountingMethod()); // "accrual" | "cash"
+        org.setAccountingMethod(req.getAccountingMethod());
         org.setFyStartMonth(req.getFyStartMonth() != null ? req.getFyStartMonth() : 4);
         org.setPreferredLanguage(req.getPreferredLanguage() != null ? req.getPreferredLanguage() : "en");
 
-        // ── Audit ─────────────────────────────────────────────────────────────
         User user = getOrCreateUser(req);
         org.setCreatedBy(user.getId());
 
-        // Save org to MongoDB
         BusinessOrganization savedOrg = orgRepository.save(org);
-        log.info("Saved org id={} name={} for user={}", savedOrg.getId(), savedOrg.getLegalName(), user.getId());
-
-        // Link user → org, mark onboarding done
         user.setOrgId(savedOrg.getId());
         user.setOnboardingComplete(true);
         user.setRole(User.Role.OWNER);
@@ -124,28 +121,53 @@ public class OnboardingService {
         );
     }
 
-
     // ── Join business ─────────────────────────────────────────────────────────
 
-    public OnboardingStatusResponse joinBusiness(OnboardingRequest req) {
-        // Find the organisation by invite code (invite code = org ID for now)
-        UUID orgId;
-        try {
-            orgId = UUID.fromString(req.getInviteCode());
-        } catch (IllegalArgumentException e) {
-            throw new RuntimeException("Invalid invite code");
+    public Map<String, Object> verifyInvite(String code) {
+        Invite invite = inviteRepository.findByToken(code)
+                .orElseThrow(() -> new RuntimeException("Invalid or expired invite code"));
+
+        if (invite.getStatus() != Invite.InviteStatus.PENDING) {
+            throw new RuntimeException("This invite code has already been used");
         }
 
-        BusinessOrganization org = orgRepository.findById(orgId)
-                .orElseThrow(() -> new RuntimeException("Organisation not found for invite code: " + req.getInviteCode()));
+        if (invite.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("This invite code has expired");
+        }
+
+        BusinessOrganization org = orgRepository.findById(invite.getOrgId())
+                .orElseThrow(() -> new RuntimeException("Organisation no longer exists"));
+
+        return Map.of(
+                "valid", true,
+                "businessName", org.getLegalName(),
+                "role", invite.getRole()
+        );
+    }
+
+    public OnboardingStatusResponse joinBusiness(OnboardingRequest req) {
+        log.info("User clerkId={} joining via code={}", req.getClerkId(), req.getInviteCode());
+        
+        Invite invite = inviteRepository.findByToken(req.getInviteCode())
+                .orElseThrow(() -> new RuntimeException("Invalid invite code"));
+
+        if (invite.getStatus() != Invite.InviteStatus.PENDING) {
+            throw new RuntimeException("Invite code already used");
+        }
+
+        BusinessOrganization org = orgRepository.findById(invite.getOrgId())
+                .orElseThrow(() -> new RuntimeException("Organisation not found"));
 
         User user = getOrCreateUser(req);
         user.setOrgId(org.getId());
         user.setOnboardingComplete(true);
-        user.setRole(User.Role.STAFF);
+        user.setRole(invite.getRole());
         userRepository.save(user);
 
-        log.info("User {} joined org {}", user.getId(), org.getId());
+        // Mark invite as accepted
+        invite.setStatus(Invite.InviteStatus.ACCEPTED);
+        invite.setUpdatedAt(LocalDateTime.now());
+        inviteRepository.save(invite);
 
         return new OnboardingStatusResponse(
                 true,
@@ -155,15 +177,13 @@ public class OnboardingService {
         );
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
     private User getOrCreateUser(OnboardingRequest req) {
         return userRepository.findByClerkId(req.getClerkId()).orElseGet(() -> {
             User newUser = new User();
             newUser.setClerkId(req.getClerkId());
             newUser.setEmail(req.getEmail());
             newUser.setName(req.getName());
-            newUser.setPasswordHash(""); // not used — auth is via Clerk
+            newUser.setPasswordHash("");
             newUser.setCreatedBy(newUser.getId());
             newUser.setUpdatedBy(newUser.getId());
             return userRepository.save(newUser);

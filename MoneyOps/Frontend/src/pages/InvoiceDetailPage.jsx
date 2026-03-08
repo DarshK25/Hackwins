@@ -16,13 +16,14 @@ import {
 } from "@/components/ui/select";
 import { ArrowLeft, Send, FileText, Loader2, DollarSign, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth, useUser } from "@clerk/clerk-react";
 
 const STATUS_BADGE = {
     paid: "bg-[#4CBB1720] text-[#4CBB17] border-[#4CBB1740]",
     sent: "bg-[#60A5FA20] text-[#60A5FA] border-[#60A5FA40]",
     draft: "bg-[#A0A0A020] text-[#A0A0A0] border-[#A0A0A040]",
 };
-const getStatusBadge = (s) => STATUS_BADGE[s] ?? STATUS_BADGE.draft;
+const getStatusBadge = (s) => STATUS_BADGE[s?.toLowerCase()] ?? STATUS_BADGE.draft;
 
 const inputStyle = {
     backgroundColor: "#1A1A1A",
@@ -47,6 +48,8 @@ function DarkInput({ ...props }) {
 }
 
 export default function InvoiceDetailPage() {
+    const { getToken } = useAuth();
+    const { user } = useUser();
     const navigate = useNavigate();
     const { id } = useParams();
 
@@ -66,16 +69,22 @@ export default function InvoiceDetailPage() {
     });
 
     useEffect(() => {
-        if (id) {
+        if (id && user?.id) {
             fetchInvoice(id);
             fetchLogs(id);
             fetchPayments(id);
         }
-    }, [id]);
+    }, [id, user?.id]);
 
     const fetchInvoice = async (invoiceId) => {
         try {
-            const res = await fetch(`/api/invoices/${invoiceId}`);
+            const token = await getToken();
+            const res = await fetch(`/api/invoices/${invoiceId}`, {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             if (!res.ok) throw new Error("Failed to fetch invoice");
             setInvoice(await res.json());
         } catch (error) {
@@ -86,14 +95,26 @@ export default function InvoiceDetailPage() {
 
     const fetchLogs = async (invoiceId) => {
         try {
-            const res = await fetch(`/api/invoices/${invoiceId}/logs`);
+            const token = await getToken();
+            const res = await fetch(`/api/invoices/${invoiceId}/logs`, {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             if (res.ok) setLogs(await res.json());
         } catch (error) { console.error(error); }
     };
 
     const fetchPayments = async (invoiceId) => {
         try {
-            const res = await fetch(`/api/invoices/${invoiceId}/payment`);
+            const token = await getToken();
+            const res = await fetch(`/api/invoices/${invoiceId}/payment`, {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             if (res.ok) setPayments(await res.json());
         } catch (error) { console.error(error); }
     };
@@ -101,9 +122,14 @@ export default function InvoiceDetailPage() {
     const handleRecordPayment = async (e) => {
         e.preventDefault();
         try {
+            const token = await getToken();
             const res = await fetch(`/api/invoices/${invoice.id}/payment`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                },
                 body: JSON.stringify({
                     amount: parseFloat(paymentForm.amount),
                     paymentDate: paymentForm.paymentDate,
@@ -126,8 +152,19 @@ export default function InvoiceDetailPage() {
     const handleSend = async () => {
         setSending(true);
         try {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            const token = await getToken();
+            const res = await fetch(`/api/invoices/${invoice.id}/send`, {
+                method: "PATCH",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
+            if (!res.ok) throw new Error("Failed to send invoice");
+            const updated = await res.json();
+            setInvoice(updated);
             toast.success("Invoice sent successfully");
+            fetchLogs(invoice.id);
         } catch (error) { toast.error(error?.message || "Failed to send invoice"); }
         finally { setSending(false); }
     };
@@ -136,7 +173,14 @@ export default function InvoiceDetailPage() {
         if (!window.confirm("Delete this invoice? This cannot be undone.")) return;
         setDeleting(true);
         try {
-            const res = await fetch(`/api/invoices/${invoice.id}`, { method: "DELETE" });
+            const token = await getToken();
+            const res = await fetch(`/api/invoices/${invoice.id}`, {
+                method: "DELETE",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             if (!res.ok) throw new Error("Failed to delete invoice");
             toast.success("Invoice deleted successfully");
             navigate("/invoices");
@@ -147,7 +191,7 @@ export default function InvoiceDetailPage() {
     };
 
     const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
-    const remainingAmount = invoice ? parseFloat(invoice.total) - totalPaid : 0;
+    const remainingAmount = invoice ? parseFloat(invoice.totalAmount || 0) - totalPaid : 0;
 
     if (loading) {
         return (
@@ -258,10 +302,10 @@ export default function InvoiceDetailPage() {
                         <h2 className="mo-h2 mb-5">Invoice Details</h2>
                         <div className="grid grid-cols-2 gap-4 text-sm mb-6">
                             {[
-                                { label: "Customer", value: invoice.customerName },
-                                { label: "Issue Date", value: new Date(invoice.issueDate).toLocaleDateString() },
-                                { label: "Due Date", value: new Date(invoice.dueDate).toLocaleDateString() },
-                                { label: "Total Amount", value: `₹${invoice.total}`, highlight: true },
+                                { label: "Customer", value: invoice.clientName || "N/A" },
+                                { label: "Issue Date", value: invoice.issueDate ? new Date(invoice.issueDate).toLocaleDateString() : "N/A" },
+                                { label: "Due Date", value: invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : "N/A" },
+                                { label: "Total Amount", value: `₹${(invoice.totalAmount || 0).toLocaleString("en-IN")}`, highlight: true },
                             ].map(({ label, value, highlight }) => (
                                 <div key={label}>
                                     <p className="text-[#A0A0A0] text-xs mb-1">{label}</p>
@@ -282,12 +326,12 @@ export default function InvoiceDetailPage() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#2A2A2A]">
-                                    {Array.isArray(invoice.lineItems) && invoice.lineItems.map((item, i) => (
+                                    {Array.isArray(invoice.items) && invoice.items.map((item, i) => (
                                         <tr key={i} className="hover:bg-[#1A1A1A] transition-colors">
                                             <td className="p-3 text-white">{item.description}</td>
-                                            <td className="p-3 text-right text-[#A0A0A0]">{item.quantity}</td>
+                                            <td className="p-3 text-right text-[#A0A0A0]">{item.quantity || "-"}</td>
                                             <td className="p-3 text-right text-[#A0A0A0]">₹{item.rate}</td>
-                                            <td className="p-3 text-right font-medium text-white">₹{item.amount}</td>
+                                            <td className="p-3 text-right font-medium text-white">₹{item.lineTotal}</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -296,11 +340,11 @@ export default function InvoiceDetailPage() {
 
                         <div className="flex justify-end mt-4">
                             <div className="w-48 flex flex-col gap-1 text-sm">
-                                <div className="flex justify-between py-1"><span className="text-[#A0A0A0]">Subtotal</span><span className="text-white">₹{invoice.amount}</span></div>
-                                <div className="flex justify-between py-1"><span className="text-[#A0A0A0]">Tax</span><span className="text-white">₹{invoice.tax}</span></div>
+                                <div className="flex justify-between py-1"><span className="text-[#A0A0A0]">Subtotal</span><span className="text-white">₹{(invoice.subtotal || 0).toLocaleString("en-IN")}</span></div>
+                                <div className="flex justify-between py-1"><span className="text-[#A0A0A0]">GST Total</span><span className="text-white">₹{(invoice.gstTotal || 0).toLocaleString("en-IN")}</span></div>
                                 <div className="flex justify-between py-2 font-bold border-t border-[#2A2A2A] mt-1">
                                     <span className="text-white">Total</span>
-                                    <span className="text-[#4CBB17]">₹{invoice.total}</span>
+                                    <span className="text-[#4CBB17]">₹{(invoice.totalAmount || 0).toLocaleString("en-IN")}</span>
                                 </div>
                             </div>
                         </div>
@@ -313,7 +357,7 @@ export default function InvoiceDetailPage() {
                     <div className="mo-card">
                         <h2 className="mo-h2 mb-4">Payment Summary</h2>
                         <div className="flex flex-col gap-2 text-sm">
-                            <div className="flex justify-between"><span className="text-[#A0A0A0]">Invoice Total</span><span className="font-medium text-white">₹{invoice.total}</span></div>
+                            <div className="flex justify-between"><span className="text-[#A0A0A0]">Invoice Total</span><span className="font-medium text-white">₹{(invoice.totalAmount || 0).toLocaleString("en-IN")}</span></div>
                             <div className="flex justify-between"><span className="text-[#A0A0A0]">Total Paid</span><span className="font-medium text-[#4CBB17]">₹{totalPaid.toFixed(2)}</span></div>
                             <div className="flex justify-between border-t border-[#2A2A2A] pt-3 mt-1">
                                 <span className="font-semibold text-white">Remaining</span>
@@ -334,7 +378,7 @@ export default function InvoiceDetailPage() {
                                         <div className="w-2 h-2 mt-1.5 rounded-full bg-[#4CBB17] shrink-0" />
                                         <div className="flex-1">
                                             <div className="flex justify-between">
-                                                <p className="font-semibold text-white">₹{payment.amount.toFixed(2)}</p>
+                                                <p className="font-semibold text-white">₹{(payment.amount || 0).toLocaleString("en-IN")}</p>
                                                 <span className="text-xs text-[#A0A0A0] capitalize">{payment.paymentMethod?.replace("_", " ")}</span>
                                             </div>
                                             <p className="text-xs text-[#A0A0A0]">{new Date(payment.paymentDate).toLocaleDateString()}</p>

@@ -1,6 +1,8 @@
 // src/main/java/com/moneyops/users/controller/InviteController.java
 package com.moneyops.users.controller;
 
+import com.moneyops.users.dto.CreateInviteRequest;
+import com.moneyops.users.dto.AcceptInviteRequest;
 import com.moneyops.users.entity.Invite;
 import com.moneyops.users.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +18,19 @@ public class InviteController {
 
     @Autowired
     private UserService userService;
+
+    @PostMapping
+    public ResponseEntity<Invite> createInvite(
+            @RequestBody CreateInviteRequest request,
+            @RequestHeader("X-Org-Id") UUID orgId,
+            @RequestHeader("X-User-Id") UUID userId) {
+        return ResponseEntity.ok(userService.createInvite(request, orgId, userId));
+    }
+
+    @PostMapping("/accept")
+    public ResponseEntity<?> acceptInvite(@RequestBody AcceptInviteRequest request) {
+        return ResponseEntity.ok(userService.acceptInvite(request));
+    }
 
     @GetMapping("/pending")
     public ResponseEntity<List<Invite>> getPendingInvites(@RequestHeader("X-Org-Id") UUID orgId) {

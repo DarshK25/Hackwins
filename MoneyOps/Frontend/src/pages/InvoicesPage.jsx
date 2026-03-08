@@ -20,6 +20,7 @@ import {
     Search,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth, useUser } from "@clerk/clerk-react";
 
 const STATUS_STYLES = {
     paid: "mo-badge-success",
@@ -29,18 +30,21 @@ const STATUS_STYLES = {
 };
 
 const STATUS_BADGE_CLASS = (status) => {
+    const s = status?.toLowerCase() || "draft";
     const map = {
         paid: "inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-[#4CBB1720] text-[#4CBB17] border border-[#4CBB1740]",
         sent: "inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-[#60A5FA20] text-[#60A5FA] border border-[#60A5FA40]",
         overdue: "inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-[#CD1C1820] text-[#CD1C18] border border-[#CD1C1840]",
         draft: "inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-[#A0A0A020] text-[#A0A0A0] border border-[#A0A0A040]",
     };
-    return map[status] ?? map.draft;
+    return map[s] ?? map.draft;
 };
 
 const TABS = ["all", "draft", "sent", "paid", "overdue"];
 
 export default function InvoicesPage() {
+    const { getToken } = useAuth();
+    const { user } = useUser();
     const navigate = useNavigate();
     const [invoices, setInvoices] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -49,16 +53,25 @@ export default function InvoicesPage() {
     const [actionLoading, setActionLoading] = useState(null);
 
     useEffect(() => {
-        fetchInvoices();
-    }, []);
+        if (user?.id) {
+            fetchInvoices();
+        }
+    }, [user?.id]);
 
     const fetchInvoices = async () => {
         try {
             setLoading(true);
-            const res = await fetch("/api/invoices");
+            const token = await getToken();
+            const res = await fetch("/api/invoices", {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             if (!res.ok) throw new Error("Failed to fetch");
             const data = await res.json();
-            setInvoices(data.invoices || []);
+            // Backend returns List<InvoiceDto> directly
+            setInvoices(Array.isArray(data) ? data : []);
         } catch {
             toast.error("Failed to load invoices");
             setInvoices([]);
@@ -67,19 +80,29 @@ export default function InvoicesPage() {
         }
     };
 
-    const handleViewInvoice = (invoice) => navigate(`/invoices/${invoice.id}`);
+    const handleViewInvoice = (invoice) => {
+        const id = invoice.id || invoice._id;
+        if (id) navigate(`/invoices/${id}`);
+    };
 
     const handleSendInvoice = async (invoice) => {
-        if (!invoice.client?.email && !invoice.description?.includes("@")) {
+        if (!invoice.clientEmail && !invoice.notes?.includes("@")) {
             toast.error("No email address found for this client");
             return;
         }
-        setActionLoading(invoice.id);
+        setActionLoading(invoice.id || invoice._id);
         try {
-            const res = await fetch(`/api/invoices/${invoice.id}/send`, { method: "POST" });
-            const data = await res.json();
-            if (!res.ok || !data.success) throw new Error(data.message || "Failed to send");
-            toast.success(`Invoice sent to ${invoice.client?.email || "client"}`);
+            const token = await getToken();
+            const id = invoice.id || invoice._id;
+            const res = await fetch(`/api/invoices/${id}/send`, {
+                method: "PATCH",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
+            if (!res.ok) throw new Error("Failed to send");
+            toast.success(`Invoice sent to ${invoice.clientEmail || "client"}`);
             fetchInvoices();
         } catch (error) {
             toast.error(error?.message || "Failed to send invoice");
@@ -89,10 +112,17 @@ export default function InvoicesPage() {
     };
 
     const handleDownloadInvoice = async (invoice) => {
-        setActionLoading(invoice.id);
+        const id = invoice.id || invoice._id;
+        setActionLoading(id);
         try {
             toast.info("Generating PDF…");
-            const res = await fetch(`/api/invoices/${invoice.id}/download`);
+            const token = await getToken();
+            const res = await fetch(`/api/invoices/${id}/download`, {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             if (!res.ok) throw new Error("Failed to generate PDF");
             const blob = await res.blob();
             const url = window.URL.createObjectURL(blob);
@@ -113,21 +143,21 @@ export default function InvoicesPage() {
 
     const stats = {
         total: invoices.length,
-        paid: invoices.filter((inv) => inv.status === "paid").length,
-        pending: invoices.filter((inv) => inv.status === "sent" || inv.status === "draft").length,
-        overdue: invoices.filter((inv) => inv.status === "overdue").length,
+        paid: invoices.filter((inv) => inv.status?.toLowerCase() === "paid").length,
+        pending: invoices.filter((inv) => ["sent", "draft"].includes(inv.status?.toLowerCase())).length,
+        overdue: invoices.filter((inv) => inv.status?.toLowerCase() === "overdue").length,
         paidAmount: invoices
-            .filter((inv) => inv.status === "paid")
-            .reduce((sum, inv) => sum + (inv.total || 0), 0),
+            .filter((inv) => inv.status?.toLowerCase() === "paid")
+            .reduce((sum, inv) => sum + (inv.totalAmount || 0), 0),
     };
 
     const filteredInvoices = invoices.filter((invoice) => {
-        const statusMatch = activeTab === "all" || invoice.status === activeTab;
+        const statusMatch = activeTab === "all" || invoice.status?.toLowerCase() === activeTab;
         const searchMatch =
             !searchQuery ||
             invoice.invoiceNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            invoice.client?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            invoice.description?.toLowerCase().includes(searchQuery.toLowerCase());
+            invoice.clientName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            invoice.notes?.toLowerCase().includes(searchQuery.toLowerCase());
         return statusMatch && searchMatch;
     });
 
@@ -201,8 +231,8 @@ export default function InvoicesPage() {
                             key={tab}
                             onClick={() => setActiveTab(tab)}
                             className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-all ${activeTab === tab
-                                    ? "bg-[#4CBB17] text-black"
-                                    : "bg-[#1A1A1A] text-[#A0A0A0] border border-[#2A2A2A] hover:border-[#4CBB17] hover:text-white"
+                                ? "bg-[#4CBB17] text-black"
+                                : "bg-[#1A1A1A] text-[#A0A0A0] border border-[#2A2A2A] hover:border-[#4CBB17] hover:text-white"
                                 }`}
                         >
                             {tab}
@@ -237,7 +267,7 @@ export default function InvoicesPage() {
                 <div className="flex flex-col gap-3">
                     {filteredInvoices.map((invoice) => (
                         <div
-                            key={invoice.id}
+                            key={invoice.id || invoice._id}
                             className="mo-card !py-4 cursor-pointer"
                             onClick={() => handleViewInvoice(invoice)}
                         >
@@ -253,17 +283,17 @@ export default function InvoicesPage() {
                                         </span>
                                     </div>
                                     <p className="text-sm text-[#A0A0A0]">
-                                        {invoice.client?.name || invoice.description || "No client"}
+                                        {invoice.clientName || invoice.notes || "No client"}
                                     </p>
                                 </div>
 
                                 {/* Right */}
-                                <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center gap-4">
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-sm">
                                         <div>
                                             <p className="text-[#A0A0A0] mb-0.5 text-xs">Amount</p>
                                             <p className="font-semibold text-white">
-                                                ₹{invoice.total?.toLocaleString("en-IN")}
+                                                ₹{invoice.totalAmount?.toLocaleString("en-IN")}
                                             </p>
                                         </div>
                                         <div>
@@ -281,51 +311,53 @@ export default function InvoicesPage() {
                                         <div>
                                             <p className="text-[#A0A0A0] mb-0.5 text-xs">Payment</p>
                                             <p className="font-medium text-white">
-                                                {invoice.paidDate
-                                                    ? new Date(invoice.paidDate).toLocaleDateString()
+                                                {invoice.paymentDate
+                                                    ? new Date(invoice.paymentDate).toLocaleDateString()
                                                     : "Not paid"}
                                             </p>
                                         </div>
                                     </div>
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <button className="p-2 rounded-lg hover:bg-[#2A2A2A] text-[#A0A0A0] hover:text-white transition-colors">
-                                                <MoreVertical className="h-4 w-4" />
-                                            </button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end" className="bg-[#1A1A1A] border-[#2A2A2A]">
-                                            <DropdownMenuItem
-                                                onClick={() => handleViewInvoice(invoice)}
-                                                className="text-white hover:bg-[#2A2A2A] cursor-pointer"
-                                            >
-                                                <Eye className="h-4 w-4 mr-2" /> View
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                                onClick={() => handleSendInvoice(invoice)}
-                                                disabled={actionLoading === invoice.id}
-                                                className="text-white hover:bg-[#2A2A2A] cursor-pointer"
-                                            >
-                                                {actionLoading === invoice.id ? (
-                                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                ) : (
-                                                    <Send className="h-4 w-4 mr-2" />
-                                                )}
-                                                Send
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                                onClick={() => handleDownloadInvoice(invoice)}
-                                                disabled={actionLoading === invoice.id}
-                                                className="text-white hover:bg-[#2A2A2A] cursor-pointer"
-                                            >
-                                                {actionLoading === invoice.id ? (
-                                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                ) : (
-                                                    <Download className="h-4 w-4 mr-2" />
-                                                )}
-                                                Download
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
+                                    <div onClick={(e) => e.stopPropagation()}>
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <button className="p-2 rounded-lg hover:bg-[#2A2A2A] text-[#A0A0A0] hover:text-white transition-colors">
+                                                    <MoreVertical className="h-4 w-4" />
+                                                </button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end" className="bg-[#1A1A1A] border-[#2A2A2A]">
+                                                <DropdownMenuItem
+                                                    onClick={() => handleViewInvoice(invoice)}
+                                                    className="text-white hover:bg-[#2A2A2A] cursor-pointer"
+                                                >
+                                                    <Eye className="h-4 w-4 mr-2" /> View
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    onClick={(e) => { e.stopPropagation(); handleSendInvoice(invoice); }}
+                                                    disabled={actionLoading === (invoice.id || invoice._id)}
+                                                    className="text-white hover:bg-[#2A2A2A] cursor-pointer"
+                                                >
+                                                    {actionLoading === (invoice.id || invoice._id) ? (
+                                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                    ) : (
+                                                        <Send className="h-4 w-4 mr-2" />
+                                                    )}
+                                                    Send
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    onClick={(e) => { e.stopPropagation(); handleDownloadInvoice(invoice); }}
+                                                    disabled={actionLoading === (invoice.id || invoice._id)}
+                                                    className="text-white hover:bg-[#2A2A2A] cursor-pointer"
+                                                >
+                                                    {actionLoading === (invoice.id || invoice._id) ? (
+                                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                    ) : (
+                                                        <Download className="h-4 w-4 mr-2" />
+                                                    )}
+                                                    Download
+                                                </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    </div>
                                 </div>
                             </div>
                         </div>

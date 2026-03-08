@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
+import { useAuth, useUser } from "@clerk/clerk-react";
 import {
     FileText,
     Lock,
@@ -14,42 +15,43 @@ import {
     Loader2,
 } from "lucide-react";
 import { DocumentUpload } from "@/components/DocumentUpload";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 
 const DEFAULT_BUSINESS_ID = 1;
 
 export default function DocumentsPage() {
+    const { getToken } = useAuth();
+    const { user } = useUser();
+    const { userId: internalUserId, orgId: internalOrgId } = useOnboardingStatus();
     const [loading, setLoading] = useState(true);
-    const [businessId, setBusinessId] = useState(DEFAULT_BUSINESS_ID);
     const [sharedDocuments, setSharedDocuments] = useState([]);
     const [privateDocuments, setPrivateDocuments] = useState([]);
 
     useEffect(() => {
-        initBusiness();
-    }, []);
-
-    async function initBusiness() {
-        try {
-            const initRes = await fetch("/api/init").catch(() => null);
-            if (initRes?.ok) {
-                const initData = await initRes.json();
-                const bId = initData.business?.id || DEFAULT_BUSINESS_ID;
-                setBusinessId(bId);
-                await fetchDocuments(bId);
-            } else {
-                await fetchDocuments(DEFAULT_BUSINESS_ID);
-            }
-        } catch {
-            toast.error("Failed to load business context");
-        } finally {
-            setLoading(false);
+        if (internalOrgId && internalUserId) {
+            fetchDocuments(internalOrgId);
         }
-    }
+    }, [internalOrgId, internalUserId]);
+
 
     async function fetchDocuments(bId) {
         try {
+            const token = await getToken();
             const [sharedRes, privateRes] = await Promise.all([
-                fetch(`/api/documents?businessId=${bId}&showPrivate=false`).catch(() => null),
-                fetch(`/api/documents?businessId=${bId}&showPrivate=true`).catch(() => null),
+                fetch(`/api/documents?businessId=${bId}&showPrivate=false`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": internalUserId,
+                        "X-Org-Id": bId
+                    }
+                }).catch(() => null),
+                fetch(`/api/documents?businessId=${bId}&showPrivate=true`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": internalUserId,
+                        "X-Org-Id": bId
+                    }
+                }).catch(() => null),
             ]);
             const sharedData = sharedRes?.ok ? await sharedRes.json() : { documents: [] };
             const privateData = privateRes?.ok ? await privateRes.json() : { documents: [] };
@@ -58,16 +60,25 @@ export default function DocumentsPage() {
         } catch (e) {
             console.error("Error fetching documents", e);
             toast.error("Failed to refresh documents");
+        } finally {
+            setLoading(false);
         }
     }
 
     async function handleDelete(docId) {
         if (!window.confirm("Are you sure you want to delete this document?")) return;
         try {
-            const res = await fetch(`/api/documents/${docId}`, { method: "DELETE" });
+            const token = await getToken();
+            const res = await fetch(`/api/documents/${docId}`, {
+                method: "DELETE",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             if (!res.ok) throw new Error("Delete failed");
             toast.success("Document deleted");
-            await fetchDocuments(businessId);
+            await fetchDocuments(internalOrgId);
         } catch {
             toast.error("Failed to delete document");
         }
@@ -169,8 +180,8 @@ export default function DocumentsPage() {
                 {/* Upload Column */}
                 <div className="lg:col-span-1 flex flex-col gap-4">
                     <DocumentUpload
-                        businessId={businessId}
-                        onUploadComplete={() => fetchDocuments(businessId)}
+                        businessId={internalOrgId}
+                        onUploadComplete={() => fetchDocuments(internalOrgId)}
                     />
                     {/* Mini Stats */}
                     <div className="grid grid-cols-2 gap-4">

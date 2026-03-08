@@ -39,7 +39,13 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
                 auth_token: sessionToken || "",
             });
             const params = new URLSearchParams({ user_id: userId, org_id: orgId, metadata });
-            const res = await fetch(`/api/v1/voice/token?${params.toString()}`);
+            const res = await fetch(`/api/v1/voice/token?${params.toString()}`, {
+                headers: {
+                    "Authorization": `Bearer ${sessionToken}`,
+                    "X-User-Id": userId,
+                    "X-Org-Id": orgId
+                }
+            });
             if (!res.ok) {
                 const errText = await res.text();
                 throw new Error(errText || `Failed to fetch token (${res.status})`);

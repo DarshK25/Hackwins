@@ -43,6 +43,7 @@ public class BusinessOrganization {
     private String website;
     private Integer employeeCount;
     private String registeredAddress;
+    private String pincode;
 
     // ── Step 2: Regulatory Info ────────────────────────────────────────────────
     private String panNumber;

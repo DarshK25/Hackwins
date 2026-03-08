@@ -26,6 +26,7 @@ import {
     Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth, useUser } from "@clerk/clerk-react";
 
 const BLANK_TRANSACTION = {
     accountId: "",
@@ -40,6 +41,8 @@ const FILTER_TYPES = ["all", "credit", "debit"];
 const FILTER_LABELS = { all: "All", credit: "Income", debit: "Expenses" };
 
 export default function TransactionsPage() {
+    const { getToken } = useAuth();
+    const { user } = useUser();
     const [transactions, setTransactions] = useState([]);
     const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -53,14 +56,22 @@ export default function TransactionsPage() {
     const [isUploading, setIsUploading] = useState(false);
 
     useEffect(() => {
-        fetchTransactions();
-        fetchAccounts();
-    }, []);
+        if (user?.id) {
+            fetchTransactions();
+            fetchAccounts();
+        }
+    }, [user?.id]);
 
     const fetchTransactions = async () => {
         try {
             setLoading(true);
-            const res = await fetch("/api/transactions");
+            const token = await getToken();
+            const res = await fetch("/api/transactions", {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             if (!res.ok) throw new Error("Failed to fetch");
             const data = await res.json();
             setTransactions(Array.isArray(data) ? data : data.transactions || []);
@@ -74,7 +85,13 @@ export default function TransactionsPage() {
 
     const fetchAccounts = async () => {
         try {
-            const res = await fetch("/api/accounts");
+            const token = await getToken();
+            const res = await fetch("/api/accounts", {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             if (res.ok) {
                 const data = await res.json();
                 setAccounts(data.accounts || []);
@@ -90,9 +107,14 @@ export default function TransactionsPage() {
             return;
         }
         try {
+            const token = await getToken();
             const res = await fetch("/api/transactions", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                },
                 body: JSON.stringify({ ...newTransaction, amount: parseFloat(newTransaction.amount) }),
             });
             if (!res.ok) throw new Error("Failed to create transaction");
@@ -112,10 +134,18 @@ export default function TransactionsPage() {
         }
         try {
             setIsUploading(true);
+            const token = await getToken();
             const formData = new FormData();
             formData.append("file", uploadFile);
             formData.append("accountId", uploadAccountId);
-            const res = await fetch("/api/transactions/import", { method: "POST", body: formData });
+            const res = await fetch("/api/transactions/import", {
+                method: "POST",
+                body: formData,
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             if (!res.ok) throw new Error("Upload failed");
             const data = await res.json();
             toast.success(data.message || "Transactions uploaded successfully");
@@ -133,7 +163,14 @@ export default function TransactionsPage() {
     const handleDeleteTransaction = async (id) => {
         if (!window.confirm("Delete this transaction? This cannot be undone.")) return;
         try {
-            const res = await fetch(`/api/transactions?id=${id}`, { method: "DELETE" });
+            const token = await getToken();
+            const res = await fetch(`/api/transactions?id=${id}`, {
+                method: "DELETE",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             if (!res.ok) throw new Error("Failed to delete transaction");
             toast.success("Transaction deleted successfully");
             fetchTransactions();
@@ -382,8 +419,8 @@ export default function TransactionsPage() {
                             key={type}
                             onClick={() => setFilterType(type)}
                             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${filterType === type
-                                    ? "bg-[#4CBB17] text-black"
-                                    : "bg-[#1A1A1A] text-[#A0A0A0] border border-[#2A2A2A] hover:border-[#4CBB17] hover:text-white"
+                                ? "bg-[#4CBB17] text-black"
+                                : "bg-[#1A1A1A] text-[#A0A0A0] border border-[#2A2A2A] hover:border-[#4CBB17] hover:text-white"
                                 }`}
                         >
                             {FILTER_LABELS[type]}
@@ -431,8 +468,8 @@ export default function TransactionsPage() {
                                 <div className="flex items-center gap-4 flex-1 min-w-0">
                                     <div
                                         className={`p-2 rounded-full shrink-0 ${transaction.type === "credit"
-                                                ? "bg-[#4CBB1720] text-[#4CBB17]"
-                                                : "bg-[#CD1C1820] text-[#CD1C18]"
+                                            ? "bg-[#4CBB1720] text-[#4CBB17]"
+                                            : "bg-[#CD1C1820] text-[#CD1C18]"
                                             }`}
                                     >
                                         {transaction.type === "credit" ? (
@@ -478,8 +515,8 @@ export default function TransactionsPage() {
                                         {transaction.status && (
                                             <span
                                                 className={`text-xs px-1.5 py-0.5 rounded mt-1 inline-block ${transaction.status === "completed"
-                                                        ? "bg-[#4CBB1720] text-[#4CBB17]"
-                                                        : "bg-[#A0A0A020] text-[#A0A0A0]"
+                                                    ? "bg-[#4CBB1720] text-[#4CBB17]"
+                                                    : "bg-[#A0A0A020] text-[#A0A0A0]"
                                                     }`}
                                             >
                                                 {transaction.status}

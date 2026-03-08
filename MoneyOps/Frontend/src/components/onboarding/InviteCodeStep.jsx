@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAuth } from "@clerk/clerk-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,6 +7,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 
 export function InviteCodeStep({ onNext, loading }) {
+    const { getToken } = useAuth();
     const [inviteCode, setInviteCode] = useState("");
     const [verifying, setVerifying] = useState(false);
     const [verification, setVerification] = useState(null); // { valid, businessName?, error? }
@@ -14,16 +16,22 @@ export function InviteCodeStep({ onNext, loading }) {
         if (!inviteCode.trim()) return;
         setVerifying(true);
         try {
+            const token = await getToken();
             const response = await fetch("/api/onboarding/verify-invite", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
                 body: JSON.stringify({ code: inviteCode }),
             });
-            const data = await response.json();
-            if (response.ok && data.valid) {
+            const result = await response.json();
+            const data = result.data; // Unwrapping ApiResponse
+
+            if (response.ok && data?.valid) {
                 setVerification({ valid: true, businessName: data.businessName });
             } else {
-                setVerification({ valid: false, error: data.error || "Invalid code" });
+                setVerification({ valid: false, error: result.message || data?.error || "Invalid code" });
             }
         } catch {
             setVerification({ valid: false, error: "Verification failed. Please try again." });

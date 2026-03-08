@@ -20,7 +20,7 @@ import {
 import { useOrganization, useAuth } from "@clerk/clerk-react";
 import { toast } from "sonner";
 
-const AI_GATEWAY_URL = import.meta.env.VITE_AI_GATEWAY_URL || "http://localhost:8001";
+const AI_GATEWAY_URL = ""; // Use Vite proxy via relative paths (/api/v1)
 
 // ─── Strategy result components ───────────────────────────────────────────
 const HEALTH_COLOR = (score) => score >= 75 ? "#4CBB17" : score >= 50 ? "#FFB300" : "#CD1C18";

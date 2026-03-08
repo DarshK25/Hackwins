@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { InteractiveTrendCard } from "@/components/ui/trend-card";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 
 // ── Fallback Data ──────────────────────────────────────────────────────────────
 const FALLBACK_DATA = {
@@ -44,12 +45,30 @@ const FALLBACK_DATA = {
 };
 
 export default function AnalyticsPage() {
+    const { userId, orgId } = useOnboardingStatus();
     const [data, setData] = useState(null);
+    const [orgName, setOrgName] = useState("Your Business");
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         fetchAnalytics();
-    }, []);
+        fetchOrgName();
+    }, [orgId, userId]);
+
+    const fetchOrgName = async () => {
+        if (!userId) return;
+        try {
+            const res = await fetch(`/api/org/my`, {
+                headers: { "X-User-Id": userId }
+            });
+            if (res.ok) {
+                const result = await res.json();
+                setOrgName(result.data?.legalName || "Your Business");
+            }
+        } catch (err) {
+            console.error("Failed to fetch org name", err);
+        }
+    };
 
     const fetchAnalytics = async () => {
         try {
@@ -92,7 +111,7 @@ export default function AnalyticsPage() {
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
                     <h1 className="mo-h1">Analytics</h1>
-                    <p className="mo-text-secondary mt-1">Business insights and performance metrics</p>
+                    <p className="mo-text-secondary mt-1">Performance metrics for {orgName}</p>
                 </div>
                 <div className="flex gap-2">
                     <button className="mo-btn-secondary flex items-center gap-2">

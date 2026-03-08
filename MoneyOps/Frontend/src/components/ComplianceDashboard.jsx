@@ -8,6 +8,7 @@ import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { useAuth, useUser } from "@clerk/clerk-react";
 
 const PRIORITY_BADGE = {
     high: "bg-[#CD1C1820] text-[#CD1C18] border-[#CD1C1840]",
@@ -52,6 +53,8 @@ function StatCard({ label, value, sub, icon: Icon, iconColor, accent }) {
 }
 
 export function ComplianceDashboard({ businessId, data, onRefresh }) {
+    const { getToken } = useAuth();
+    const { user } = useUser();
     const [activeTab, setActiveTab] = useState("overview");
     const [date, setDate] = useState(new Date());
     const [deadlines, setDeadlines] = useState([]);
@@ -59,14 +62,28 @@ export function ComplianceDashboard({ businessId, data, onRefresh }) {
     const [formData, setFormData] = useState({ amount: "", category: "professional", isIndividual: "true" });
 
     useEffect(() => {
-        fetch(`/api/deadlines?businessId=${businessId}`)
-            .then(res => { if (!res.ok) throw new Error(); return res.json(); })
-            .then(data => setDeadlines(data.deadlines || []))
-            .catch(() => setDeadlines([
-                { id: 1, title: "GST Filing (Current Month)", dueDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 20).toISOString().split("T")[0], type: "GST", priority: "high" },
-                { id: 2, title: "TDS Payment", dueDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 7).toISOString().split("T")[0], type: "TDS", priority: "high" },
-            ]));
-    }, [businessId]);
+        const fetchDeadlines = async () => {
+            if (!businessId || !user?.id) return;
+            try {
+                const token = await getToken();
+                const res = await fetch(`/api/deadlines?businessId=${businessId}`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": user?.id
+                    }
+                });
+                if (!res.ok) throw new Error();
+                const data = await res.json();
+                setDeadlines(data.deadlines || []);
+            } catch (error) {
+                setDeadlines([
+                    { id: 1, title: "GST Filing (Current Month)", dueDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 20).toISOString().split("T")[0], type: "GST", priority: "high" },
+                    { id: 2, title: "TDS Payment", dueDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 7).toISOString().split("T")[0], type: "TDS", priority: "high" },
+                ]);
+            }
+        };
+        fetchDeadlines();
+    }, [businessId, user?.id, getToken]);
 
     const complianceScore = data?.score || 85;
     const pendingTasks = data?.pendingTasks || [
@@ -81,9 +98,14 @@ export function ComplianceDashboard({ businessId, data, onRefresh }) {
 
     async function onCalculate() {
         try {
+            const token = await getToken();
             const res = await fetch("/api/tds/calc", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                },
                 body: JSON.stringify({ amount: parseFloat(formData.amount), category: formData.category, isIndividual: formData.isIndividual === "true" }),
             });
             if (!res.ok) throw new Error("Calculation failed");

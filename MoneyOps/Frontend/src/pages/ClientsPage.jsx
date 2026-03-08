@@ -23,6 +23,7 @@ import {
     DollarSign,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth, useUser } from "@clerk/clerk-react";
 
 const INITIAL_FORM = {
     name: "",
@@ -35,6 +36,8 @@ const INITIAL_FORM = {
 };
 
 export default function ClientsPage() {
+    const { getToken } = useAuth();
+    const { user } = useUser();
     const [clients, setClients] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
@@ -43,13 +46,21 @@ export default function ClientsPage() {
     const [formData, setFormData] = useState(INITIAL_FORM);
 
     useEffect(() => {
-        fetchClients();
-    }, []);
+        if (user?.id) {
+            fetchClients();
+        }
+    }, [user?.id]);
 
     const fetchClients = async () => {
         try {
             setLoading(true);
-            const res = await fetch("/api/clients");
+            const token = await getToken();
+            const res = await fetch("/api/clients", {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             if (!res.ok) throw new Error("Failed to fetch");
             const data = await res.json();
             setClients(Array.isArray(data) ? data : []);
@@ -68,13 +79,18 @@ export default function ClientsPage() {
         }
         setSaving(true);
         try {
+            const token = await getToken();
             const res = await fetch("/api/clients", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                },
                 body: JSON.stringify(formData),
             });
             const data = await res.json();
-            if (!res.ok || !data.success) throw new Error(data.message || "Failed to create client");
+            if (!res.ok) throw new Error(data.message || "Failed to create client");
             toast.success("Client created successfully");
             setDialogOpen(false);
             setFormData(INITIAL_FORM);
@@ -276,8 +292,8 @@ export default function ClientsPage() {
                                     <h3 className="text-base font-semibold text-white truncate">{client.name}</h3>
                                     <span
                                         className={`mt-1 inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${client.status === "active"
-                                                ? "bg-[#4CBB1720] text-[#4CBB17] border border-[#4CBB1740]"
-                                                : "bg-[#A0A0A020] text-[#A0A0A0] border border-[#A0A0A040]"
+                                            ? "bg-[#4CBB1720] text-[#4CBB17] border border-[#4CBB1740]"
+                                            : "bg-[#A0A0A020] text-[#A0A0A0] border border-[#A0A0A040]"
                                             }`}
                                     >
                                         {client.status || "active"}

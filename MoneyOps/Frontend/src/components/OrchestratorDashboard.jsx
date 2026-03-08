@@ -3,6 +3,7 @@ import {
     GitMerge, Activity, MessageSquare, Clock, CheckCircle2,
     Loader2, RefreshCw, Mic, Users, TrendingUp,
 } from "lucide-react";
+import { useAuth, useUser } from "@clerk/clerk-react";
 
 const STATUS_DOT = {
     completed: "#4CBB17",
@@ -33,6 +34,8 @@ function StatCard({ label, value, sub, icon: Icon, iconColor }) {
 }
 
 export function OrchestratorDashboard({ businessId }) {
+    const { getToken } = useAuth();
+    const { user } = useUser();
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState("activities");
     const [activities, setActivities] = useState([]);
@@ -45,16 +48,29 @@ export function OrchestratorDashboard({ businessId }) {
     ]);
 
     useEffect(() => {
-        fetchOrchestratorData();
-        const interval = setInterval(fetchOrchestratorData, 10000);
-        return () => clearInterval(interval);
-    }, [businessId]);
+        if (businessId && user?.id) {
+            fetchOrchestratorData();
+            const interval = setInterval(fetchOrchestratorData, 10000);
+            return () => clearInterval(interval);
+        }
+    }, [businessId, user?.id]);
 
     async function fetchOrchestratorData() {
         try {
+            const token = await getToken();
             const [activitiesRes, conversationsRes] = await Promise.all([
-                fetch(`/api/orchestrator/activities?businessId=${businessId}`),
-                fetch(`/api/orchestrator/conversations?businessId=${businessId}`),
+                fetch(`/api/orchestrator/activities?businessId=${businessId}`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": user?.id
+                    }
+                }),
+                fetch(`/api/orchestrator/conversations?businessId=${businessId}`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": user?.id
+                    }
+                }),
             ]);
             if (activitiesRes.ok) { const d = await activitiesRes.json(); setActivities(d.activities || []); }
             else setActivities([

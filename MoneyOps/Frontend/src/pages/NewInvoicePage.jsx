@@ -15,8 +15,9 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Trash, ArrowLeft, Loader2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth, useUser } from "@clerk/clerk-react";
 
-const BLANK_ITEM = { description: "", quantity: 1, rate: 0, gstRate: 18, isService: false };
+const BLANK_ITEM = { description: "", quantity: 1, rate: 0, gstPercent: 18, isService: false };
 const BLANK_CLIENT = { name: "", email: "", phone: "", company: "", gstin: "", address: "" };
 
 const inputStyle = {
@@ -42,6 +43,8 @@ function DarkInput({ ...props }) {
 }
 
 export default function NewInvoicePage() {
+    const { getToken } = useAuth();
+    const { user } = useUser();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [previewData, setPreviewData] = useState(null);
@@ -58,11 +61,21 @@ export default function NewInvoicePage() {
         items: [{ ...BLANK_ITEM }],
     });
 
-    useEffect(() => { fetchClients(); }, []);
+    useEffect(() => {
+        if (user?.id) {
+            fetchClients();
+        }
+    }, [user?.id]);
 
     const fetchClients = async () => {
         try {
-            const res = await fetch("/api/clients");
+            const token = await getToken();
+            const res = await fetch("/api/clients", {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                }
+            });
             const data = await res.json();
             setClients(Array.isArray(data) ? data : []);
         } catch { setClients([]); }
@@ -73,18 +86,24 @@ export default function NewInvoicePage() {
         if (!newClientData.name.trim()) { toast.error("Client name is required"); return; }
         setSavingClient(true);
         try {
+            const token = await getToken();
             const res = await fetch("/api/clients", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                },
                 body: JSON.stringify(newClientData),
             });
             const data = await res.json();
-            if (!res.ok || !data.success) throw new Error(data.message || "Failed to create client");
+            if (!res.ok) throw new Error(data.message || "Failed to create client");
             toast.success("Client created successfully");
             setClientDialogOpen(false);
             setNewClientData(BLANK_CLIENT);
             await fetchClients();
-            setFormData((prev) => ({ ...prev, clientId: data.client.id, customerName: data.client.name }));
+            // Client API returns ClientDto directly
+            setFormData((prev) => ({ ...prev, clientId: data.id, customerName: data.name }));
         } catch (error) {
             toast.error(error?.message || "Failed to create client");
         } finally { setSavingClient(false); }
@@ -101,43 +120,83 @@ export default function NewInvoicePage() {
         let subtotal = 0;
         let totalGst = 0;
         formData.items.forEach((item) => {
-            const amt = item.isService ? item.rate : item.quantity * item.rate;
+            const amt = item.isService ? item.rate : (item.quantity || 1) * item.rate;
             subtotal += amt;
-            totalGst += (amt * item.gstRate) / 100;
+            totalGst += (amt * (item.gstPercent || 0)) / 100;
         });
         return { subtotal: subtotal.toFixed(2), gstTotal: totalGst.toFixed(2), total: (subtotal + totalGst).toFixed(2) };
     }, [formData.items]);
 
     const buildLineItems = () =>
-        formData.items.map((item) => {
-            const amt = item.isService ? item.rate : item.quantity * item.rate;
-            return { description: item.description, quantity: item.isService ? 1 : item.quantity, rate: item.rate, gstRate: item.gstRate, isService: item.isService, amount: amt, gstAmount: (amt * item.gstRate) / 100, total: amt + (amt * item.gstRate) / 100 };
-        });
+        formData.items.map((item) => ({
+            type: item.isService ? "SERVICE" : "PRODUCT",
+            description: item.description,
+            quantity: item.isService ? null : (item.quantity || 1),
+            rate: item.rate,
+            gstPercent: item.gstPercent || 0
+        }));
 
     const handlePreview = async () => {
+        if (!formData.clientId) { toast.error("Please select or create a client first"); return; }
         setLoading(true);
         try {
+            const token = await getToken();
+            const payload = {
+                clientId: formData.clientId,
+                issueDate: formData.date,
+                dueDate: formData.dueDate,
+                items: buildLineItems()
+            };
             const res = await fetch("/api/invoices/preview", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ items: buildLineItems(), customerName: formData.customerName, dueDate: formData.dueDate, clientRequestId: Math.random().toString() }),
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                },
+                body: JSON.stringify(payload),
             });
             const data = await res.json();
-            if (!res.ok || !data.success) throw new Error(data.message || "Failed to preview");
-            setPreviewData(data.preview);
+            if (!res.ok) throw new Error(data.message || "Failed to preview");
+            // Since backend is returning the DTO back for now, we simulate the breakdown
+            const subtotal = parseFloat(liveCalculation.subtotal);
+            const gst = parseFloat(liveCalculation.gstTotal);
+            setPreviewData({
+                subtotal,
+                cgst: gst / 2,
+                sgst: gst / 2,
+                total: subtotal + gst,
+                riskFlags: []
+            });
         } catch (error) { toast.error(error?.message || "Preview failed"); }
         finally { setLoading(false); }
     };
 
     const handleCreate = async () => {
+        if (!formData.clientId) { toast.error("Please select or create a client first"); return; }
         setLoading(true);
         try {
+            const token = await getToken();
+            const payload = {
+                clientId: formData.clientId,
+                issueDate: formData.date,
+                dueDate: formData.dueDate,
+                items: buildLineItems(),
+                currency: "INR",
+                status: "DRAFT"
+            };
             const res = await fetch("/api/invoices", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ clientId: formData.clientId || undefined, customerName: formData.customerName, dueDate: new Date(formData.dueDate), issueDate: new Date(formData.date), items: buildLineItems(), clientRequestId: Math.random().toString() }),
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id
+                },
+                body: JSON.stringify(payload),
             });
             const data = await res.json();
-            if (!res.ok || !data.success) throw new Error(data.message || "Failed to create");
-            toast.success(data.message || "Invoice created successfully");
+            if (!res.ok) throw new Error(data.message || "Failed to create invoice");
+            toast.success("Invoice created successfully");
             navigate("/invoices");
         } catch (error) { toast.error(error?.message || "Failed to create invoice"); }
         finally { setLoading(false); }
@@ -259,7 +318,7 @@ export default function NewInvoicePage() {
                                         </div>
                                         <div className="w-20">
                                             <label className="text-xs text-[#A0A0A0] block mb-1">GST %</label>
-                                            <DarkInput type="number" value={item.gstRate} onChange={(e) => handleItemChange(index, "gstRate", Number(e.target.value))} placeholder="18" />
+                                            <DarkInput type="number" value={item.gstPercent} onChange={(e) => handleItemChange(index, "gstPercent", Number(e.target.value))} placeholder="18" />
                                         </div>
                                         <button
                                             className="p-2 rounded-lg text-[#A0A0A0] hover:text-[#CD1C18] hover:bg-[#CD1C1820] transition-all mb-0.5"

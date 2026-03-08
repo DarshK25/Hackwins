@@ -1,3 +1,4 @@
+// CLEANUP: removed Customer Agent, Growth Agent, Operations Agent, Strategy Agent, added Command Center, Sales & CRM — June 2025
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
@@ -29,6 +30,8 @@ import {
   SidebarHeader,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import { useState, useEffect } from "react";
 
 function SidebarNav({ items }) {
   const { pathname } = useLocation();
@@ -75,21 +78,33 @@ function SidebarNav({ items }) {
 }
 
 export function AppSidebar(props) {
+  const { orgId, userId } = useOnboardingStatus();
+  const [orgName, setOrgName] = useState("MoneyOps");
+
+  useEffect(() => {
+    const fetchOrgName = async () => {
+      if (!userId) return;
+      try {
+        const response = await fetch(`/api/org/my`, {
+          headers: { "X-User-Id": userId }
+        });
+        if (response.ok) {
+          const result = await response.json();
+          const data = result.data;
+          setOrgName(data.legalName || "MoneyOps");
+        }
+      } catch (err) {
+        console.error("Failed to fetch org name", err);
+      }
+    };
+    fetchOrgName();
+  }, [orgId, userId]);
+
   const mainNavItems = [
     {
       href: "/analytics",
       title: "Overview",
       icon: <Home className="h-4 w-4" />,
-    },
-    {
-      href: "/finances",
-      title: "Bank Accounts",
-      icon: <CreditCard className="h-4 w-4" />,
-    },
-    {
-      href: "/transactions",
-      title: "Transactions",
-      icon: <FileText className="h-4 w-4" />,
     },
     {
       href: "/invoices",
@@ -115,49 +130,24 @@ export function AppSidebar(props) {
 
   const agentNavItems = [
     {
-      href: "/finance-intelligence",
+      href: "/finance-agent",
       title: "Finance Agent",
       icon: <Calculator className="h-4 w-4" />,
     },
     {
       href: "/sales-crm",
-      title: "Sales Agent",
+      title: "Sales CRM",
       icon: <TrendingUp className="h-4 w-4" />,
     },
     {
-      href: "/strategy-agent",
-      title: "Strategy Agent",
-      icon: <Brain className="h-4 w-4" />,
-    },
-    {
-      href: "/market-research",
-      title: "Research Agent",
-      icon: <Search className="h-4 w-4" />,
-    },
-    {
       href: "/compliance",
-      title: "Compliance Agent",
+      title: "Compliance",
       icon: <Shield className="h-4 w-4" />,
     },
     {
-      href: "/alerts",
-      title: "Alert Agent",
-      icon: <Bell className="h-4 w-4" />,
-    },
-    {
-      href: "/customer-agent",
-      title: "Customer Agent",
-      icon: <Heart className="h-4 w-4" />,
-    },
-    {
-      href: "/growth-agent",
-      title: "Growth Agent",
-      icon: <Rocket className="h-4 w-4" />,
-    },
-    {
-      href: "/operations-agent",
-      title: "Operations Agent",
-      icon: <Cog className="h-4 w-4" />,
+      href: "/market-intelligence",
+      title: "Market Agent",
+      icon: <Search className="h-4 w-4" />,
     },
     {
       href: "/orchestrator",
@@ -171,8 +161,7 @@ export function AppSidebar(props) {
       href: "/teams",
       title: "Teams",
       icon: <Users className="h-4 w-4" />,
-    },
-    {
+    },{
       href: "/settings",
       title: "Settings",
       icon: <Settings className="h-4 w-4" />,
@@ -194,8 +183,8 @@ export function AppSidebar(props) {
             </svg>
           </div>
           <div className="flex flex-col min-w-0">
-            <span className="text-sm font-bold text-white truncate">MoneyOps</span>
-            <span className="text-xs text-[#A0A0A0] truncate">Enterprise AI Finance</span>
+            <span className="text-sm font-bold text-white truncate">{orgName}</span>
+            <span className="text-xs text-[#A0A0A0] truncate">MoneyOps Workspace</span>
           </div>
         </div>
       </SidebarHeader>

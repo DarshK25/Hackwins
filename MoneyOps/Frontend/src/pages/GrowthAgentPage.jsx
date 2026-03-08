@@ -6,7 +6,7 @@ import { Rocket, Tag, MapPin, BarChart3, RefreshCw } from "lucide-react";
 import { useOrganization, useAuth } from "@clerk/clerk-react";
 import { toast } from "sonner";
 
-const AI_GATEWAY_URL = import.meta.env.VITE_AI_GATEWAY_URL || "http://localhost:8000";
+const AI_GATEWAY_URL = ""; // Use Vite proxy via relative paths (/api/v1)
 
 export default function GrowthAgentPage() {
     const { organization } = useOrganization();

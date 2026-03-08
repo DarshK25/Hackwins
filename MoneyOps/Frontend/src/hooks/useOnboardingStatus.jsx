@@ -3,7 +3,7 @@ import { useUser } from "@clerk/clerk-react";
 
 const OnboardingContext = createContext(null);
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+const BACKEND_URL = ""; // Use Vite proxy via relative paths
 
 export function OnboardingProvider({ children }) {
     const { user, isLoaded } = useUser();
@@ -21,7 +21,12 @@ export function OnboardingProvider({ children }) {
         setLoading(true);
         try {
             const res = await fetch(
-                `${BACKEND_URL}/api/onboarding/status?clerkId=${user.id}`
+                `${BACKEND_URL}/api/onboarding/status?clerkId=${user.id}`,
+                {
+                    headers: {
+                        "X-User-Id": user.id
+                    }
+                }
             );
             if (!res.ok) throw new Error("Status check failed");
             const json = await res.json();

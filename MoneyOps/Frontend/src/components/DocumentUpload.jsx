@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useAuth } from "@clerk/clerk-react";
 import {
     Card,
     CardContent,
@@ -13,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 
 export function DocumentUpload({ businessId, onUploadComplete }) {
+    const { getToken } = useAuth();
     const [isDragging, setIsDragging] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
@@ -72,9 +74,11 @@ export function DocumentUpload({ businessId, onUploadComplete }) {
                 });
             }, 200);
 
+            const token = await getToken();
             const response = await fetch("/api/documents/upload", {
                 method: "POST",
                 body: formData,
+                headers: { "Authorization": `Bearer ${token}` }
             });
 
             clearInterval(progressInterval);
@@ -124,8 +128,8 @@ export function DocumentUpload({ businessId, onUploadComplete }) {
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
                     className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${isDragging
-                            ? "border-primary bg-primary/5"
-                            : "border-border hover:border-primary/50 hover:bg-muted/50"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/50 hover:bg-muted/50"
                         }`}
                 >
                     <input

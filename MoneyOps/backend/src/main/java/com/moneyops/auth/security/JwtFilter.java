@@ -7,6 +7,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -100,11 +101,22 @@ public class JwtFilter extends OncePerRequestFilter {
             String userIdHeader = request.getHeader("X-User-Id");
             String orgIdHeader = request.getHeader("X-Org-Id");
 
-            if (userIdHeader != null && userIdHeader.startsWith("user_")) {
+            if (userIdHeader != null) {
                 try {
-                    final String clerkId = userIdHeader;
-                    userRepository.findByClerkId(clerkId).ifPresentOrElse(user -> {
-                        org.slf4j.LoggerFactory.getLogger(JwtFilter.class).debug("Resolved Clerk ID {} to internal user {} and org {}", clerkId, user.getId(), user.getOrgId());
+                    final String idStr = userIdHeader;
+                    Optional<com.moneyops.users.entity.User> userOpt;
+                    
+                    if (idStr.startsWith("user_")) {
+                        userOpt = userRepository.findByClerkId(idStr);
+                    } else {
+                        try {
+                            userOpt = userRepository.findById(UUID.fromString(idStr));
+                        } catch (Exception e) {
+                            userOpt = Optional.empty();
+                        }
+                    }
+
+                    userOpt.ifPresentOrElse(user -> {
                         UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                                 user.getEmail(), null, java.util.Collections.emptyList());
                         SecurityContextHolder.getContext().setAuthentication(auth);
@@ -118,7 +130,6 @@ public class JwtFilter extends OncePerRequestFilter {
                             } catch (Exception e) {}
                         }
                     }, () -> {
-                        org.slf4j.LoggerFactory.getLogger(JwtFilter.class).warn("Failed to resolve Clerk ID {} to an internal user", clerkId);
                     });
                     filterChain.doFilter(request, response);
                 } finally {

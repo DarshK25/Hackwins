@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import LandingPage from "@/pages/LandingPage";
 import SignInPage from "@/pages/SignInPage";
@@ -16,16 +16,11 @@ import AnalyticsPage from "@/pages/AnalyticsPage";
 import TransactionsPage from "@/pages/TransactionsPage";
 import TeamsPage from "@/pages/TeamsPage";
 import DocumentsPage from "@/pages/DocumentsPage";
-import AlertAgentPage from "@/pages/AlertAgentPage";
-import ComplianceAgentPage from "@/pages/ComplianceAgentPage";
-import FinanceIntelligencePage from "@/pages/FinanceIntelligencePage";
-import OrchestratorPage from "@/pages/OrchestratorPage";
-import MarketResearchPage from "@/pages/MarketResearchPage";
 import SalesCRMPage from "@/pages/SalesCRMPage";
-import StrategyAgentPage from "@/pages/StrategyAgentPage";
-import CustomerAgentPage from "@/pages/CustomerAgentPage";
-import GrowthAgentPage from "@/pages/GrowthAgentPage";
-import OperationsAgentPage from "@/pages/OperationsAgentPage";
+import MarketResearchPage from "@/pages/MarketResearchPage";
+import FinanceIntelligencePage from "@/pages/FinanceIntelligencePage";
+import { ComplianceDashboard } from "@/components/ComplianceDashboard";
+import { OrchestratorDashboard } from "@/components/OrchestratorDashboard";
 import DashboardLayout from "@/components/DashboardLayout";
 
 export default function App() {
@@ -66,18 +61,15 @@ export default function App() {
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/analytics" element={<AnalyticsPage />} />
                     <Route path="/transactions" element={<TransactionsPage />} />
-                    <Route path="/teams" element={<TeamsPage />} />
                     <Route path="/documents" element={<DocumentsPage />} />
-                    <Route path="/alerts" element={<AlertAgentPage />} />
-                    <Route path="/compliance" element={<ComplianceAgentPage />} />
-                    <Route path="/finance-intelligence" element={<FinanceIntelligencePage />} />
-                    <Route path="/orchestrator" element={<OrchestratorPage />} />
-                    <Route path="/market-research" element={<MarketResearchPage />} />
+                    
+                    {/* 5 Core Agents */}
+                    <Route path="/finance-agent" element={<FinanceIntelligencePage />} />
                     <Route path="/sales-crm" element={<SalesCRMPage />} />
-                    <Route path="/strategy-agent" element={<StrategyAgentPage />} />
-                    <Route path="/customer-agent" element={<CustomerAgentPage />} />
-                    <Route path="/growth-agent" element={<GrowthAgentPage />} />
-                    <Route path="/operations-agent" element={<OperationsAgentPage />} />
+                    <Route path="/market-intelligence" element={<MarketResearchPage />} />
+                    <Route path="/compliance" element={<ComplianceDashboard />} />
+                    <Route path="/orchestrator" element={<OrchestratorDashboard />} />
+                    <Route path="/teams" element={<TeamsPage />} />
                 </Route>
             </Routes>
         </>

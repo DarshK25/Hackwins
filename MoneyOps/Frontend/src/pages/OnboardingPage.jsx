@@ -65,7 +65,10 @@ export default function OnboardingPage() {
                 : "/api/onboarding/join-business";
             const response = await fetch(endpoint, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-User-Id": user?.id
+                },
                 body: JSON.stringify(payload),
             });
             if (!response.ok) {

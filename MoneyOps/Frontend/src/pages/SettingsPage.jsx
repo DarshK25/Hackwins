@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Save, User, Building, Bell, Shield } from "lucide-react";
+import { useUser, useAuth } from "@clerk/clerk-react";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 
 const inputStyle = {
     backgroundColor: "#1A1A1A",
@@ -16,6 +18,9 @@ const inputStyle = {
 };
 
 export default function SettingsPage() {
+    const { user } = useUser();
+    const { orgId, userId } = useOnboardingStatus();
+    
     const [profile, setProfile] = useState({
         firstName: "",
         lastName: "",
@@ -31,6 +36,8 @@ export default function SettingsPage() {
         address: "",
         website: "",
         pincode: "",
+        panNumber: "",
+        stateOfRegistration: "",
     });
 
     const [notifications, setNotifications] = useState({
@@ -41,9 +48,84 @@ export default function SettingsPage() {
         systemAlerts: true,
     });
 
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (user) {
+            setProfile({
+                firstName: user.firstName || "",
+                lastName: user.lastName || "",
+                email: user.primaryEmailAddress?.emailAddress || "",
+                phone: user.primaryPhoneNumber?.phoneNumber || "",
+                professionalTitle: "",
+            });
+        }
+
+        const fetchBusinessData = async () => {
+            if (!userId) return;
+            try {
+                const response = await fetch(`/api/org/my`, {
+                    headers: {
+                        "X-User-Id": userId
+                    }
+                });
+                if (response.ok) {
+                    const result = await response.json();
+                    const data = result.data;
+                    if (!data) return;
+                    setBusiness({
+                        id: data.id,
+                        companyName: data.legalName || "",
+                        gstin: data.gstin || "",
+                        businessType: data.businessType || "",
+                        address: data.registeredAddress || "",
+                        website: data.website || "",
+                        pincode: data.pincode || "", 
+                        panNumber: data.panNumber || "",
+                        stateOfRegistration: data.stateOfRegistration || "",
+                    });
+                }
+            } catch (error) {
+                console.error("Failed to fetch business data:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchBusinessData();
+    }, [user, orgId, userId]);
+
     const handleSave = async (section) => {
-        await new Promise((r) => setTimeout(r, 400));
-        toast.success(`${section} settings saved`);
+        try {
+            if (section === "Business" && userId) {
+                // If orgId is not yet available, we can use the 'my' endpoint if the backend supports PUT /my, 
+                // but usually we have an orgId by this point if we loaded data.
+                const targetId = orgId || business.id; 
+                if (!targetId) throw new Error("Organization ID not found");
+
+                const response = await fetch(`/api/org/${targetId}`, {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-User-Id": userId
+                    },
+                    body: JSON.stringify({
+                        legalName: business.companyName,
+                        gstin: business.gstin,
+                        businessType: business.businessType,
+                        registeredAddress: business.address,
+                        website: business.website,
+                        pincode: business.pincode,
+                        panNumber: business.panNumber,
+                        stateOfRegistration: business.stateOfRegistration
+                    })
+                });
+                if (!response.ok) throw new Error("Failed to update business");
+            }
+            toast.success(`${section} settings saved`);
+        } catch (error) {
+            toast.error(error.message);
+        }
     };
 
     return (
@@ -119,7 +201,9 @@ export default function SettingsPage() {
                             {[
                                 { label: "Company Name", id: "biz-company", field: "companyName", placeholder: "Acme Corp", colSpan: true },
                                 { label: "GST Number", id: "biz-gstin", field: "gstin", placeholder: "22AAAAA0000A1Z5" },
+                                { label: "PAN Number", id: "biz-pan", field: "panNumber", placeholder: "ABCDE1234F" },
                                 { label: "Business Type", id: "biz-type", field: "businessType", placeholder: "Sole Proprietor" },
+                                { label: "State", id: "biz-state", field: "stateOfRegistration", placeholder: "Maharashtra" },
                                 { label: "Business Address", id: "biz-address", field: "address", placeholder: "123 Main St, City", colSpan: true },
                                 { label: "Website", id: "biz-website", field: "website", type: "url", placeholder: "https://yourdomain.com" },
                                 { label: "Pincode", id: "biz-pincode", field: "pincode", placeholder: "400001" },
