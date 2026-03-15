@@ -41,6 +41,9 @@ public class ServiceTokenFilter extends OncePerRequestFilter {
     @Value("${INTERNAL_SERVICE_TOKEN:moneyops-internal-service-secret}")
     private String expectedToken;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.moneyops.users.repository.UserRepository userRepository;
+
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
@@ -67,18 +70,30 @@ public class ServiceTokenFilter extends OncePerRequestFilter {
                     String orgIdHeader = request.getHeader("X-Org-Id");
                     String userIdHeader = request.getHeader("X-User-Id");
 
-                    if (StringUtils.hasText(orgIdHeader)) {
-                        try {
-                            OrgContext.setOrgId(UUID.fromString(orgIdHeader));
-                        } catch (IllegalArgumentException e) {
-                            logger.warn("Invalid X-Org-Id header value: " + orgIdHeader);
+                    if (StringUtils.hasText(userIdHeader) && userIdHeader.startsWith("user_")) {
+                        userRepository.findByClerkId(userIdHeader).ifPresent(user -> {
+                            OrgContext.setUserId(user.getId());
+                            if (user.getOrgId() != null) {
+                                OrgContext.setOrgId(user.getOrgId());
+                            } else if (StringUtils.hasText(orgIdHeader) && !orgIdHeader.startsWith("org_")) {
+                                try { OrgContext.setOrgId(UUID.fromString(orgIdHeader)); } catch (IllegalArgumentException ignored) {}
+                            }
+                        });
+                    } else {
+                        // Standard UUID processing
+                        if (StringUtils.hasText(orgIdHeader) && !orgIdHeader.startsWith("org_")) {
+                            try {
+                                OrgContext.setOrgId(UUID.fromString(orgIdHeader));
+                            } catch (IllegalArgumentException e) {
+                                logger.warn("Invalid X-Org-Id header value: " + orgIdHeader);
+                            }
                         }
-                    }
-                    if (StringUtils.hasText(userIdHeader)) {
-                        try {
-                            OrgContext.setUserId(UUID.fromString(userIdHeader));
-                        } catch (IllegalArgumentException e) {
-                            logger.warn("Invalid X-User-Id header value: " + userIdHeader);
+                        if (StringUtils.hasText(userIdHeader)) {
+                            try {
+                                OrgContext.setUserId(UUID.fromString(userIdHeader));
+                            } catch (IllegalArgumentException e) {
+                                logger.warn("Invalid X-User-Id header value: " + userIdHeader);
+                            }
                         }
                     }
 

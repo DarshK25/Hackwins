@@ -19,6 +19,7 @@ from app.schemas.entities import (
     ENTITY_PATTERNS,
 )
 from app.schemas.intents import Intent
+from app.utils.amount_parser import parse_indian_amount
 
 logger = get_logger(__name__)
 
@@ -50,10 +51,27 @@ class EntityExtractor:
         start_time = time.time()
         entities: List[Entity] = []
 
-        # 1) regex extraction (fast)
+        # 1) Indian number system pre-processing (Bug 2)
+        indian_amount = parse_indian_amount(user_input)
+        if indian_amount is not None:
+            logger.info("indian_amount_parsed", amount=indian_amount)
+            entities.append(Entity(
+                entity_type=EntityType.AMOUNT,
+                value=str(indian_amount),
+                raw_text=user_input,
+                confidence=1.0,
+                normalized_value=Decimal(str(indian_amount)),
+                extraction_method="indian_parser",
+            ))
+
+        # 2) regex extraction (fast)
         try:
             regex_entities = self._regex_extract(user_input)
-            entities.extend(regex_entities)
+            # Avoid duplicate amounts if indian_parser already found it
+            if indian_amount is None:
+                entities.extend(regex_entities)
+            else:
+                entities.extend([e for e in regex_entities if e.entity_type != EntityType.AMOUNT])
         except Exception as e:
             logger.warning("regex_extract_failed", error=str(e))
 
@@ -199,11 +217,14 @@ Return ONLY a JSON array of entities like:
 Important:
 - Return [] if none found
 - Confidence 0.0 - 1.0
-- Use snake_case types: client_name, amount, invoice_id, phone, email, gst_number, tax_id, gst_percent, due_date, company_name
-- For INVOICE_CREATE: always extract client_name, amount, and explicitly look for gst_percent (e.g. "18% GST" -> 18) and due_date.
-- For CLIENT_CREATE: extract client_name, email, phone, tax_id, and company_name
-- Extract only explicitly mentioned values (do not fabricate)
-- For dates, attempt to resolve them into ISO 8601 (YYYY-MM-DD) based on Today's Date.
+- Use snake_case types: client_name, amount, invoice_id, phone, email, gst_number, tax_id, gst_percent, due_date, due_days, company_name
+- For INVOICE_CREATE: extract client_name, amount, gst_percent, due_date. 
+- For relative dates (e.g., "next 15 days", "in 2 weeks", "fifteen days"): 
+  → Extract numeric value as `due_days`
+  → Do NOT try to resolve into `due_date`
+- For absolute dates (e.g., "29th March", "April 5th"):
+  → Resolve into `due_date` format YYYY-MM-DD
+- For "lakh" amounts: 1 lakh = 100000, 50000 is fifty thousand.
 """
 
         if context:

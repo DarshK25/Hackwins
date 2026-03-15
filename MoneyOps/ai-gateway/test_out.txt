@@ -1,0 +1,47 @@
+C:\Users\archa\OneDrive\Desktop\MoneyOps\MoneyOps\ai-gateway\venv\lib\site-packages\pydantic\_internal\_fields.py:149: UserWarning: Field "model_name" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+{"event": "tool_registry_initialized", "level": "info", "timestamp": "2026-03-14T09:20:59.573407Z"}
+load_ssl_context verify=True cert=None trust_env=True http2=False
+load_verify_locations cafile='C:\\Users\\archa\\OneDrive\\Desktop\\MoneyOps\\MoneyOps\\ai-gateway\\venv\\lib\\site-packages\\certifi\\cacert.pem'
+{"base_url": "http://127.0.0.1:8000", "event": "backend_adapter_initialized", "level": "info", "timestamp": "2026-03-14T09:20:59.637218Z"}
+{"tool": "create_invoice", "category": "finance", "event": "tool_registered", "level": "debug", "timestamp": "2026-03-14T09:20:59.639074Z"}
+{"tool": "query_invoices", "category": "finance", "event": "tool_registered", "level": "debug", "timestamp": "2026-03-14T09:20:59.639074Z"}
+{"tool": "record_payment", "category": "finance", "event": "tool_registered", "level": "debug", "timestamp": "2026-03-14T09:20:59.639074Z"}
+{"tool": "check_balance", "category": "finance", "event": "tool_registered", "level": "debug", "timestamp": "2026-03-14T09:20:59.639074Z"}
+{"tool": "analytics_query", "category": "finance", "event": "tool_registered", "level": "debug", "timestamp": "2026-03-14T09:20:59.639074Z"}
+{"tool": "calculate_business_health_score", "category": "finance", "event": "tool_registered", "level": "debug", "timestamp": "2026-03-14T09:20:59.639619Z"}
+{"tool": "perform_swot_analysis", "category": "finance", "event": "tool_registered", "level": "debug", "timestamp": "2026-03-14T09:20:59.639619Z"}
+{"tool": "diagnose_business_problem", "category": "finance", "event": "tool_registered", "level": "debug", "timestamp": "2026-03-14T09:20:59.639619Z"}
+{"event": "finance_agent_initialized", "level": "info", "timestamp": "2026-03-14T09:20:59.639619Z"}
+Using proactor: IocpProactor
+Testing FinanceAgent analytics query with REAL endpoint...
+{"method": "GET", "endpoint": "/api/finance-intelligence/metrics", "has_data": false, "event": "backend_request", "level": "debug", "timestamp": "2026-03-14T09:20:59.646431Z"}
+connect_tcp.started host='127.0.0.1' port=8000 local_address=None timeout=30 socket_options=None
+connect_tcp.complete return_value=<httpcore._backends.anyio.AnyIOStream object at 0x00000239A94B4C70>
+send_request_headers.started request=<Request [b'GET']>
+send_request_headers.complete
+send_request_body.started request=<Request [b'GET']>
+send_request_body.complete
+receive_response_headers.started request=<Request [b'GET']>
+receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'', [(b'Vary', b'Origin'), (b'Vary', b'Access-Control-Request-Method'), (b'Vary', b'Access-Control-Request-Headers'), (b'X-Content-Type-Options', b'nosniff'), (b'X-XSS-Protection', b'0'), (b'Cache-Control', b'no-cache, no-store, max-age=0, must-revalidate'), (b'Pragma', b'no-cache'), (b'Expires', b'0'), (b'X-Frame-Options', b'DENY'), (b'Content-Type', b'application/json'), (b'Transfer-Encoding', b'chunked'), (b'Date', b'Sat, 14 Mar 2026 09:21:01 GMT'), (b'Keep-Alive', b'timeout=60'), (b'Connection', b'keep-alive')])
+HTTP Request: GET http://127.0.0.1:8000/api/finance-intelligence/metrics?businessId=1 "HTTP/1.1 200 "
+receive_response_body.started request=<Request [b'GET']>
+receive_response_body.complete
+response_closed.started
+response_closed.complete
+{"tool": "analytics_query", "success": true, "execution_time_ms": 1417, "event": "tool_executed", "level": "info", "timestamp": "2026-03-14T09:21:01.062761Z"}
+Success: True
+Traceback (most recent call last):
+  File "C:\Users\archa\OneDrive\Desktop\MoneyOps\MoneyOps\ai-gateway\test_finance_agent.py", line 46, in <module>
+    asyncio.run(test())
+  File "C:\python3.10\lib\asyncio\runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "C:\python3.10\lib\asyncio\base_events.py", line 649, in run_until_complete
+    return future.result()
+  File "C:\Users\archa\OneDrive\Desktop\MoneyOps\MoneyOps\ai-gateway\test_finance_agent.py", line 31, in test
+    print(f"Message: {resp.message}")
+  File "C:\python3.10\lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+UnicodeEncodeError: 'charmap' codec can't encode character '\u20b9' in position 31: character maps to <undefined>

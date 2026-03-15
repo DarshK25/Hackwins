@@ -2,7 +2,7 @@
 Tool registry for centralized tool mgmt and executn
 """
 from typing import List, Dict, Any, Optional, Callable, Awaitable
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 import asyncio
 from app.utils.logger import get_logger
 
@@ -31,11 +31,12 @@ class Tool(BaseModel):
     mvp_ready: bool = True
     
     #metadata
-    category: str = "general"  # "invoice", "payment", "analytics", etc
+    category: str="general" #"invoice", "payment", "analytics", etc
     requires_confirmation: bool = False
     estimated_time_seconds: int = 2
     
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    class Config:
+        arbitrary_types_allowed = True
 
 class ToolExecutionResult(BaseModel):
     """Result of tool execution"""

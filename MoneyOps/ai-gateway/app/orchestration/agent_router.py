@@ -30,64 +30,21 @@ class AgentRouter:
     def _register_agents(self):
         """Register all enabled agents"""
         
-        # Finance Agent (always on)
+        # Finance Agent (MVP)
         if feature_flags.ENABLE_FINANCE_AGENT:
             self._agents[AgentType.FINANCE_AGENT] = finance_agent
         
-        # Sales Agent
+        # Other agents (v2.0 - stubs for now)
         if feature_flags.ENABLE_SALES_AGENT:
-            try:
-                from app.agents.sales_agent import sales_agent
-                self._agents[AgentType.SALES_AGENT] = sales_agent
-                logger.info("sales_agent_registered")
-            except Exception as e:
-                logger.error("sales_agent_registration_failed", error=str(e))
+            # self._agents[AgentType.SALES_AGENT] = sales_agent
+            pass
         
-        # Strategy Agent
         if feature_flags.ENABLE_STRATEGY_AGENT:
-            try:
-                from app.agents.strategy_agent import strategy_agent
-                self._agents[AgentType.STRATEGY_AGENT] = strategy_agent
-                logger.info("strategy_agent_registered")
-            except Exception as e:
-                logger.error("strategy_agent_registration_failed", error=str(e))
+            # self._agents[AgentType.STRATEGY_AGENT] = strategy_agent
+            pass
         
-        # Compliance Agent
-        if feature_flags.ENABLE_COMPLIANCE_AGENT:
-            try:
-                from app.agents.compliance_agent import compliance_agent
-                self._agents[AgentType.COMPLIANCE_AGENT] = compliance_agent
-                logger.info("compliance_agent_registered")
-            except Exception as e:
-                logger.error("compliance_agent_registration_failed", error=str(e))
-        
-        # Customer Agent
-        if feature_flags.ENABLE_CUSTOMER_AGENT:
-            try:
-                from app.agents.customer_agent import customer_agent
-                self._agents[AgentType.CUSTOMER_AGENT] = customer_agent
-                logger.info("customer_agent_registered")
-            except Exception as e:
-                logger.error("customer_agent_registration_failed", error=str(e))
-        
-        # Growth Agent
-        if feature_flags.ENABLE_GROWTH_AGENT:
-            try:
-                from app.agents.growth_agent import growth_agent
-                self._agents[AgentType.GROWTH_AGENT] = growth_agent
-                logger.info("growth_agent_registered")
-            except Exception as e:
-                logger.error("growth_agent_registration_failed", error=str(e))
-        
-        # Operations Agent
-        if feature_flags.ENABLE_OPERATIONS_AGENT:
-            try:
-                from app.agents.operations_agent import operations_agent
-                self._agents[AgentType.OPERATIONS_AGENT] = operations_agent
-                logger.info("operations_agent_registered")
-            except Exception as e:
-                logger.error("operations_agent_registration_failed", error=str(e))
-
+        # ... other agents
+    
     def get_agent(self, agent_type: AgentType) -> Optional[BaseAgent]:
         """Get an agent by type"""
         return self._agents.get(agent_type)
@@ -104,6 +61,14 @@ class AgentRouter:
     ) -> AgentResponse:
         """
         Route intent to appropriate agent(s)
+        
+        Args:
+            intent: Classified intent
+            entities: Extracted entities
+            context: Additional context (org_id, user_id, etc.)
+        
+        Returns:
+            AgentResponse from primary agent
         """
         # Get intent requirements (includes agent routing info)
         requirements = get_intent_requirements(intent)
@@ -118,21 +83,15 @@ class AgentRouter:
             supporting_agents=[a.value for a in supporting_agent_types]
         )
         
-        # Fallback: if primary agent not available, try strategy or finance
+        # Get primary agent
         primary_agent = self.get_agent(primary_agent_type)
         
         if not primary_agent:
-            # Try strategy agent as fallback for strategic/analytical queries
-            if self.is_agent_available(AgentType.STRATEGY_AGENT):
-                primary_agent = self.get_agent(AgentType.STRATEGY_AGENT)
-                primary_agent_type = AgentType.STRATEGY_AGENT
-                logger.info("agent_fallback_to_strategy", original_agent=requirements.primary_agent.value)
-            elif self.is_agent_available(AgentType.FINANCE_AGENT):
-                primary_agent = self.get_agent(AgentType.FINANCE_AGENT)
-                primary_agent_type = AgentType.FINANCE_AGENT
-                logger.info("agent_fallback_to_finance", original_agent=requirements.primary_agent.value)
-            else:
-                return self._build_agent_unavailable_response(primary_agent_type, intent)
+            # Agent not available - return stub response
+            return self._build_agent_unavailable_response(
+                primary_agent_type,
+                intent
+            )
         
         # Check if primary agent supports this intent
         if not primary_agent.supports_intent(intent):
@@ -141,7 +100,12 @@ class AgentRouter:
                 agent=primary_agent_type.value,
                 intent=intent.value
             )
-            # Still try to execute — strategy agent can handle many intents
+            return AgentResponse(
+                success=False,
+                message=f"{primary_agent_type.value} does not support {intent.value}",
+                agent_type=primary_agent_type,
+                error="Intent not supported by this agent"
+            )
         
         # MVP: Single-agent execution
         if not feature_flags.ENABLE_MULTI_AGENT_ORCHESTRATION:
@@ -169,7 +133,7 @@ class AgentRouter:
         entities: Dict[str, Any],
         context: Optional[Dict[str, Any]]
     ) -> AgentResponse:
-        """Execute a single agent"""
+        """Execute a single agent (MVP mode)"""
         try:
             response = await agent.process(intent, entities, context)
             return response
@@ -197,6 +161,11 @@ class AgentRouter:
     ) -> AgentResponse:
         """
         Execute multi-agent orchestration (v2.0)
+        
+        Strategy:
+        1. Execute supporting agents in parallel (gather data)
+        2. Pass results to primary agent
+        3. Primary agent synthesizes final response
         """
         import asyncio
         
@@ -207,24 +176,23 @@ class AgentRouter:
             if self.is_agent_available(agent_type)
         ]
         
-        if supporting_agents:
-            # Execute supporting agents in parallel
-            supporting_results = await asyncio.gather(*[
-                agent.process(intent, entities, context)
-                for agent in supporting_agents
-            ], return_exceptions=True)
-            
-            # Add supporting results to context
-            if context is None:
-                context = {}
-            
-            context["supporting_agent_results"] = [
-                {
-                    "agent": agent.get_agent_type().value,
-                    "response": result.model_dump() if isinstance(result, AgentResponse) else str(result)
-                }
-                for agent, result in zip(supporting_agents, supporting_results)
-            ]
+        # Execute supporting agents in parallel
+        supporting_results = await asyncio.gather(*[
+            agent.process(intent, entities, context)
+            for agent in supporting_agents
+        ], return_exceptions=True)
+        
+        # Add supporting results to context
+        if context is None:
+            context = {}
+        
+        context["supporting_agent_results"] = [
+            {
+                "agent": agent.get_agent_type().value,
+                "response": result.dict() if isinstance(result, AgentResponse) else str(result)
+            }
+            for agent, result in zip(supporting_agents, supporting_results)
+        ]
         
         # Execute primary agent with enriched context
         return await self._execute_single_agent(
@@ -242,12 +210,13 @@ class AgentRouter:
         """Build response for unavailable agent"""
         return AgentResponse(
             success=False,
-            message=f"No agents available to handle this request. Please check agent configuration.",
+            message=f"{agent_type.value} is not available yet. Coming in v2.0!",
             agent_type=agent_type,
             implemented=False,
             recommendations=[
-                "Ensure at least one agent is enabled in feature flags",
-                "Check agent initialization logs for errors"
+                f"{agent_type.value} will be available post-MVP",
+                "Enable it via feature flags when ready",
+                "Focus on Finance Agent operations for now"
             ]
         )
     
@@ -267,31 +236,6 @@ class AgentRouter:
             "supported_intents": [i.value for i in agent.get_supported_intents()],
             "available_tools": len(agent.get_enabled_tools()),
             "mvp_tools": len(agent.get_mvp_tools())
-        }
-    
-    def get_all_agents_status(self) -> Dict[str, Any]:
-        """Get status of all registered agents"""
-        all_agent_types = [
-            AgentType.FINANCE_AGENT,
-            AgentType.SALES_AGENT,
-            AgentType.STRATEGY_AGENT,
-            AgentType.COMPLIANCE_AGENT,
-            AgentType.CUSTOMER_AGENT,
-            AgentType.GROWTH_AGENT,
-            AgentType.OPERATIONS_AGENT,
-        ]
-        
-        return {
-            "registered": [at.value for at in self._agents.keys()],
-            "total_registered": len(self._agents),
-            "total_possible": len(all_agent_types),
-            "agents": {
-                at.value: {
-                    "available": at in self._agents,
-                    "info": self.get_agent_info(at) if at in self._agents else None
-                }
-                for at in all_agent_types
-            }
         }
 
 

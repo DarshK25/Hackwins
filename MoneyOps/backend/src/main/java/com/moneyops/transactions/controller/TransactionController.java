@@ -26,7 +26,7 @@ public class TransactionController {
     public ResponseEntity<TransactionDto> createTransaction(@RequestBody TransactionDto dto) {
         UUID orgId = OrgContext.getOrgId();
         UUID userId = OrgContext.getUserId();
-        if (orgId == null) throw new RuntimeException("Organization context missing");
+        if (orgId == null) return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
 
         TransactionDto created = transactionService.createTransaction(dto, orgId, userId);
         return ResponseEntity.ok(created);
@@ -36,7 +36,7 @@ public class TransactionController {
     public ResponseEntity<TransactionDto> updateTransaction(@PathVariable UUID id,
                                                             @RequestBody TransactionDto dto) {
         UUID orgId = OrgContext.getOrgId();
-        if (orgId == null) throw new RuntimeException("Organization context missing");
+        if (orgId == null) return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
 
         TransactionDto updated = transactionService.updateTransaction(id, dto, orgId);
         return ResponseEntity.ok(updated);
@@ -54,7 +54,7 @@ public class TransactionController {
     @GetMapping("/{id}")
     public ResponseEntity<TransactionDto> getTransaction(@PathVariable UUID id) {
         UUID orgId = OrgContext.getOrgId();
-        if (orgId == null) throw new RuntimeException("Organization context missing");
+        if (orgId == null) return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
 
         TransactionDto transaction = transactionService.getTransactionById(id, orgId);
         return ResponseEntity.ok(transaction);
@@ -63,7 +63,7 @@ public class TransactionController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteTransaction(@PathVariable UUID id) {
         UUID orgId = OrgContext.getOrgId();
-        if (orgId == null) throw new RuntimeException("Organization context missing");
+        if (orgId == null) return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
 
         transactionService.deleteTransaction(id, orgId);
         return ResponseEntity.noContent().build();
@@ -92,7 +92,7 @@ public class TransactionController {
     @GetMapping("/summary")
     public ResponseEntity<Map<String, BigDecimal>> getFinancialSummary() {
         UUID orgId = OrgContext.getOrgId();
-        if (orgId == null) throw new RuntimeException("Organization context missing");
+        if (orgId == null) return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
 
         Map<String, BigDecimal> summary = transactionService.getFinancialSummary(orgId);
         return ResponseEntity.ok(summary);

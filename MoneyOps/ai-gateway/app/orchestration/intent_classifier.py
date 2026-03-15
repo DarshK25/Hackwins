@@ -141,13 +141,11 @@ class IntentClassifier:
                 r"how.*use",
             ],
             Intent.CONFIRMATION: [
-                r"\b(yes|yeah|yep|sure|ok|okay|correct|right|fine)\b",
-                r"go ahead",
-                r"proceed",
-                r"confirm",
+                r"^(yes|yeah|yep|sure|ok|okay|correct|right|fine|got it|sounds good)[\.\!]*$",
+                r"^(go ahead|proceed|confirm)[\.\!]*$",
             ],
             Intent.CANCELLATION: [
-                r"\b(no|nope|nah|cancel|stop|abort|nevermind)\b",
+                r"^(no|nope|nah|cancel|stop|abort|nevermind)[\.\!]*$",
                 r"don't.*do.*that",
                 r"wrong",
             ],
@@ -205,7 +203,12 @@ class IntentClassifier:
         for intent, patterns in self.intent_patterns.items():
             for pattern in patterns:
                 try:
-                    # Use re.search with IGNORECASE for flexibility
+                    # For common conversational intents, try fullmatch first for precision
+                    if intent in (Intent.CONFIRMATION, Intent.CANCELLATION, Intent.GREETING):
+                        if re.fullmatch(pattern, user_input_lower, re.IGNORECASE):
+                            return {"intent": intent, "confidence": 0.95, "pattern": pattern}
+                    
+                    # For all intents (including fallback for the above), try search
                     if re.search(pattern, user_input_lower, re.IGNORECASE):
                         # Higher confidence for longer, more specific patterns
                         confidence = 0.95 if len(pattern) > 20 else 0.9 if len(pattern) > 15 else 0.85

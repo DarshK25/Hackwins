@@ -47,6 +47,11 @@ class AgentResponse(BaseModel):
 
     #V2.0
     implemented: bool = True
+    checkpoint_message: Optional[str] = None
+    
+    # UI and Voice support
+    ui_event: Optional[Dict[str, Any]] = None
+    intent: Optional[str] = None
 
 class BaseAgent: 
     """Abstract base class for all agents in MoneyOps
@@ -122,13 +127,22 @@ class BaseAgent:
     def supports_intent(self, intent: Intent) -> bool:
         """Check if this agent supports a given intent"""
         return intent in self.get_supported_intents()
+
+    def is_production_ready(self) -> bool:
+        """
+        Returns True if this agent is safe to route to in production.
+        Override to return False in stub/development agents.
+        Default is True — all real agents are production-ready.
+        """
+        return True
     
     def _build_success_response(
             self,
             message: str,
             data: Optional[Dict[str, Any]] = None,
             tool_used : Optional[str] = None,
-            confidence: float = 1.0
+            confidence: float = 1.0,
+            checkpoint_message: Optional[str] = None
     ) -> AgentResponse:
         """Helper to build success response"""
         return AgentResponse(
@@ -137,14 +151,16 @@ class BaseAgent:
             tool_used=tool_used,
             agent_type=self.get_agent_type(),
             confidence=confidence,
-            implemented=True
+            implemented=True,
+            checkpoint_message=checkpoint_message
         )
 
     def _build_error_response(
         self,
         error: str,
         needs_clarification: bool = False,
-        clarification_question: Optional[str] = None
+        clarification_question: Optional[str] = None,
+        checkpoint_message: Optional[str] = None
     ) -> AgentResponse:
         """Helper to build error response"""
         return AgentResponse(
@@ -154,7 +170,8 @@ class BaseAgent:
             needs_clarification=needs_clarification,
             clarification_question=clarification_question,
             agent_type=self.get_agent_type(),
-            implemented=True
+            implemented=True,
+            checkpoint_message=checkpoint_message
         )
 
     def _build_stub_response(

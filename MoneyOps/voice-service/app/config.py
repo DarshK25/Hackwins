@@ -53,12 +53,11 @@ class Settings(BaseSettings):
     # VAD (Voice Activity Detection) — tuned for natural conversation
     # min_speech_duration LOW  → picks up speech quickly (no missed start-of-turn)
     VAD_MIN_SPEECH_DURATION: float = 0.1   # seconds — lower picks up speech faster
-    # min_silence_duration HIGH → doesn't cut off mid-sentence (critical for UX)
-    VAD_MIN_SILENCE_DURATION: float = 0.8  # seconds — prevents premature end-of-turn
+    VAD_MIN_SILENCE_DURATION: float = 0.3  # seconds — faster end-of-turn
     # activation_threshold: confidence level needed to declare speech activity (0.0–1.0)
     VAD_ACTIVATION_THRESHOLD: float = 0.5  # standard Silero default
     # How long (seconds) the agent waits after end-of-speech before processing
-    TURN_DETECTION_DELAY: float = 0.3      # seconds
+    TURN_DETECTION_DELAY: float = 0.4      # seconds
 
     @property
     def is_production(self) -> bool:

@@ -1,0 +1,115 @@
+import uuid
+from typing import Dict, Any, List, Optional
+from dataclasses import dataclass
+
+from app.orchestration.intent_classifier import intent_classifier
+from app.orchestration.entity_extractor import entity_extractor
+from app.agents.finance_agent import finance_agent
+from app.state.session_manager import session_manager
+from app.schemas.intents import Intent
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+@dataclass
+class VoiceContext:
+    session_id: str
+    user_id: str
+    org_uuid: str
+    business_id: Optional[int] = 1
+    clerk_org_id: Optional[str] = None
+    extracted_entities: List[Dict[str, Any]] = None
+
+class VoiceProcessor:
+    def __init__(self):
+        self.intent_classifier = intent_classifier
+        self.entity_extractor = entity_extractor
+        self.finance_agent = finance_agent
+        self.state_manager = session_manager
+        from app.adapters.backend_adapter import get_backend_adapter
+        self.backend = get_backend_adapter()
+
+    async def process(self, text: str, context: VoiceContext) -> dict:
+        session = self.state_manager.get_session(context.session_id, context.user_id, context.org_uuid)
+        
+        # 1. RESOLVE IDENTITY (If still Clerk format)
+        if context.org_uuid.startswith("org_") and (not session.org_id or session.org_id.startswith("org_")):
+            logger.info({"user": context.user_id, "event": "resolving_identity_per_session"})
+            onboarding_resp = await self.backend.get_onboarding_status(context.user_id)
+            if onboarding_resp.success and onboarding_resp.data:
+                data = onboarding_resp.data
+                resolved_uuid = data.get("orgId") or data.get("orgUuid") or data.get("organizationId")
+                if resolved_uuid:
+                    context.org_uuid = resolved_uuid
+                    session.org_id = resolved_uuid
+                    session.business_id = data.get("businessId") or 1
+                    self.state_manager.save_session(session)
+        
+        # 2. RESTORE FROM SESSION (If already resolved in previous turns)
+        if session.org_id and not session.org_id.startswith("org_"):
+            context.org_uuid = session.org_id
+            context.business_id = session.business_id
+            
+        logger.info({
+            "session_id": context.session_id,
+            "resolved_org_uuid": context.org_uuid,
+            "business_id": context.business_id,
+            "event": "identity_persistence_check"
+        })
+        
+        # INTENT LOCK BYPASS
+        if (session.locked_intent == "INVOICE_CREATE" 
+                and session.invoice_draft is not None):
+            
+            cancel_words = {"cancel", "stop", "never mind", "forget it", "abort"}
+            if any(w in text.lower() for w in cancel_words):
+                session.locked_intent = None
+                session.invoice_draft = None
+                self.state_manager.save_session(session)
+                return {"response_text": "Invoice cancelled.", "success": True, "intent": "CANCELLATION"}
+            
+            entities = await self.entity_extractor.extract(text, Intent.INVOICE_CREATE, context)
+            # Convert to list of dicts if needed
+            context.extracted_entities = [{"type": e.entity_type.value.lower(), "value": e.value} for e in entities.entities] if hasattr(entities, 'entities') else []
+            
+            result = await self.finance_agent.handle_invoice_create(context)
+            
+            if result.success:
+                self.state_manager.add_turn(context.session_id, "user", text, "INVOICE_CREATE")
+                self.state_manager.add_turn(context.session_id, "assistant", result.message, "INVOICE_CREATE")
+            
+            return {
+                "response_text": result.message,
+                "success": result.success,
+                "intent": "INVOICE_CREATE",
+                "ui_event": result.ui_event if hasattr(result, 'ui_event') else None,
+            }
+        
+        # NORMAL PATH
+        classification = await self.intent_classifier.classify(text, context)
+        intent = classification.intent.value if hasattr(classification.intent, 'value') else str(classification.intent)
+        
+        # Default extraction
+        entities = await self.entity_extractor.extract(text, classification.intent, context)
+        context.extracted_entities = [{"type": e.entity_type.value.lower(), "value": e.value} for e in entities.entities] if hasattr(entities, 'entities') else []
+        
+        if intent == "INVOICE_CREATE":
+            result = await self.finance_agent.handle_invoice_create(context)
+        else:
+            # Fallback to general agent or other handlers
+            from app.orchestration.agent_router import agent_router
+            agent_resp = await agent_router.route(classification.intent, {e["type"]: e["value"] for e in context.extracted_entities}, vars(context))
+            result = agent_resp
+
+        if result.success:
+            self.state_manager.add_turn(context.session_id, "user", text, intent)
+            self.state_manager.add_turn(context.session_id, "assistant", result.message, intent)
+
+        return {
+            "response_text": result.message,
+            "success": result.success,
+            "intent": intent,
+            "ui_event": result.ui_event if hasattr(result, 'ui_event') else None,
+        }
+
+voice_processor = VoiceProcessor()

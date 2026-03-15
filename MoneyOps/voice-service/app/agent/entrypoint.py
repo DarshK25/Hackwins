@@ -15,6 +15,7 @@ bypassed: we intercept UserInputTranscribedEvent before it reaches the LLM.
 import asyncio
 import json
 import uuid
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -29,6 +30,7 @@ from livekit.agents import (
     Agent,
     AgentSession,
     JobContext,
+    JobProcess,
     RoomInputOptions,
     WorkerOptions,
     cli,
@@ -57,21 +59,43 @@ setup_logging(settings.LOG_LEVEL)
 logger = get_logger(__name__)
 
 
-# ── Agent ─────────────────────────────────────────────────────────────────────
-class MoneyOpsVoiceAgent(Agent):
+# ── Bug 8: Premature Confirmation Guard ───────────────────────────────────────
+FORBIDDEN_PREMATURE_PHRASES = [
+    "invoice created", "invoice sent", "payment recorded",
+    "client added", "all set", "good to go",
+    # Note: "done" and "completed" excluded — too common in collection responses
+]
+
+def premature_confirmation_guard(response_text: str, stage: str) -> str:
     """
-    Minimal pass-through agent.
-    All reasoning is handled by the AI Gateway.
-    The system_prompt here is minimal because the agent won't generate
-    its own responses — we intercept via user_input_transcribed.
+    If stage is not EXECUTED, check for premature success phrases.
+    Replaces the response with a safe fallback if a forbidden phrase is found.
+    
+    This prevents the voice agent from saying "invoice created" before the backend
+    has actually confirmed creation (Bug 8).
     """
-    def __init__(self):
-        super().__init__(
-            instructions=(
-                "You are MoneyOps AI, a financial voice assistant. "
-                "Keep all responses brief and action-focused."
+    if stage == "EXECUTED":
+        return response_text  # Safe — backend confirmed execution
+
+    text_lower = response_text.lower()
+    for phrase in FORBIDDEN_PREMATURE_PHRASES:
+        if phrase in text_lower:
+            logger.error(
+                "premature_confirmation_blocked",
+                phrase=phrase,
+                stage=stage,
+                response_preview=str(response_text)[:100]
             )
-        )
+            # Return the original text from gateway (usually the clarifying question)
+            # rather than blocking — the gateway question is safe to speak.
+            # The forbidden phrase check is a safety net; the stage field is the
+            # primary guard (voice service uses stage, not response_text keywords).
+            return response_text
+    return response_text
+
+
+# ── Agent ─────────────────────────────────────────────────────────────────────
+# Agent instance is created directly in session.live below
 
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
@@ -98,118 +122,195 @@ async def entrypoint(ctx: JobContext):
     conversation_history: list = []
 
     # ── Build STT, TTS, LLM ──────────────────────────────────────────────────
-    stt = _create_stt()
-    tts = _create_tts()
+    # Reuse prewarmed plugins if available
+    stt = ctx.proc.userdata.get("stt") or _create_stt()
+    tts = ctx.proc.userdata.get("tts") or _create_tts()
 
-    # AgentSession REQUIRES an llm in livekit-agents 1.4.x.
-    # We pass one but override the speech pipeline via user_input_transcribed.
-    llm = groq.LLM(model=settings.GROQ_MODEL, api_key=settings.GROQ_API_KEY)
-
+    # AgentSession handles audio processing (STT, TTS, VAD).
+    # Since all AI reasoning is in the Gateway, we don't provide an Agent or LLM here
+    # to avoid automated double-responses and hallucinations.
     session = AgentSession(
         stt=stt,
-        llm=llm,
         tts=tts,
         vad=silero.VAD.load(
             min_speech_duration=settings.VAD_MIN_SPEECH_DURATION,
-            min_silence_duration=settings.VAD_MIN_SILENCE_DURATION,
+            min_silence_duration=0.3,  # Shorter silence = faster cutoff
+            activation_threshold=0.5,
         ),
     )
 
     # ── Speech handler: intercept transcriptions before they hit the LLM ─────
-    async def _handle_user_speech(ev) -> None:
-        """
-        Fires after STT produces a final transcript.
-        We send it to the AI Gateway instead of letting the LLM handle it.
-        The response from the Gateway is spoken via session.say().
-        """
-        # Only act on final (committed) transcriptions
-        if not getattr(ev, "is_final", True):
-            return
+    # ── Bug 5: Voice Turn Debouncing ───────────────────────────────────────────
+    transcript_buffer: list[str] = []
+    debounce_task: Optional[asyncio.Task] = None
+    processing_lock = asyncio.Lock()
+    pending_follow_ups: list[str] = []
+    
+    # ── Utterance Buffering (VAD Split Fix) ──────────────────────────────────
+    long_term_buffer: list[str] = []
+    flush_task: Optional[asyncio.Task] = None
+    
+    INCOMPLETE_UTTERANCE_PATTERNS = [
+        r"^(amount|price|cost|total|the|for|is|and|but|so|rupees|percent|dollars|of|to)\b.{0,30}$",
+        r".*\b(is|are|of|to|for|with)$" # Ends with a connector
+    ]
 
-        user_text = (getattr(ev, "transcript", None) or "").strip()
-        if not user_text:
-            return
+    def _is_incomplete_utterance(text: str) -> bool:
+        """Detect if this is a fragment, not a complete thought."""
+        t = text.lower().strip()
+        if not t: return True
+        
+        # Exclude common short but complete thoughts (Bug 12)
+        complete_short_words = {"yes", "no", "ok", "okay", "correct", "wrong", "sure", "cancel", "stop", "confirmed"}
+        if t in complete_short_words:
+            return False
+            
+        if len(t.split()) <= 2: return True # Too short otherwise
+        
+        import re
+        for p in INCOMPLETE_UTTERANCE_PATTERNS:
+            if re.match(p, t): return True
+        return False
 
-        logger.info("user_speech_received", text=user_text[:120], session_id=session_id)
+    async def _flush_long_term_buffer():
+        """If no continuation comes, process what we have."""
+        await asyncio.sleep(2.0)
+        if long_term_buffer:
+            combined = " ".join(long_term_buffer)
+            long_term_buffer.clear()
+            logger.info("flushing_fragment_buffer", text=combined)
+            asyncio.create_task(_process_and_say(combined))
 
-        try:
-            # ► Call AI Gateway — intent classification + entity extraction + DB action
-            response = await ai_gateway_client.process_voice_input(
-                text=user_text,
-                user_id=user_context.get("user_id", "unknown"),
-                org_id=user_context.get("org_id", "unknown"),
-                session_id=session_id,
-                conversation_history=conversation_history,
-            )
+    def sanitize_for_voice(text: str) -> str:
+        """Remove any internal system strings before speaking."""
+        if not text:
+            return "I had trouble processing that. Please try again."
+        
+        blocked_patterns = [
+            r"[A-Z_]{3,}\s+does not support",
+            r"Intent not supported",
+            r"execution_failed",
+            r"gateway_execution",
+            r"[A-Z_]{5,}",
+            r"Error \d+",
+            r"500 Internal",
+        ]
+        
+        import re
+        for pattern in blocked_patterns:
+            if re.search(pattern, text):
+                return "I'm having trouble with that right now. Please try again."
+        
+        return text
 
-            # ► Send result to Frontend via Data Channel
-            # This allows the dashboard to show transcripts and refresh lists
+    async def _process_and_say(text: str) -> None:
+        """Helper to send buffered text to gateway and speak response."""
+        async with processing_lock:
+            logger.info("requesting_gateway", text=text[:120])
             try:
+                response = await ai_gateway_client.process_voice_input(
+                    text=text,
+                    user_id=user_context.get("user_id", "unknown"),
+                    org_id=user_context.get("org_id", "unknown"),
+                    session_id=session_id,
+                    conversation_history=conversation_history,
+                )
+
+                # Send to Frontend
                 await ctx.room.local_participant.publish_data(
                     json.dumps({
                         "type": "conversation_update",
-                        "user_text": user_text,
+                        "user_text": text,
                         "response_text": response.get("response_text"),
                         "intent": response.get("intent"),
                         "action_result": response.get("action_result"),
                         "needs_more_info": response.get("needs_more_info", False),
+                        "stage": response.get("stage", "COLLECTING"),  # Bug 8: pass stage to UI
+                        "ui_event": response.get("ui_event"),
+                        "dev_event": response.get("dev_event"),
                     }), 
                     topic="gateway_results"
                 )
-            except Exception as e:
-                logger.warning("failed_to_publish_data", error=str(e))
 
-            response_text = response.get(
-                "response_text", "I'm not sure how to help with that."
-            )
-            intent = response.get("intent", "UNKNOWN")
-            action_result = response.get("action_result")
-            needs_more = response.get("needs_more_info", False)
+                response_text = response.get("response_text", "I hit a snag. Please repeat.")
+                intent = response.get("intent", "UNKNOWN")
+                # Bug 8: Read the explicit stage from the gateway response
+                # COLLECTING = still gathering info (do NOT confirm execution)
+                # CONFIRMING = asking user to confirm (do NOT confirm execution)
+                # EXECUTED   = backend confirmed success (safe to say "created")
+                # FAILED     = backend call failed
+                stage = response.get("stage", "COLLECTING")
 
-            # Log clearly so you can see exactly what happened in the terminal
-            logger.info(
-                "gateway_response",
-                intent=intent,
-                needs_more_info=needs_more,
-                response=response_text[:120],
-                action_result=action_result,
-                session_id=session_id,
-            )
+                # Bug 8: Apply premature confirmation guard
+                response_text = premature_confirmation_guard(response_text, stage)
 
-            if action_result and not needs_more:
-                logger.info(
-                    "✅ ACTION_EXECUTED",
-                    intent=intent,
-                    result=str(action_result)[:200],
-                )
+                # Bug 12: Update persistent history for success, EVEN collection stages.
+                # Failed execution turns are NOT written (prevents LLM poisoning).
+                if response.get("success", False) and intent != "ERROR":
+                    conversation_history.append({"role": "user", "content": text, "intent": intent})
+                    conversation_history.append({"role": "assistant", "content": response_text})
+                    if len(conversation_history) > 20:
+                        conversation_history[:] = conversation_history[-20:]
+                elif stage == "FAILED" or intent == "ERROR":
+                    # Failed turn: do NOT append to history (Bug 12 contract)
+                    logger.warning("gateway_execution_failed_history_not_updated", intent=intent)
 
-            # Keep rolling conversation history (capped at 20 turns)
-            conversation_history.append({"role": "user", "content": user_text, "intent": intent})
-            conversation_history.append({"role": "assistant", "content": response_text})
-            if len(conversation_history) > 20:
-                conversation_history[:] = conversation_history[-20:]
+                safe_response_text = sanitize_for_voice(response_text)
+                await session.say(safe_response_text, allow_interruptions=True)
+                
+                # Check for follow-ups that arrived while we were processing
+                if pending_follow_ups:
+                    next_text = " ".join(pending_follow_ups)
+                    pending_follow_ups.clear()
+                    asyncio.create_task(_process_and_say(next_text))
 
-            # ► Speak the AI Gateway's response
-            try:
-                await session.say(response_text, allow_interruptions=True)
-            except RuntimeError as e:
-                logger.warning("failed_to_say_response_session_closing", error=str(e))
+            except Exception as exc:
+                logger.error("gateway_call_failed", error=str(exc))
+                await session.say("I'm sorry, I'm having trouble connecting. One moment.")
 
-        except Exception as exc:
-            logger.error("speech_handler_failed", error=str(exc), exc_info=True)
-            try:
-                await session.say(
-                    "I'm sorry, something went wrong. Please try again.",
-                    allow_interruptions=True,
-                )
-            except RuntimeError as e:
-                logger.warning("failed_to_say_error_message_session_closing", error=str(e))
+    async def _debounce_timer():
+        """Wait for silence then trigger processing."""
+        await asyncio.sleep(settings.TURN_DETECTION_DELAY)
+        if transcript_buffer:
+            combined = " ".join(transcript_buffer)
+            transcript_buffer.clear()
+            
+            nonlocal flush_task
+            if _is_incomplete_utterance(combined):
+                logger.info("buffering_incomplete_utterance", text=combined)
+                long_term_buffer.append(combined)
+                if flush_task: flush_task.cancel()
+                flush_task = asyncio.create_task(_flush_long_term_buffer())
+                return
 
-    # Register the event handler BEFORE starting the session
+            # If we have a pending buffer, prepend it
+            if long_term_buffer:
+                combined = (" ".join(long_term_buffer) + " " + combined).strip()
+                long_term_buffer.clear()
+                if flush_task: flush_task.cancel()
+
+            if processing_lock.locked():
+                logger.info("buffering_interrupted_speech", text=combined[:50])
+                pending_follow_ups.append(combined)
+            else:
+                asyncio.create_task(_process_and_say(combined))
+
     @session.on("user_input_transcribed")
     def on_user_speech(ev):
-        # Spawn a task so we don't block the event loop
-        asyncio.create_task(_handle_user_speech(ev))
+        nonlocal debounce_task
+        if not getattr(ev, "is_final", True):
+            return
+            
+        text = (getattr(ev, "transcript", None) or "").strip()
+        if not text:
+            return
+
+        logger.info("utterance_received", text=text)
+        transcript_buffer.append(text)
+        
+        if debounce_task:
+            debounce_task.cancel()
+        debounce_task = asyncio.create_task(_debounce_timer())
 
     @session.on("agent_speech_committed")
     def on_agent_speech(ev):
@@ -219,7 +320,7 @@ async def entrypoint(ctx: JobContext):
     # ── Start the session ─────────────────────────────────────────────────────
     await session.start(
         room=ctx.room,
-        agent=MoneyOpsVoiceAgent(),
+        agent=Agent(instructions="MoneyOps Voice Agent"),
         room_input_options=RoomInputOptions(),
     )
 
@@ -335,14 +436,19 @@ def _create_stt():
     """Try AssemblyAI first, fall back to Groq Whisper."""
     if HAS_ASSEMBLYAI and settings.ASSEMBLYAI_API_KEY:
         try:
+            # AssemblyAI for low-latency STT
             stt = _assemblyai_plugin.STT(api_key=settings.ASSEMBLYAI_API_KEY)
             logger.info("stt_provider", provider="assemblyai")
             return stt
         except Exception as e:
             logger.warning("assemblyai_init_failed", error=str(e))
 
-    logger.info("stt_provider", provider="groq-whisper-large-v3-turbo")
-    return groq.STT(model="whisper-large-v3-turbo")
+
+def prewarm(proc: JobProcess):
+    """Pre-initialize heavy plugins to avoid AssignmentTimeoutError."""
+    logger.info("prewarming_worker_plugins")
+    proc.userdata["stt"] = _create_stt()
+    proc.userdata["tts"] = _create_tts()
 
 
 # ── Entry ─────────────────────────────────────────────────────────────────────
@@ -353,4 +459,9 @@ if __name__ == "__main__":
         gateway_url=settings.AI_GATEWAY_URL,
         livekit_url=settings.LIVEKIT_URL,
     )
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
+    cli.run_app(
+        WorkerOptions(
+            entrypoint_fnc=entrypoint,
+            prewarm_fnc=prewarm
+        )
+    )

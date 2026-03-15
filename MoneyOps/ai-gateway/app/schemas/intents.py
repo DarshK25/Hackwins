@@ -239,8 +239,8 @@ DEFAULT_CONVERSATIONAL = IntentRequirements(
 
 INTENT_REQUIREMENTS: Dict[Intent, IntentRequirements] = {
     Intent.INVOICE_CREATE: IntentRequirements(
-        required_entities=["client_name", "amount", "due_date", "gst_percent"],
-        optional_entities=["notes", "items"],
+        required_entities=["client_name", "items"],
+        optional_entities=["due_date", "notes", "tax"],
         requires_user_confirmation=True,
         minimum_confidence=0.8,
         primary_agent=AgentType.FINANCE_AGENT,
@@ -281,22 +281,22 @@ INTENT_REQUIREMENTS: Dict[Intent, IntentRequirements] = {
         required_entities=["client_name", "email"],
         optional_entities=["phone", "address", "gst_number"],
         requires_user_confirmation=True,
-        primary_agent=AgentType.FINANCE_AGENT,
+        primary_agent=AgentType.CUSTOMER_AGENT,
     ),
     Intent.CLIENT_UPDATE: IntentRequirements(
         required_entities=["client_id"],
         optional_entities=["email", "phone", "address"],
         requires_user_confirmation=True,
-        primary_agent=AgentType.FINANCE_AGENT,
+        primary_agent=AgentType.CUSTOMER_AGENT,
     ),
     Intent.CLIENT_DELETE: IntentRequirements(
         required_entities=["client_id"],
         requires_user_confirmation=True,
-        primary_agent=AgentType.FINANCE_AGENT,
+        primary_agent=AgentType.CUSTOMER_AGENT,
     ),
     Intent.CLIENT_QUERY: IntentRequirements(
         optional_entities=["client_id", "client_name"],
-        primary_agent=AgentType.FINANCE_AGENT,
+        primary_agent=AgentType.CUSTOMER_AGENT,
     ),
     Intent.CLIENT_HISTORY: IntentRequirements(
         required_entities=["client_id"],
@@ -355,228 +355,43 @@ INTENT_REQUIREMENTS: Dict[Intent, IntentRequirements] = {
         requires_ml_model=True,
     ),
 
-    # Compliance — routed to Compliance Agent
-    Intent.COMPLIANCE_QUERY: IntentRequirements(
-        primary_agent=AgentType.COMPLIANCE_AGENT,
-        complexity=ComplexityLevel.COMPLEX,
-        requires_historical_data=True,
-        expected_response_format="report",
-    ),
-    Intent.COMPLIANCE_CHECK: IntentRequirements(
-        primary_agent=AgentType.COMPLIANCE_AGENT,
-        complexity=ComplexityLevel.COMPLEX,
-        requires_historical_data=True,
-    ),
-    Intent.COMPLIANCE_REPORT: IntentRequirements(
-        primary_agent=AgentType.COMPLIANCE_AGENT,
-        complexity=ComplexityLevel.COMPLEX,
-        requires_historical_data=True,
-    ),
-    Intent.GST_QUERY: IntentRequirements(
-        primary_agent=AgentType.COMPLIANCE_AGENT,
-        complexity=ComplexityLevel.MEDIUM,
-        requires_historical_data=True,
-    ),
-    Intent.TAX_OPTIMIZATION: IntentRequirements(
-        primary_agent=AgentType.COMPLIANCE_AGENT,
-        supporting_agents=[AgentType.STRATEGY_AGENT],
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.TAX_CALCULATION: IntentRequirements(
-        primary_agent=AgentType.COMPLIANCE_AGENT,
-        complexity=ComplexityLevel.MEDIUM,
-        requires_historical_data=True,
-    ),
-    Intent.AUDIT_READINESS: IntentRequirements(
-        primary_agent=AgentType.COMPLIANCE_AGENT,
-        complexity=ComplexityLevel.COMPLEX,
-        requires_historical_data=True,
-    ),
+    Intent.COMPLIANCE_QUERY: DEFAULT_STRATEGIC,
+    Intent.COMPLIANCE_CHECK: DEFAULT_STRATEGIC,
+    Intent.COMPLIANCE_REPORT: DEFAULT_STRATEGIC,
+    Intent.GST_QUERY: DEFAULT_STRATEGIC,
+    Intent.TAX_OPTIMIZATION: DEFAULT_STRATEGIC,
+    Intent.TAX_CALCULATION: DEFAULT_STRATEGIC,
+    Intent.AUDIT_READINESS: DEFAULT_STRATEGIC,
 
-    # Strategy — routed to Strategy Agent
-    Intent.BUSINESS_HEALTH_CHECK: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        supporting_agents=[AgentType.FINANCE_AGENT],
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-        max_response_time_seconds=15,
-    ),
-    Intent.PROBLEM_DIAGNOSIS: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        supporting_agents=[AgentType.FINANCE_AGENT, AgentType.SALES_AGENT],
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-        max_response_time_seconds=15,
-    ),
-    Intent.BUDGET_OPTIMIZATION: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        supporting_agents=[AgentType.FINANCE_AGENT],
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.CASH_FLOW_PLANNING: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        supporting_agents=[AgentType.FINANCE_AGENT],
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.PROFIT_OPTIMIZATION: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        supporting_agents=[AgentType.FINANCE_AGENT, AgentType.SALES_AGENT],
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.INVESTMENT_ADVICE: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.DEBT_MANAGEMENT: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.RISK_ASSESSMENT: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        supporting_agents=[AgentType.COMPLIANCE_AGENT],
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.SWOT_ANALYSIS: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.SCENARIO_PLANNING: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.GOAL_SETTING: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        complexity=ComplexityLevel.STRATEGIC,
-    ),
-    Intent.COMPETITIVE_POSITIONING: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.PARTNERSHIP_OPPORTUNITIES: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        complexity=ComplexityLevel.STRATEGIC,
-    ),
+    Intent.BUSINESS_HEALTH_CHECK: DEFAULT_STRATEGIC,
+    Intent.PROBLEM_DIAGNOSIS: DEFAULT_STRATEGIC,
+    Intent.BUDGET_OPTIMIZATION: DEFAULT_STRATEGIC,
+    Intent.CASH_FLOW_PLANNING: DEFAULT_STRATEGIC,
+    Intent.PROFIT_OPTIMIZATION: DEFAULT_STRATEGIC,
+    Intent.INVESTMENT_ADVICE: DEFAULT_STRATEGIC,
+    Intent.DEBT_MANAGEMENT: DEFAULT_STRATEGIC,
+    Intent.SALES_STRATEGY: DEFAULT_STRATEGIC,
+    Intent.CUSTOMER_ACQUISITION: DEFAULT_STRATEGIC,
+    Intent.PRICING_STRATEGY: DEFAULT_STRATEGIC,
+    Intent.MARKETING_OPTIMIZATION: DEFAULT_STRATEGIC,
+    Intent.CUSTOMER_RETENTION: DEFAULT_STRATEGIC,
+    Intent.GROWTH_STRATEGY: DEFAULT_STRATEGIC,
+    Intent.MARKET_EXPANSION: DEFAULT_STRATEGIC,
+    Intent.PRODUCT_STRATEGY: DEFAULT_STRATEGIC,
+    Intent.SCALING_ADVICE: DEFAULT_STRATEGIC,
+    Intent.PARTNERSHIP_OPPORTUNITIES: DEFAULT_STRATEGIC,
+    Intent.RISK_ASSESSMENT: DEFAULT_STRATEGIC,
+    Intent.CUSTOMER_SEGMENTATION: DEFAULT_STRATEGIC,
+    Intent.CHURN_PREDICTION: DEFAULT_STRATEGIC,
+    Intent.CUSTOMER_LIFETIME_VALUE: DEFAULT_STRATEGIC,
+    Intent.CUSTOMER_FEEDBACK_ANALYSIS: DEFAULT_STRATEGIC,
 
-    # Sales — routed to Sales Agent
-    Intent.SALES_STRATEGY: IntentRequirements(
-        primary_agent=AgentType.SALES_AGENT,
-        supporting_agents=[AgentType.STRATEGY_AGENT],
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.CUSTOMER_ACQUISITION: IntentRequirements(
-        primary_agent=AgentType.SALES_AGENT,
-        complexity=ComplexityLevel.COMPLEX,
-        requires_historical_data=True,
-    ),
-    Intent.PRICING_STRATEGY: IntentRequirements(
-        primary_agent=AgentType.GROWTH_AGENT,
-        supporting_agents=[AgentType.SALES_AGENT],
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.MARKETING_OPTIMIZATION: IntentRequirements(
-        primary_agent=AgentType.SALES_AGENT,
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.CUSTOMER_RETENTION: IntentRequirements(
-        primary_agent=AgentType.CUSTOMER_AGENT,
-        supporting_agents=[AgentType.SALES_AGENT],
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-    Intent.FORECAST_REQUEST: IntentRequirements(
-        primary_agent=AgentType.SALES_AGENT,
-        supporting_agents=[AgentType.FINANCE_AGENT],
-        complexity=ComplexityLevel.COMPLEX,
-        requires_historical_data=True,
-    ),
-
-    # Growth — routed to Growth Agent
-    Intent.GROWTH_STRATEGY: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        supporting_agents=[AgentType.GROWTH_AGENT, AgentType.SALES_AGENT],
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-        max_response_time_seconds=15,
-    ),
-    Intent.MARKET_EXPANSION: IntentRequirements(
-        primary_agent=AgentType.GROWTH_AGENT,
-        complexity=ComplexityLevel.STRATEGIC,
-    ),
-    Intent.PRODUCT_STRATEGY: IntentRequirements(
-        primary_agent=AgentType.GROWTH_AGENT,
-        complexity=ComplexityLevel.STRATEGIC,
-    ),
-    Intent.SCALING_ADVICE: IntentRequirements(
-        primary_agent=AgentType.GROWTH_AGENT,
-        supporting_agents=[AgentType.STRATEGY_AGENT],
-        complexity=ComplexityLevel.STRATEGIC,
-        requires_historical_data=True,
-    ),
-
-    # Customer — routed to Customer Agent
-    Intent.CUSTOMER_SEGMENTATION: IntentRequirements(
-        primary_agent=AgentType.CUSTOMER_AGENT,
-        complexity=ComplexityLevel.COMPLEX,
-        requires_historical_data=True,
-    ),
-    Intent.CHURN_PREDICTION: IntentRequirements(
-        primary_agent=AgentType.CUSTOMER_AGENT,
-        complexity=ComplexityLevel.COMPLEX,
-        requires_historical_data=True,
-    ),
-    Intent.CUSTOMER_LIFETIME_VALUE: IntentRequirements(
-        primary_agent=AgentType.CUSTOMER_AGENT,
-        complexity=ComplexityLevel.COMPLEX,
-        requires_historical_data=True,
-    ),
-    Intent.CUSTOMER_FEEDBACK_ANALYSIS: IntentRequirements(
-        primary_agent=AgentType.CUSTOMER_AGENT,
-        complexity=ComplexityLevel.MEDIUM,
-    ),
-
-    # Reports & Analytics
     Intent.REPORT_GENERATE: DEFAULT_ANALYTICAL,
     Intent.ANALYTICS_QUERY: DEFAULT_ANALYTICAL,
-    Intent.BENCHMARK_COMPARISON: IntentRequirements(
-        primary_agent=AgentType.STRATEGY_AGENT,
-        complexity=ComplexityLevel.COMPLEX,
-        requires_historical_data=True,
-    ),
-    Intent.TREND_ANALYSIS: IntentRequirements(
-        primary_agent=AgentType.FINANCE_AGENT,
-        complexity=ComplexityLevel.COMPLEX,
-        requires_historical_data=True,
-    ),
+    Intent.FORECAST_REQUEST: DEFAULT_ANALYTICAL,
+    Intent.BENCHMARK_COMPARISON: DEFAULT_ANALYTICAL,
+    Intent.TREND_ANALYSIS: DEFAULT_ANALYTICAL,
 
-    # Operations
-    Intent.PROCESS_OPTIMIZATION: IntentRequirements(
-        primary_agent=AgentType.OPERATIONS_AGENT,
-        complexity=ComplexityLevel.COMPLEX,
-        requires_historical_data=True,
-    ),
-    Intent.RESOURCE_ALLOCATION: IntentRequirements(
-        primary_agent=AgentType.OPERATIONS_AGENT,
-        complexity=ComplexityLevel.COMPLEX,
-    ),
-    Intent.INVENTORY_OPTIMIZATION: IntentRequirements(
-        primary_agent=AgentType.OPERATIONS_AGENT,
-        complexity=ComplexityLevel.MEDIUM,
-    ),
-
-    # Conversational
     Intent.GENERAL_QUERY: DEFAULT_CONVERSATIONAL,
     Intent.GREETING: DEFAULT_CONVERSATIONAL,
     Intent.HELP: DEFAULT_CONVERSATIONAL,

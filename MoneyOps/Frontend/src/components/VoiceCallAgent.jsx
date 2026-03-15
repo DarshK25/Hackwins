@@ -13,6 +13,7 @@ import {
 import "@livekit/components-styles";
 import { AIVoiceInput } from "@/components/ui/ai-voice-input";
 import { motion, AnimatePresence } from "framer-motion";
+import { useVoiceEvents } from "@/hooks/useVoiceEvents";
 
 export function VoiceCallAgent({ agentType = "orchestrator" }) {
     const { user, isLoaded } = useUser();
@@ -188,6 +189,7 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
 }
 
 function AgentContent({ onDisconnect }) {
+    useVoiceEvents();
     const { state } = useConnectionState();
     const isConnected = state === ConnectionState.Connected;
     const isConnecting = state === ConnectionState.Connecting;
