@@ -100,9 +100,15 @@ class FinanceAgent(BaseAgent):
                 if client:
                     draft.client_id = client.get("id")
                     draft.client_name = client.get("name")
-            elif etype in ("amount", "total") and draft.amount is None:
-                try: draft.amount = float(str(val).replace(",", "").replace("₹", "").strip())
-                except: pass
+            elif etype in ("amount", "total"):
+                try: 
+                    new_val = float(str(val).replace(",", "").replace("₹", "").replace("rupees", "").strip())
+                    # Safeguard: Don't let day numbers (1-31) or small fragments 
+                    # overwrite an existing significant amount.
+                    if draft.amount is None or new_val > 100 or new_val > draft.amount * 0.5:
+                        draft.amount = new_val
+                except: 
+                    pass
             elif etype in ("due_date", "time_period", "date", "deadline"):
                 if draft.due_date is None or draft.due_date == "" or draft.due_date == "null":
                     v_str = str(val).strip()
@@ -209,7 +215,7 @@ class FinanceAgent(BaseAgent):
                 {
                     "type": "SERVICE",
                     "description": f"Services for {draft.client_name}",
-                    "quantity": 1,
+                    "quantity": None, # Must be null for SERVICE items in backend
                     "rate": subtotal,
                     "gstPercent": draft.gst_percent or 0,
                     "lineSubtotal": subtotal,
@@ -251,14 +257,12 @@ class FinanceAgent(BaseAgent):
                 message=f"Invoice {invoice_number} created for {draft.client_name}. Total ₹{total_amount:,.0f} including GST, due {draft.due_date}.",
                 success=True,
                 ui_event={
-                    "type": "toast", 
-                    "variant": "success", 
-                    "title": "Invoice Created ✓", 
-                    "message": f"₹{total_amount:,.0f} for {draft.client_name}", 
-                    "actions": [
-                        {"label": "View", "action": f"navigate:/invoices/{invoice_id}"},
-                        {"label": "Send", "action": f"send_invoice:{invoice_id}"}
-                    ]
+                    "type": "invoice_created",
+                    "invoice_id": invoice_id,
+                    "invoice_number": invoice_number,
+                    "client_name": draft.client_name,
+                    "total": total_amount,
+                    "due_date": draft.due_date
                 },
                 agent_type=self.get_agent_type()
             )
@@ -296,10 +300,60 @@ class FinanceAgent(BaseAgent):
         return best if best_score >= 1 else None
 
     # Handler stubs for other intents
-    async def _handle_business_health_score(self, params, context=None): return {"message": "Business health is good."}
-    async def _handle_query_invoices(self, params, context=None): return {"message": "You have 5 pending invoices."}
-    async def _handle_check_balance(self, params, context=None): return {"message": "Your balance is ₹1,61,000."}
-    async def _handle_analytics_query(self, params, context=None): return {"message": "Revenue is up 10% this month."}
+    async def _handle_business_health_score(self, params, context=None): 
+        org_uuid = context.get("org_uuid") or context.get("org_id")
+        business_id = context.get("business_id", 1)
+        user_id = context.get("user_id")
+        
+        resp = await self.backend.get_finance_metrics(business_id, org_uuid, user_id)
+        if resp.success and resp.data:
+            m = resp.data
+            revenue = m.get("revenue", 0)
+            expenses = m.get("expenses", 0)
+            profit = m.get("netProfit", 0)
+            # Simple heuristic score
+            score = 75 # default
+            if revenue > 0:
+                profit_margin = (profit / revenue) * 100
+                score = min(100, max(0, int(50 + profit_margin)))
+            
+            return {"message": f"Your business health score is {score}/100. Your net profit margin is sitting at {profit_margin:.1f}% based on recent revenue of ₹{revenue:,.0f}."}
+        return {"message": "I couldn't calculate your health score right now."}
+
+    async def _handle_query_invoices(self, params, context=None): 
+        org_uuid = context.get("org_uuid") or context.get("org_id")
+        user_id = context.get("user_id")
+        resp = await self.backend._request("GET", "/api/invoices", org_id=org_uuid, user_id=user_id)
+        if resp.success and isinstance(resp.data, list):
+            count = len(resp.data)
+            return {"message": f"You have {count} total invoices in the system."}
+        return {"message": "I couldn't fetch your invoices right now."}
+
+    async def _handle_check_balance(self, params, context=None): 
+        org_uuid = context.get("org_uuid") or context.get("org_id")
+        user_id = context.get("user_id")
+        resp = await self.backend.get_financial_summary(org_uuid, user_id)
+        if resp.success and resp.data:
+            summary = resp.data
+            income = summary.get("totalIncome", 0)
+            expense = summary.get("totalExpense", 0)
+            net = summary.get("netProfit", 0)
+            return {"message": f"Your current cash balance summary shows total income of ₹{income:,.2f} and total expenses of ₹{expense:,.2f}, leaving a net balance of ₹{net:,.2f}."}
+        return {"message": "I couldn't check your balance right now."}
+
+    async def _handle_analytics_query(self, params, context=None): 
+        org_uuid = context.get("org_uuid") or context.get("org_id")
+        business_id = context.get("business_id", 1)
+        user_id = context.get("user_id")
+        
+        resp = await self.backend.get_finance_metrics(business_id, org_uuid, user_id)
+        if resp.success and resp.data:
+            m = resp.data
+            revenue = m.get("revenue", 0)
+            expenses = m.get("expenses", 0)
+            profit = m.get("netProfit", 0)
+            return {"message": f"Revenue for this period is ₹{revenue:,.0f} with expenses of ₹{expenses:,.0f}, resulting in a net profit of ₹{profit:,.0f}."}
+        return {"message": "I couldn't retrieve your analytics data at the moment."}
 
     async def process(self, intent: Intent, entities: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> AgentResponse:
         if intent == Intent.INVOICE_CREATE:

@@ -289,7 +289,7 @@ CONVERSATIONAL INTENTS:
 User Input: "{user_input}"
 """
 
-        if conversation_history and len(conversation_history) > 0:
+        if isinstance(conversation_history, list) and len(conversation_history) > 0:
             prompt += f"\n\nPrevious Intent: {conversation_history[-1].get('intent', 'N/A')}"
             prompt += "\nThis might be a follow-up question."
 

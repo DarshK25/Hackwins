@@ -216,7 +216,19 @@ async def entrypoint(ctx: JobContext):
                     conversation_history=conversation_history,
                 )
 
-                # Send to Frontend
+                # ── Inform Frontend Logic (UI + History) ──
+                ui_event = response.get("ui_event")
+                if ui_event:
+                    logger.info("publishing_ui_event_to_room", type=ui_event.get("type"))
+                    await ctx.room.local_participant.publish_data(
+                        json.dumps({
+                            "type": "moneyops_ui_event",
+                            "payload": ui_event
+                        }), 
+                        topic="ui_events"
+                    )
+
+                # Update conversation status/transcript
                 await ctx.room.local_participant.publish_data(
                     json.dumps({
                         "type": "conversation_update",
@@ -226,7 +238,7 @@ async def entrypoint(ctx: JobContext):
                         "action_result": response.get("action_result"),
                         "needs_more_info": response.get("needs_more_info", False),
                         "stage": response.get("stage", "COLLECTING"),  # Bug 8: pass stage to UI
-                        "ui_event": response.get("ui_event"),
+                        "ui_event": ui_event,
                         "dev_event": response.get("dev_event"),
                     }), 
                     topic="gateway_results"

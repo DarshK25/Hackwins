@@ -68,8 +68,8 @@ class VoiceProcessor:
                 self.state_manager.save_session(session)
                 return {"response_text": "Invoice cancelled.", "success": True, "intent": "CANCELLATION"}
             
+            classification = await self.intent_classifier.classify(text, conversation_history=session.history)
             entities = await self.entity_extractor.extract(text, Intent.INVOICE_CREATE, context)
-            # Convert to list of dicts if needed
             context.extracted_entities = [{"type": e.entity_type.value.lower(), "value": e.value} for e in entities.entities] if hasattr(entities, 'entities') else []
             
             result = await self.finance_agent.handle_invoice_create(context)
@@ -86,7 +86,11 @@ class VoiceProcessor:
             }
         
         # NORMAL PATH
-        classification = await self.intent_classifier.classify(text, context)
+        classification = await self.intent_classifier.classify(
+            text, 
+            conversation_history=session.history,
+            business_context={"business_id": context.business_id, "org_uuid": context.org_uuid}
+        )
         intent = classification.intent.value if hasattr(classification.intent, 'value') else str(classification.intent)
         
         # Default extraction
