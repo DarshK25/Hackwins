@@ -127,8 +127,12 @@ class FinanceAgent(BaseAgent):
                         logger.info({"merged_due_days": days, "computed": draft.due_date, "event": "due_date_from_days"})
                 except: pass
             elif etype in ("gst_percent", "gst", "tax_percent", "percentage", "gst_percentage") and draft.gst_percent is None:
-                try: draft.gst_percent = float(str(val).replace("%", "").strip())
-                except: pass
+                try: 
+                    v_str = str(val).replace("%", "").strip()
+                    if v_str.lower() != "null" and v_str != "":
+                        draft.gst_percent = float(v_str)
+                except: 
+                    pass
         
         session.invoice_draft = draft
         session.locked_intent = "INVOICE_CREATE"
@@ -196,10 +200,44 @@ class FinanceAgent(BaseAgent):
             return AgentResponse(
                 message=f"Add 18% GST? Total would be ₹{total_with_gst:,.0f}.",
                 success=True,
-                ui_event={"type": "confirmation", "variant": "warning", "title": "Confirm GST", "message": f"Add 18% GST → Total ₹{total_with_gst:,.0f}?", "actions": [{"label": "Yes, add GST"}, {"label": "Skip GST"}]},
+                ui_event={
+                    "type": "confirmation", 
+                    "variant": "warning", 
+                    "title": "Confirm GST", 
+                    "message": f"Add 18% GST → Total ₹{total_with_gst:,.0f}?"
+                },
                 agent_type=self.get_agent_type()
             )
-        
+
+        if not draft.service_description:
+            return AgentResponse(
+                message=f"What's this invoice for? For example: 'web development services' or 'consulting for March'.",
+                success=True,
+                ui_event={
+                    "type": "progress", 
+                    "variant": "info", 
+                    "title": "Creating Invoice", 
+                    "message": "What service are you billing for?"
+                },
+                agent_type=self.get_agent_type()
+            )
+
+        if not draft.confirmed:
+            gst_total = round(draft.amount * (draft.gst_percent / 100), 2)
+            total = round(draft.amount + gst_total, 2)
+            return AgentResponse(
+                message=f"Ready to create: {draft.service_description} for {draft.client_name}, ₹{draft.amount:,.0f} + {draft.gst_percent}% GST = ₹{total:,.0f}, due {draft.due_date}. Shall I proceed?",
+                success=True,
+                ui_event={
+                    "type": "confirmation", 
+                    "variant": "warning", 
+                    "title": "Confirm Invoice", 
+                    "message": f"{draft.client_name} · ₹{total:,.0f} due {draft.due_date}", 
+                    "actions": [{"label": "Yes, create"}, {"label": "Cancel"}]
+                },
+                agent_type=self.get_agent_type()
+            )
+
         return await self._finalize_and_create_invoice(draft, context)
 
     async def _finalize_and_create_invoice(self, draft: InvoiceDraft, context) -> AgentResponse:
@@ -214,7 +252,7 @@ class FinanceAgent(BaseAgent):
             line_items = [
                 {
                     "type": "SERVICE",
-                    "description": f"Services for {draft.client_name}",
+                    "description": draft.service_description or f"Services for {draft.client_name}",
                     "quantity": None, # Must be null for SERVICE items in backend
                     "rate": subtotal,
                     "gstPercent": draft.gst_percent or 0,

@@ -70,8 +70,53 @@ class VoiceProcessor:
             
             classification = await self.intent_classifier.classify(text, conversation_history=session.history)
             entities = await self.entity_extractor.extract(text, Intent.INVOICE_CREATE, context)
-            context.extracted_entities = [{"type": e.entity_type.value.lower(), "value": e.value} for e in entities.entities] if hasattr(entities, 'entities') else []
-            
+            context.extracted_entities = [
+                {"type": e.entity_type.value.lower(), "value": e.value} 
+                for e in entities.entities
+            ] if hasattr(entities, 'entities') else []
+
+            draft = session.invoice_draft
+
+            # Handle CONFIRMATION — set confirmed flag or set gst to 18 if still pending
+            confirm_words = {"yes", "yeah", "yep", "sure", "ok", "okay", "correct", "proceed", "go ahead", "create it", "create"}
+            if any(w in text.lower().strip() for w in confirm_words):
+                if draft.gst_percent is None:
+                    # User confirmed the 18% GST suggestion
+                    draft.gst_percent = 18.0
+                    session.invoice_draft = draft
+                    self.state_manager.save_session(session)
+                elif draft.service_description and not draft.confirmed:
+                    # User confirmed the final summary
+                    draft.confirmed = True
+                    session.invoice_draft = draft
+                    self.state_manager.save_session(session)
+
+            # Handle service description — if agent just asked "what's this for?"
+            # and no entities were extracted, treat the raw text as the description
+            if (draft.client_id and draft.amount is not None 
+                    and draft.due_date and draft.gst_percent is not None
+                    and not draft.service_description
+                    and not any(w in text.lower().strip() for w in confirm_words)):
+                # The user is answering the "what's this invoice for?" question
+                description = text.strip()
+                filler_patterns = [
+                    r"^this (one |invoice |bill )?is for\s*",
+                    r"^it['s| is] for\s*",
+                    r"^the service is\s*",
+                    r"^the description is\s*",
+                    r"^for\s+",
+                    r"^invoice for\s*",
+                    r"^the (description|service description) is\s*"
+                ]
+                import re
+                for pattern in filler_patterns:
+                    description = re.sub(pattern, "", description, flags=re.IGNORECASE).strip()
+                
+                draft.service_description = description.capitalize()
+                session.invoice_draft = draft
+                self.state_manager.save_session(session)
+                context.extracted_entities = []  # don't re-extract, we have it
+
             result = await self.finance_agent.handle_invoice_create(context)
             
             if result.success:

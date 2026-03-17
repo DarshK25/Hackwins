@@ -23,6 +23,8 @@ class InvoiceDraft:
     amount: Optional[float] = None
     gst_percent: Optional[float] = None
     due_date: Optional[str] = None
+    service_description: Optional[str] = None
+    confirmed: bool = False
     line_items: List[Any] = field(default_factory=list)
     current_stage: str = "COLLECT_INITIAL"
     last_question_asked: Optional[str] = None
