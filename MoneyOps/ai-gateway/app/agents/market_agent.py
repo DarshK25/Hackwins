@@ -107,6 +107,13 @@ class MarketAgent(BaseAgent):
             Intent.SWOT_ANALYSIS,
             Intent.TREND_ANALYSIS,
             Intent.BENCHMARK_COMPARISON,
+            Intent.BUSINESS_HEALTH_CHECK,
+            Intent.BUDGET_OPTIMIZATION,
+            Intent.CASH_FLOW_PLANNING,
+            Intent.PROFIT_OPTIMIZATION,
+            Intent.CUSTOMER_RETENTION,
+            Intent.FORECAST_REQUEST,
+            Intent.ANALYTICS_QUERY,
         ]
 
     def get_tools(self) -> List[ToolDefinition]:
@@ -184,18 +191,19 @@ class MarketAgent(BaseAgent):
 
         self._scheduler.add_job(
             func=self._market_monitor_tick,
-            trigger=IntervalTrigger(minutes=30),
+            trigger=IntervalTrigger(hours=6),
             id=job_id,
             args=[org_uuid, business_id, industry],
-            next_run_time=datetime.now() + timedelta(seconds=5),  # first run in 5s
+            next_run_time=datetime.now() + timedelta(seconds=10),  # first run in 10s
             replace_existing=True,
-            misfire_grace_time=60,
+            misfire_grace_time=300,
         )
 
         logger.info({
             "event": "market_monitor_started",
             "org_uuid": org_uuid,
-            "interval_minutes": 30
+            "interval_hours": 6,
+            "estimated_monthly_calls": 360
         })
 
     def stop_market_monitor(self, org_uuid: str):
@@ -212,16 +220,14 @@ class MarketAgent(BaseAgent):
             # Fetch in parallel
             news_task = fetch_market_news(f"{industry} India market")
             competitor_task = fetch_competitor_intelligence(industry, "SME", "India")
-            geo_task = fetch_market_news("India economy regulatory policy 2026")
 
             results = await asyncio.gather(
-                news_task, competitor_task, geo_task,
+                news_task, competitor_task,
                 return_exceptions=True
             )
             
             news = results[0]
             competitors = results[1]
-            geo = results[2]
 
             # Cache result
             _market_cache[org_uuid] = {
@@ -229,7 +235,7 @@ class MarketAgent(BaseAgent):
                 "industry": industry,
                 "news": news if not isinstance(news, Exception) else {},
                 "competitors": competitors if not isinstance(competitors, Exception) else {},
-                "geopolitical": geo if not isinstance(geo, Exception) else {},
+                "geopolitical": {},
             }
 
             logger.info({
@@ -320,7 +326,7 @@ class MarketAgent(BaseAgent):
         snapshot = await self._get_business_snapshot(context)
 
         # 3. Get cached market data
-        market_data = self._market_cache.get(org_uuid, {})
+        market_data = _market_cache.get(org_uuid, {})
 
         # 4. Synthesize strategy response
         prompt = self._build_strategy_prompt(text, snapshot, market_data, history_str)

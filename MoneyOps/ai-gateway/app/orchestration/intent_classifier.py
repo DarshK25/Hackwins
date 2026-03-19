@@ -41,11 +41,10 @@ class IntentClassifier:
         return {
             # Operational intents
             Intent.INVOICE_CREATE: [
-                r"create.*invoice",
+                r"creat.*invoice",
+                r"invoice.*for\s+\w+",
                 r"new invoice",
-                r"generate.*invoice",
                 r"make.*invoice",
-                r"invoice for",
             ],
             Intent.INVOICE_QUERY: [
                 r"show.*invoices?",
@@ -71,9 +70,10 @@ class IntentClassifier:
             ],
             Intent.CLIENT_CREATE: [
                 r"add.*client",
-                r"new.*client",
-                r"create.*client",
+                r"create.*client", 
+                r"new client",
                 r"register.*client",
+                r"onboard.*client",
             ],
             Intent.CLIENT_QUERY: [
                 r"show.*clients?",
@@ -136,7 +136,7 @@ class IntentClassifier:
                 r"^moneyops$",
             ],
             Intent.HELP: [
-                r"\b(help|guide|assist)\b",
+                r"^(help|what can you do|what do you do|how do you work)",
                 r"what.*can.*do",
                 r"how.*use",
             ],

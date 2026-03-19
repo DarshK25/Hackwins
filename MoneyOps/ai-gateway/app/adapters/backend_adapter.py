@@ -121,15 +121,16 @@ class BackendHttpAdapter:
 
     async def get_onboarding_status(self, clerk_id: str) -> BackendResponse:
         if clerk_id in self._onboarding_cache:
-            status, ts = self._onboarding_cache[clerk_id]
+            cached_data, ts = self._onboarding_cache[clerk_id]
             if time.time() - ts < self._ONBOARDING_TTL:
-                return BackendResponse(success=True, data={"onboarded": status}, status_code=200)
+                return BackendResponse(success=True, data=cached_data, status_code=200)
 
         resp = await self._request("GET", "/api/onboarding/status", params={"clerkId": clerk_id})
         if resp.success and resp.data:
             data = resp.data.get("data") if isinstance(resp.data, dict) and "data" in resp.data else resp.data
             onboarded = data.get("onboardingComplete", False) or data.get("orgId") is not None
-            self._onboarding_cache[clerk_id] = (bool(onboarded), time.time())
+            # Cache the FULL data (including orgId) not just the boolean
+            self._onboarding_cache[clerk_id] = (data, time.time())
             resp.data = data
         return resp
 

@@ -11,16 +11,25 @@ export function useVoiceEvents() {
     if (!room) return;
     
     const onDataReceived = (payload, participant, kind, topic) => {
-      if (topic !== "ui_events") return;
+      console.log(`[VoiceEvents] Received packet on topic: ${topic}`, { kind, participantIdentity: participant?.identity });
       
       try {
         const raw = new TextDecoder().decode(payload);
         const message = JSON.parse(raw);
-        if (message.type === "moneyops_ui_event") {
+        console.log("[VoiceEvents] Parsed message:", message);
+
+        // Handle direct UI events
+        if (topic === "ui_events" && message.type === "moneyops_ui_event") {
           dispatchUIEvent(message.payload, navigate);
         }
+        
+        // Also handle UI events nested in gateway results (fallback/sync)
+        if (topic === "gateway_results" && message.ui_event) {
+          console.log("[VoiceEvents] Handling nested UI event from gateway_results");
+          dispatchUIEvent(message.ui_event, navigate);
+        }
       } catch (err) {
-        console.warn("Malformed UI event payload", err);
+        console.warn("[VoiceEvents] Malformed payload", err);
       }
     };
     
@@ -86,6 +95,14 @@ function dispatchUIEvent(event, navigate) {
 
   if (type === "confirmation") {
     window.dispatchEvent(new CustomEvent("voice:confirmation", { detail: event }));
+  }
+
+  if (type === "open_input_dialog") {
+    window.dispatchEvent(new CustomEvent("voice:open_input_dialog", { detail: event }));
+  }
+
+  if (type === "client_created") {
+    window.dispatchEvent(new CustomEvent("voice:client-created", { detail: event }));
   }
 
   if (event.badge) {

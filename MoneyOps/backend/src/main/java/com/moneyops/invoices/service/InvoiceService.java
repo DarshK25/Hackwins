@@ -48,7 +48,7 @@ public class InvoiceService {
         invoiceValidator.validate(dto);
     }
 
-    public List<InvoiceDto> searchInvoices(UUID orgId, String status, String clientName, int limit) {
+    public List<InvoiceDto> searchInvoices(UUID orgId, String status, String clientName, String clientId, int limit) {
         List<Invoice> allInvoices = invoiceRepository.findAllByOrgId(orgId);
         
         // Use a wrapper or just process sequentially to keep it simple and final-safe
@@ -62,8 +62,15 @@ public class InvoiceService {
                     .collect(Collectors.toList());
         }
 
-        // 2. Filter by client name (Fuzzy Match)
-        if (clientName != null && !clientName.trim().isEmpty()) {
+        // 2. Filter by clientId if provided
+        if (clientId != null && !clientId.trim().isEmpty()) {
+            filtered = filtered.stream()
+                    .filter(inv -> inv.getClientId() != null && inv.getClientId().toString().equals(clientId))
+                    .collect(Collectors.toList());
+        }
+
+        // 3. Filter by client name (Fuzzy Match) - only if clientId is NOT provided
+        if ((clientId == null || clientId.trim().isEmpty()) && clientName != null && !clientName.trim().isEmpty()) {
             final String query = clientName.toLowerCase().trim();
             var clients = clientRepository.findAllByOrgId(orgId);
             org.apache.commons.text.similarity.JaroWinklerSimilarity similarity = new org.apache.commons.text.similarity.JaroWinklerSimilarity();

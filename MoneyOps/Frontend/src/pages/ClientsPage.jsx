@@ -23,6 +23,10 @@ import {
     DollarSign,
     MoreVertical,
     Trash2,
+    Edit2,
+    ArrowRight,
+    Filter,
+    Hash
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useUser } from "@clerk/clerk-react";
@@ -33,13 +37,15 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import ClientDetailDialog from "@/components/ClientDetailDialog";
+import { AnimatePresence } from "framer-motion";
 
 const INITIAL_FORM = {
     name: "",
     email: "",
-    phone: "",
+    phoneNumber: "",
     company: "",
-    gstin: "",
+    taxId: "",
     address: "",
     notes: "",
 };
@@ -54,11 +60,22 @@ export default function ClientsPage() {
     const [dialogOpen, setDialogOpen] = useState(false);
     const [saving, setSaving] = useState(false);
     const [formData, setFormData] = useState(INITIAL_FORM);
+    const [selectedClient, setSelectedClient] = useState(null);
 
     useEffect(() => {
         if (internalUserId && internalOrgId) {
             fetchClients();
         }
+    }, [internalUserId, internalOrgId]);
+
+    // LISTEN FOR VOICE ACTIONS (Bug 3 Refresh)
+    useEffect(() => {
+        const handleVoiceAction = () => {
+            console.log("Refetching clients due to voice action");
+            fetchClients();
+        };
+        window.addEventListener("voice:client-created", handleVoiceAction);
+        return () => window.removeEventListener("voice:client-created", handleVoiceAction);
     }, [internalUserId, internalOrgId]);
 
     const fetchClients = async () => {
@@ -131,6 +148,7 @@ export default function ClientsPage() {
             });
             if (!res.ok) throw new Error("Failed to delete client");
             toast.success("Client deleted successfully");
+            setSelectedClient(null);
             fetchClients();
         } catch (error) {
             toast.error(error.message);
@@ -147,33 +165,34 @@ export default function ClientsPage() {
             client.company?.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    const stats = {
-        total: clients.length,
-        active: clients.filter((c) => c.status === "active").length,
-        totalRevenue: clients.reduce((sum, c) => sum + (c.totalRevenue || 0), 0),
-        avgLifetimeValue:
-            clients.length > 0
-                ? clients.reduce((sum, c) => sum + (c.lifetimeValue || 0), 0) / clients.length
-                : 0,
+    const handleClientUpdate = (updated) => {
+        setClients(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+        if (selectedClient?.id === updated.id) setSelectedClient(updated);
     };
 
-    const updateForm = (field, value) => setFormData((prev) => ({ ...prev, [field]: value }));
-
     return (
-        <div className="flex flex-col gap-6">
-            {/* ── Header ──────────────────────────────────────────────────────── */}
-            <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="mo-page">
+            <AnimatePresence>
+                {selectedClient && (
+                    <ClientDetailDialog 
+                        client={selectedClient} 
+                        onClose={() => setSelectedClient(null)} 
+                        onUpdate={handleClientUpdate}
+                        onDelete={handleDeleteClient}
+                        internalUserId={internalUserId}
+                        internalOrgId={internalOrgId}
+                    />
+                )}
+            </AnimatePresence>
+
+            <div className="flex justify-between items-center mb-2">
                 <div>
                     <h1 className="mo-h1">Clients</h1>
-                    <p className="mo-text-secondary mt-1">Manage your client relationships</p>
+                    <p className="mo-text-secondary">Manage your business relationships and leads</p>
                 </div>
-                <div className="flex items-center gap-2">
-                    <button
-                        className="mo-btn-secondary flex items-center gap-2"
-                        onClick={fetchClients}
-                        disabled={loading}
-                    >
-                        <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                <div className="flex gap-3">
+                    <button className="mo-btn-secondary" onClick={fetchClients} disabled={loading}>
+                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                     </button>
                     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                         <DialogTrigger asChild>
@@ -181,67 +200,58 @@ export default function ClientsPage() {
                                 <Plus className="h-4 w-4" /> New Client
                             </button>
                         </DialogTrigger>
-                        <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto bg-[#111111] border-[#2A2A2A] text-white">
+                        <DialogContent className="bg-[#1A1A1A] border-[#2A2A2A] text-white">
                             <DialogHeader>
-                                <DialogTitle className="text-white">Create New Client</DialogTitle>
+                                <DialogTitle className="text-white">Add New Client</DialogTitle>
                                 <DialogDescription className="text-[#A0A0A0]">
-                                    Add a new client to your database.
+                                    Enter details for your new client.
                                 </DialogDescription>
                             </DialogHeader>
                             <div className="grid gap-4 py-4">
-                                {[
-                                    { id: "client-name", label: "Name *", field: "name", placeholder: "John Doe" },
-                                    { id: "client-email", label: "Email", field: "email", type: "email", placeholder: "john@example.com" },
-                                    { id: "client-phone", label: "Phone", field: "phone", type: "tel", placeholder: "+91 98765 43210" },
-                                    { id: "client-company", label: "Company", field: "company", placeholder: "Acme Corp" },
-                                    { id: "client-gstin", label: "GST Number", field: "gstin", placeholder: "22AAAAA0000A1Z5" },
-                                ].map(({ id, label, field, type, placeholder }) => (
-                                    <div key={id} className="grid gap-2">
-                                        <label htmlFor={id} className="text-sm font-medium text-[#A0A0A0]">{label}</label>
-                                        <input
-                                            id={id}
-                                            type={type || "text"}
-                                            value={formData[field]}
-                                            onChange={(e) => updateForm(field, e.target.value)}
-                                            placeholder={placeholder}
-                                            className="px-3 py-2 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17]"
-                                            style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
-                                        />
-                                    </div>
-                                ))}
                                 <div className="grid gap-2">
-                                    <label className="text-sm font-medium text-[#A0A0A0]">Address</label>
-                                    <Textarea
-                                        value={formData.address}
-                                        onChange={(e) => updateForm("address", e.target.value)}
-                                        placeholder="123 Main St, City, State"
-                                        rows={2}
-                                        className="bg-[#1A1A1A] border-[#2A2A2A] text-white placeholder:text-[#A0A0A0] focus:border-[#4CBB17] resize-none"
+                                    <Label htmlFor="name" className="text-white">Name</Label>
+                                    <input
+                                        id="name"
+                                        className="mo-input px-3 py-2"
+                                        value={formData.name}
+                                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                        placeholder="Full Name"
                                     />
                                 </div>
                                 <div className="grid gap-2">
-                                    <label className="text-sm font-medium text-[#A0A0A0]">Notes</label>
+                                    <Label htmlFor="email" className="text-white">Email</Label>
+                                    <input
+                                        id="email"
+                                        className="mo-input px-3 py-2"
+                                        value={formData.email}
+                                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                        placeholder="Email Address"
+                                    />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="phone" className="text-white">Phone</Label>
+                                    <input
+                                        id="phone"
+                                        className="mo-input px-3 py-2"
+                                        value={formData.phoneNumber}
+                                        onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                                        placeholder="Phone Number"
+                                    />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="address" className="text-white">Address</Label>
                                     <Textarea
-                                        value={formData.notes}
-                                        onChange={(e) => updateForm("notes", e.target.value)}
-                                        placeholder="Additional notes about the client"
-                                        rows={2}
-                                        className="bg-[#1A1A1A] border-[#2A2A2A] text-white placeholder:text-[#A0A0A0] focus:border-[#4CBB17] resize-none"
+                                        id="address"
+                                        className="mo-input"
+                                        value={formData.address}
+                                        onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                                        placeholder="Office Address"
                                     />
                                 </div>
                             </div>
                             <DialogFooter>
-                                <button
-                                    className="mo-btn-secondary"
-                                    onClick={() => setDialogOpen(false)}
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={handleCreateClient}
-                                    disabled={saving}
-                                    className="mo-btn-primary flex items-center gap-2"
-                                >
+                                <button className="mo-btn-secondary" onClick={() => setDialogOpen(false)}>Cancel</button>
+                                <button className="mo-btn-primary flex items-center gap-2" onClick={handleCreateClient} disabled={saving}>
                                     {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                                     Create Client
                                 </button>
@@ -251,139 +261,61 @@ export default function ClientsPage() {
                 </div>
             </div>
 
-            {/* ── Stats ───────────────────────────────────────────────────────── */}
-            <div className="grid gap-4 md:grid-cols-4">
-                <div className="mo-stat-card">
-                    <div className="flex items-center justify-between mb-2">
-                        <p className="text-sm text-[#A0A0A0]">Total Clients</p>
-                        <Users className="h-4 w-4 text-[#A0A0A0]" />
-                    </div>
-                    <div className="text-3xl font-bold text-white">{stats.total}</div>
-                </div>
-                <div className="mo-stat-card">
-                    <div className="flex items-center justify-between mb-2">
-                        <p className="text-sm text-[#A0A0A0]">Active</p>
-                        <TrendingUp className="h-4 w-4 text-[#A0A0A0]" />
-                    </div>
-                    <div className="text-3xl font-bold text-[#4CBB17]">{stats.active}</div>
-                </div>
-                <div className="mo-stat-card">
-                    <div className="flex items-center justify-between mb-2">
-                        <p className="text-sm text-[#A0A0A0]">Total Revenue</p>
-                        <DollarSign className="h-4 w-4 text-[#A0A0A0]" />
-                    </div>
-                    <div className="text-3xl font-bold text-white">₹{stats.totalRevenue.toLocaleString()}</div>
-                </div>
-                <div className="mo-stat-card">
-                    <div className="flex items-center justify-between mb-2">
-                        <p className="text-sm text-[#A0A0A0]">Avg Lifetime Value</p>
-                        <TrendingUp className="h-4 w-4 text-[#A0A0A0]" />
-                    </div>
-                    <div className="text-3xl font-bold text-white">₹{stats.avgLifetimeValue.toFixed(0)}</div>
-                </div>
-            </div>
-
-            {/* ── Search ──────────────────────────────────────────────────────── */}
-            <div className="relative max-w-md">
+            <div className="relative mb-6">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#A0A0A0]" />
                 <input
-                    placeholder="Search clients…"
+                    className="mo-input w-full pl-10 pr-4 py-2"
+                    placeholder="Search clients..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17]"
-                    style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
                 />
             </div>
 
-            {/* ── Client List ─────────────────────────────────────────────────── */}
             {loading ? (
-                <div className="flex items-center justify-center h-64">
-                    <Loader2 className="h-8 w-8 animate-spin text-[#4CBB17]" />
+                <div className="flex justify-center p-20">
+                    <Loader2 className="h-8 w-8 animate-spin mo-accent" />
                 </div>
             ) : filteredClients.length === 0 ? (
-                <div className="mo-card flex flex-col items-center justify-center py-16 border-dashed">
-                    <Users className="h-16 w-16 text-[#2A2A2A] mb-4" />
-                    <h3 className="text-lg font-semibold text-white mb-2">
-                        {searchQuery ? "No clients found" : "No clients yet"}
-                    </h3>
-                    <p className="text-[#A0A0A0] mb-6 text-center max-w-sm text-sm">
-                        {searchQuery
-                            ? "Try adjusting your search query"
-                            : "Add your first client to start managing relationships and invoices"}
-                    </p>
-                    {!searchQuery && (
-                        <button
-                            onClick={() => setDialogOpen(true)}
-                            className="mo-btn-primary flex items-center gap-2"
-                        >
-                            <Plus className="h-4 w-4" /> Add Your First Client
-                        </button>
-                    )}
+                <div className="mo-card text-center py-20 flex flex-col items-center">
+                    <Users className="h-12 w-12 text-[#2A2A2A] mb-4" />
+                    <h3 className="mo-h2 mb-2">No clients found</h3>
+                    <p className="mo-text-secondary">Add your first client to get started.</p>
                 </div>
             ) : (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredClients.map((client) => (
-                        <div key={client.id} className="mo-card cursor-pointer">
-                            <div className="flex items-start justify-between mb-3">
-                                <div>
-                                    <h3 className="text-base font-semibold text-white truncate">{client.name}</h3>
-                                    <span
-                                        className={`mt-1 inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${client.status === "active"
-                                            ? "bg-[#4CBB1720] text-[#4CBB17] border border-[#4CBB1740]"
-                                            : "bg-[#A0A0A020] text-[#A0A0A0] border border-[#A0A0A040]"
-                                            }`}
-                                    >
-                                        {client.status || "active"}
-                                    </span>
+                        <div 
+                            key={client.id} 
+                            className="mo-card flex flex-col justify-between cursor-pointer hover:border-[#4CBB17]"
+                            onClick={() => setSelectedClient(client)}
+                        >
+                            <div>
+                                <div className="flex justify-between items-start mb-4">
+                                    <div className="h-10 w-10 rounded-full bg-[#4CBB1720] flex items-center justify-center">
+                                        <Building className="h-5 w-5 mo-accent" />
+                                    </div>
+                                    <div className="mo-badge-success">{client.status || 'Active'}</div>
                                 </div>
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <button className="p-1 rounded-md hover:bg-[#2A2A2A] text-[#A0A0A0] hover:text-white transition-colors">
-                                            <MoreVertical className="h-4 w-4" />
-                                        </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="bg-[#1A1A1A] border-[#2A2A2A]">
-                                        <DropdownMenuItem
-                                            onClick={() => handleDeleteClient(client)}
-                                            className="text-red-500 hover:bg-[#CD1C1820] cursor-pointer"
-                                        >
-                                            <Trash2 className="h-4 w-4 mr-2" /> Delete
-                                        </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
+                                <h3 className="mo-h2 mb-1 truncate">{client.name}</h3>
+                                <p className="mo-text-secondary mb-4 truncate">{client.email || 'No email'}</p>
+                                
+                                <div className="space-y-2">
+                                    {client.phoneNumber && (
+                                        <div className="flex items-center gap-2 text-xs text-[#A0A0A0]">
+                                            <Phone className="h-3 w-3" /> {client.phoneNumber}
+                                        </div>
+                                    )}
+                                    {(client.taxId || client.gstin) && (
+                                        <div className="flex items-center gap-2 text-xs text-[#A0A0A0]">
+                                            <Hash className="h-3 w-3" /> {client.taxId || client.gstin}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                            <div className="space-y-2 text-sm">
-                                {client.email && (
-                                    <div className="flex items-center gap-2 text-[#A0A0A0]">
-                                        <Mail className="h-3.5 w-3.5 flex-shrink-0" />
-                                        <span className="truncate">{client.email}</span>
-                                    </div>
-                                )}
-                                {client.phone && (
-                                    <div className="flex items-center gap-2 text-[#A0A0A0]">
-                                        <Phone className="h-3.5 w-3.5 flex-shrink-0" />
-                                        <span>{client.phone}</span>
-                                    </div>
-                                )}
-                                {client.company && (
-                                    <div className="flex items-center gap-2 text-[#A0A0A0]">
-                                        <Building className="h-3.5 w-3.5 flex-shrink-0" />
-                                        <span className="truncate">{client.company}</span>
-                                    </div>
-                                )}
-                                {client.gstin && (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-mono bg-[#1A1A1A] text-[#A0A0A0] border border-[#2A2A2A]">
-                                        GST: {client.gstin}
-                                    </span>
-                                )}
-                                {client.totalRevenue > 0 && (
-                                    <div className="pt-3 mt-2 border-t border-[#2A2A2A]">
-                                        <p className="text-xs text-[#A0A0A0]">Total Revenue</p>
-                                        <p className="font-semibold text-white">
-                                            ₹{client.totalRevenue.toLocaleString()}
-                                        </p>
-                                    </div>
-                                )}
+                            
+                            <div className="mt-6 pt-4 border-t mo-divider flex justify-between items-center">
+                                <span className="text-xs font-bold mo-accent">View Details</span>
+                                <Edit2 className="h-4 w-4 text-[#2A2A2A]" />
                             </div>
                         </div>
                     ))}

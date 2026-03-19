@@ -93,4 +93,49 @@ async def process_voice(request: VoiceProcessRequest, fastapi_request: Request):
             "success": False,
             "intent": "ERROR"
         }
+
+@router.post("/voice/dialog-response")
+async def dialog_response(request: Request):
+    """Handle UI-submitted client data form."""
+    payload = await request.json()
+    session_id = payload.get("session_id")
+    
+    from app.state.session_manager import session_manager
+    from app.voice_processor import voice_processor
+    
+    session = session_manager.get_session(session_id)
+    # Check if session is brand new (missing metadata we set in process())
+    if not session or not session.client_draft:
+        logger.warning(f"dialog_response_failed_session_missing_or_draft_null: {session_id}")
+        return {
+            "success": False, 
+            "message": "Session expired or Gateway reloaded. Please try again.",
+            "error": "SESSION_EXPIRED"
+        }
+    
+    # Merge form fields into draft (robust check for both flat and nested payloads)
+    if session.client_draft is None:
+        session.client_draft = {}
+    
+    form_fields = payload.get("fields", payload)
+    # Support both flat and nested keys
+    for key in ["phone", "gst_number", "email", "address", "description", "taxId", "phoneNumber"]:
+        if key in form_fields and form_fields[key]:
+            # Map canonical keys
+            if key == "phoneNumber": session.client_draft["phone"] = form_fields[key]
+            elif key == "taxId": session.client_draft["gst_number"] = form_fields[key]
+            else: session.client_draft[key] = form_fields[key]
+    
+    session.dialog_pending = False
+    session.dialog_id = None
+    session_manager.save_session(session)
+    
+    # Finalize creation
+    result = await voice_processor.finalize_client_create(session)
+    
+    return {
+        "success": result.get("success", False),
+        "message": result.get("response_text", "Client saved."),
+        "ui_event": result.get("ui_event")
+    }
  

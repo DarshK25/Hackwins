@@ -9,10 +9,13 @@ class VoiceSession(BaseModel):
     org_id: str
     business_id: Optional[int] = 1
     invoice_draft: Optional[InvoiceDraft] = None
+    client_draft: Optional[Dict[str, Any]] = None
     locked_intent: Optional[str] = None
     history: List[Dict[str, Any]] = Field(default_factory=list)
     last_active: float = Field(default_factory=time.time)
     onboarding_verified: bool = False
+    dialog_pending: bool = False
+    dialog_id: Optional[str] = None
 
     def mark_active(self):
         self.last_active = time.time()

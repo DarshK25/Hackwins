@@ -11,6 +11,8 @@ import java.util.UUID;
 @Repository
 public interface ClientRepository extends MongoRepository<Client, String> {
 
+    boolean existsByEmail(String email);
+
     Optional<Client> findByIdAndOrgId(String id, UUID orgId);
 
     List<Client> findAllByOrgId(UUID orgId);

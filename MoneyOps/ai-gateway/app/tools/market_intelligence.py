@@ -1,61 +1,86 @@
 """
 Market Intelligence Tools — Tavily + NewsAPI + Alpha Vantage
+Gracefully degrades when API keys are missing.
 """
 import os
 import asyncio
 from typing import Dict, Any, Optional
-from tavily import TavilyClient
-from newsapi import NewsApiClient
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
-newsapi = NewsApiClient(api_key=os.getenv("NEWS_API_KEY"))
+# ── Safe initialization — don't crash if keys are missing ──────────
+_tavily_key = os.getenv("TAVILY_API_KEY")
+_newsapi_key = os.getenv("NEWS_API_KEY")
+
+tavily = None
+newsapi = None
+
+if _tavily_key:
+    try:
+        from tavily import TavilyClient
+        tavily = TavilyClient(api_key=_tavily_key)
+        logger.info({"event": "tavily_initialized"})
+    except Exception as e:
+        logger.warning({"event": "tavily_init_failed", "error": str(e)})
+
+if _newsapi_key:
+    try:
+        from newsapi import NewsApiClient
+        newsapi = NewsApiClient(api_key=_newsapi_key)
+        logger.info({"event": "newsapi_initialized"})
+    except Exception as e:
+        logger.warning({"event": "newsapi_init_failed", "error": str(e)})
+
+if not tavily:
+    logger.warning({"event": "tavily_not_available", "reason": "TAVILY_API_KEY not set"})
+if not newsapi:
+    logger.warning({"event": "newsapi_not_available", "reason": "NEWS_API_KEY not set"})
 
 
 async def fetch_market_news(query: str, max_results: int = 5) -> Dict[str, Any]:
     """Fetch real-time market news via Tavily + NewsAPI"""
+    result = {"answer": "", "sources": [], "news": [], "raw_results": []}
+
     try:
         loop = asyncio.get_event_loop()
 
-        # Tavily deep search
-        tavily_result = await loop.run_in_executor(
-            None,
-            lambda: tavily.search(
-                query=f"{query} India business 2026",
-                search_depth="advanced",
-                max_results=max_results,
-                include_answer=True,
-                include_raw_content=False,
+        # Tavily deep search (if available)
+        if tavily:
+            tavily_result = await loop.run_in_executor(
+                None,
+                lambda: tavily.search(
+                    query=f"{query} India business 2026",
+                    search_depth="advanced",
+                    max_results=max_results,
+                    include_answer=True,
+                    include_raw_content=False,
+                )
             )
-        )
+            result["answer"] = tavily_result.get("answer", "")
+            result["sources"] = [r.get("url", "") for r in tavily_result.get("results", [])]
+            result["raw_results"] = tavily_result.get("results", [])
 
-        # NewsAPI recent headlines
-        news_result = await loop.run_in_executor(
-            None,
-            lambda: newsapi.get_everything(
-                q=query,
-                language="en",
-                sort_by="publishedAt",
-                page_size=5
+        # NewsAPI recent headlines (if available)
+        if newsapi:
+            news_result = await loop.run_in_executor(
+                None,
+                lambda: newsapi.get_everything(
+                    q=query,
+                    language="en",
+                    sort_by="publishedAt",
+                    page_size=5
+                )
             )
-        )
+            result["news"] = [
+                f"{a['title']} ({a['source']['name']})"
+                for a in (news_result.get("articles") or [])[:5]
+            ]
 
-        headlines = [
-            f"{a['title']} ({a['source']['name']})"
-            for a in (news_result.get("articles") or [])[:5]
-        ]
-
-        return {
-            "answer": tavily_result.get("answer", ""),
-            "sources": [r.get("url", "") for r in tavily_result.get("results", [])],
-            "news": headlines,
-            "raw_results": tavily_result.get("results", []),
-        }
+        return result
     except Exception as e:
         logger.error({"event": "market_news_fetch_error", "error": str(e)})
-        return {"answer": "", "sources": [], "news": [], "raw_results": []}
+        return result
 
 
 async def fetch_competitor_intelligence(
@@ -64,6 +89,10 @@ async def fetch_competitor_intelligence(
     region: str = "India"
 ) -> Dict[str, Any]:
     """Identify and analyze competitors"""
+    empty = {"competitors_answer": "", "recent_moves": "", "sources": []}
+    if not tavily:
+        return empty
+
     try:
         loop = asyncio.get_event_loop()
 
@@ -96,7 +125,7 @@ async def fetch_competitor_intelligence(
         }
     except Exception as e:
         logger.error({"event": "competitor_intel_error", "error": str(e)})
-        return {"competitors_answer": "", "recent_moves": "", "sources": []}
+        return empty
 
 
 async def fetch_geopolitical_impact(
@@ -104,39 +133,40 @@ async def fetch_geopolitical_impact(
     business_type: str
 ) -> Dict[str, Any]:
     """Check geopolitical/regulatory events affecting the business"""
+    empty = {"impact_summary": "", "news": [], "sources": []}
+
     try:
         loop = asyncio.get_event_loop()
 
-        result = await loop.run_in_executor(
-            None,
-            lambda: tavily.search(
-                query=f"{event_query} impact {business_type} India SME business 2026",
-                search_depth="advanced",
-                max_results=5,
-                include_answer=True,
+        if tavily:
+            result = await loop.run_in_executor(
+                None,
+                lambda: tavily.search(
+                    query=f"{event_query} impact {business_type} India SME business 2026",
+                    search_depth="advanced",
+                    max_results=5,
+                    include_answer=True,
+                )
             )
-        )
+            empty["impact_summary"] = result.get("answer", "")
+            empty["sources"] = [r.get("url", "") for r in result.get("results", [])]
 
-        news = await loop.run_in_executor(
-            None,
-            lambda: newsapi.get_everything(
-                q=f"{event_query} India business",
-                language="en",
-                sort_by="publishedAt",
-                page_size=3
+        if newsapi:
+            news = await loop.run_in_executor(
+                None,
+                lambda: newsapi.get_everything(
+                    q=f"{event_query} India business",
+                    language="en",
+                    sort_by="publishedAt",
+                    page_size=3
+                )
             )
-        )
+            empty["news"] = [a["title"] for a in (news.get("articles") or [])[:3]]
 
-        headlines = [a["title"] for a in (news.get("articles") or [])[:3]]
-
-        return {
-            "impact_summary": result.get("answer", ""),
-            "news": headlines,
-            "sources": [r.get("url", "") for r in result.get("results", [])],
-        }
+        return empty
     except Exception as e:
         logger.error({"event": "geopolitical_fetch_error", "error": str(e)})
-        return {"impact_summary": "", "news": [], "sources": []}
+        return empty
 
 
 async def fetch_growth_opportunities(
@@ -146,6 +176,10 @@ async def fetch_growth_opportunities(
     region: str = "India"
 ) -> Dict[str, Any]:
     """Find specific growth opportunities for this business"""
+    empty = {"opportunities": "", "trends": "", "sources": []}
+    if not tavily:
+        return empty
+
     try:
         loop = asyncio.get_event_loop()
 
@@ -176,4 +210,4 @@ async def fetch_growth_opportunities(
         }
     except Exception as e:
         logger.error({"event": "growth_opp_fetch_error", "error": str(e)})
-        return {"opportunities": "", "trends": "", "sources": []}
+        return empty

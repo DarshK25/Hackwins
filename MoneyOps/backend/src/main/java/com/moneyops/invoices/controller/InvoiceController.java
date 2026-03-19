@@ -46,10 +46,11 @@ public class InvoiceController {
     public ResponseEntity<List<InvoiceDto>> getAllInvoices(
             @RequestParam(required = false) String status,
             @RequestParam(required = false, name = "client_name") String clientName,
+            @RequestParam(required = false, name = "clientId") String clientId,
             @RequestParam(defaultValue = "50") int limit) {
         UUID orgId = OrgContext.getOrgId();
         if (orgId == null) return ResponseEntity.ok(List.of());
-        List<InvoiceDto> invoices = invoiceService.searchInvoices(orgId, status, clientName, limit);
+        List<InvoiceDto> invoices = invoiceService.searchInvoices(orgId, status, clientName, clientId, limit);
         return ResponseEntity.ok(invoices);
     }
 

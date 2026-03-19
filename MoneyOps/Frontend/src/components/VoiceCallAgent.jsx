@@ -14,6 +14,7 @@ import "@livekit/components-styles";
 import { AIVoiceInput } from "@/components/ui/ai-voice-input";
 import { motion, AnimatePresence } from "framer-motion";
 import { useVoiceEvents } from "@/hooks/useVoiceEvents";
+import ClientInputDialog from "./ClientInputDialog";
 
 export function VoiceCallAgent({ agentType = "orchestrator" }) {
     const { user, isLoaded } = useUser();
@@ -22,6 +23,7 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
     const [url, setUrl] = useState("");
     const [isConnect, setIsConnect] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [activeDialog, setActiveDialog] = useState(null);
 
     const startCall = async () => {
         if (!user?.id) {
@@ -79,6 +81,13 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
         setIsConnect(false);
         setToken("");
         setIsProcessing(false);
+        setActiveDialog(null);
+    }, []);
+
+    useEffect(() => {
+        const handleOpenDialog = (e) => setActiveDialog(e.detail);
+        window.addEventListener("voice:open_input_dialog", handleOpenDialog);
+        return () => window.removeEventListener("voice:open_input_dialog", handleOpenDialog);
     }, []);
 
     // Collapsed pill button when hidden
@@ -183,7 +192,20 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
                         </div>
                     )}
                 </div>
+
             </motion.div>
+            
+            <AnimatePresence>
+                {activeDialog && (
+                    <ClientInputDialog 
+                        dialog={activeDialog}
+                        onSubmit={(result) => {
+                            toast.success(result.message);
+                        }}
+                        onClose={() => setActiveDialog(null)}
+                    />
+                )}
+            </AnimatePresence>
         </AnimatePresence>
     );
 }

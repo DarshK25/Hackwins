@@ -50,11 +50,13 @@ public class ClientService {
             dto.setStatus("ACTIVE");
         }
         clientValidator.validate(dto);
-        if (clientRepository.existsByEmailAndOrgId(dto.getEmail(), orgId)) {
+        
+        Client client = clientMapper.toEntity(dto);
+        if (org.springframework.util.StringUtils.hasText(client.getEmail()) 
+            && clientRepository.existsByEmail(client.getEmail())) {
             throw new RuntimeException("Client with this email already exists");
         }
-
-        Client client = clientMapper.toEntity(dto);
+        
         client.setOrgId(orgId);
         client.setCreatedBy(createdBy);
         client.setUpdatedBy(createdBy);

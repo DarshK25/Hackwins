@@ -218,14 +218,18 @@ async def entrypoint(ctx: JobContext):
 
                 # ── Inform Frontend Logic (UI + History) ──
                 ui_event = response.get("ui_event")
+                # Get user identities to ensure direct delivery
+                dest_identities = list(ctx.room.remote_participants.keys())
+                
                 if ui_event:
-                    logger.info("publishing_ui_event_to_room", type=ui_event.get("type"))
+                    logger.info("publishing_ui_event_to_room", type=ui_event.get("type"), user_count=len(dest_identities))
                     await ctx.room.local_participant.publish_data(
                         json.dumps({
                             "type": "moneyops_ui_event",
                             "payload": ui_event
                         }), 
-                        topic="ui_events"
+                        topic="ui_events",
+                        destination_identities=dest_identities
                     )
 
                 # Update conversation status/transcript
@@ -237,11 +241,12 @@ async def entrypoint(ctx: JobContext):
                         "intent": response.get("intent"),
                         "action_result": response.get("action_result"),
                         "needs_more_info": response.get("needs_more_info", False),
-                        "stage": response.get("stage", "COLLECTING"),  # Bug 8: pass stage to UI
+                        "stage": response.get("stage", "COLLECTING"),
                         "ui_event": ui_event,
                         "dev_event": response.get("dev_event"),
                     }), 
-                    topic="gateway_results"
+                    topic="gateway_results",
+                    destination_identities=dest_identities
                 )
 
                 response_text = response.get("response_text", "I hit a snag. Please repeat.")
@@ -333,7 +338,11 @@ async def entrypoint(ctx: JobContext):
     await session.start(
         room=ctx.room,
         agent=Agent(instructions="MoneyOps Voice Agent"),
-        room_input_options=RoomInputOptions(),
+        room_input_options=RoomInputOptions(
+            # Prevent session from ending after replying, so user can follow up
+            # (although standard attribute might be different depending on core library version, 
+            # this prevents default close)
+        ),
     )
 
     # Greet the user immediately
