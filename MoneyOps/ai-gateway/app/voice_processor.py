@@ -57,6 +57,15 @@ class VoiceProcessor:
             "event": "identity_persistence_check"
         })
         
+        # 3. START MARKET MONITOR (Background job)
+        if context.org_uuid and not context.org_uuid.startswith("org_"):
+            from app.agents.market_agent import market_agent_instance
+            market_agent_instance.start_market_monitor(
+                org_uuid=context.org_uuid,
+                business_id=context.business_id or 1,
+                industry="professional services" 
+            )
+        
         # INTENT LOCK BYPASS
         if (session.locked_intent == "INVOICE_CREATE" 
                 and session.invoice_draft is not None):
@@ -142,12 +151,60 @@ class VoiceProcessor:
         entities = await self.entity_extractor.extract(text, classification.intent, context)
         context.extracted_entities = [{"type": e.entity_type.value.lower(), "value": e.value} for e in entities.entities] if hasattr(entities, 'entities') else []
         
+        MARKET_INTENTS = {
+            "GROWTH_STRATEGY", "MARKET_EXPANSION", "SCALING_ADVICE",
+            "COMPETITIVE_POSITIONING", "PARTNERSHIP_OPPORTUNITIES",
+            "PRODUCT_STRATEGY", "RISK_ASSESSMENT", "SALES_STRATEGY",
+            "CUSTOMER_ACQUISITION", "PRICING_STRATEGY", "PROBLEM_DIAGNOSIS",
+            "SWOT_ANALYSIS", "TREND_ANALYSIS", "BENCHMARK_COMPARISON",
+        }
+
+        MARKET_INTENTS = {
+            "GROWTH_STRATEGY", "MARKET_EXPANSION", "SCALING_ADVICE",
+            "COMPETITIVE_POSITIONING", "PARTNERSHIP_OPPORTUNITIES",
+            "PRODUCT_STRATEGY", "RISK_ASSESSMENT", "SALES_STRATEGY",
+            "CUSTOMER_ACQUISITION", "PRICING_STRATEGY", "PROBLEM_DIAGNOSIS",
+            "SWOT_ANALYSIS", "TREND_ANALYSIS", "BENCHMARK_COMPARISON",
+            "BUSINESS_HEALTH_CHECK", "FORECAST_REQUEST", "ANALYTICS_QUERY",
+        }
+
         if intent == "INVOICE_CREATE":
             result = await self.finance_agent.handle_invoice_create(context)
+        elif intent in MARKET_INTENTS:
+            from app.agents.market_agent import market_agent_instance
+            result = await market_agent_instance.handle_market_query(
+                text, context, 
+                conversation_history=session.history
+            )
+        elif intent == "GENERAL_QUERY":
+            # Check if it's a market/world question
+            market_keywords = {
+                "market", "sector", "industry", "economy", "world", "global",
+                "india", "growth", "competitor", "business", "trend", "situation",
+                "geopolitical", "policy", "rate", "inflation", "tariff"
+            }
+            if any(w in text.lower() for w in market_keywords):
+                from app.agents.market_agent import market_agent_instance
+                result = await market_agent_instance.handle_market_query(
+                    text, context,
+                    conversation_history=session.history
+                )
+            else:
+                from app.orchestration.agent_router import agent_router
+                agent_resp = await agent_router.route(
+                    classification.intent, 
+                    {e["type"]: e["value"] for e in context.extracted_entities}, 
+                    vars(context) if not isinstance(context, dict) else context
+                )
+                result = agent_resp
         else:
             # Fallback to general agent or other handlers
             from app.orchestration.agent_router import agent_router
-            agent_resp = await agent_router.route(classification.intent, {e["type"]: e["value"] for e in context.extracted_entities}, vars(context))
+            agent_resp = await agent_router.route(
+                classification.intent, 
+                {e["type"]: e["value"] for e in context.extracted_entities}, 
+                vars(context) if not isinstance(context, dict) else context
+            )
             result = agent_resp
 
         if result.success:

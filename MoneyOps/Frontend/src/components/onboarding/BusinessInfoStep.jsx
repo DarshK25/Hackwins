@@ -109,8 +109,15 @@ export function BusinessInfoStep({ initialData = {}, onNext, loading }) {
                             <SelectItem value="healthcare">Healthcare</SelectItem>
                             <SelectItem value="education">Education</SelectItem>
                             <SelectItem value="construction">Construction &amp; Real Estate</SelectItem>
-                            <SelectItem value="hospitality">Hospitality &amp; Tourism</SelectItem>
+                            <SelectItem value="energy_utilities">Energy &amp; Utilities</SelectItem>
                             <SelectItem value="finance">Finance &amp; Banking</SelectItem>
+                            <SelectItem value="hospitality">Hospitality &amp; Tourism</SelectItem>
+                            <SelectItem value="logistics">Logistics &amp; Supply Chain</SelectItem>
+                            <SelectItem value="agriculture">Agriculture &amp; Food</SelectItem>
+                            <SelectItem value="media">Media &amp; Entertainment</SelectItem>
+                            <SelectItem value="telecom">Telecommunications</SelectItem>
+                            <SelectItem value="aerospace">Aerospace &amp; Defence</SelectItem>
+                            <SelectItem value="government">Government &amp; Public Sector</SelectItem>
                             <SelectItem value="other">Other</SelectItem>
                         </SelectContent>
                     </Select>

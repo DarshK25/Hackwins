@@ -39,7 +39,10 @@ public class DemoDataSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        log.info("[SEEDER] Starting robust demo data seeding via MongoTemplate...");
+        log.info("[SEEDER] Seeder is disabled as per user request to start accounts from zero.");
+        return;
+        
+        // log.info("[SEEDER] Starting robust demo data seeding via MongoTemplate...");
         
         List<BusinessOrganization> allOrgs;
         try {

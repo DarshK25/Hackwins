@@ -146,7 +146,7 @@ export default function OnboardingPage() {
     // ── Multi-step form ───────────────────────────────────────────────────────
 
     return (
-        <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#000000" }}>
+        <div className="min-h-screen dark flex items-center justify-center p-4" style={{ backgroundColor: "#000000" }}>
             <div className="w-full max-w-3xl rounded-2xl p-8" style={{ backgroundColor: "#111111", border: "1px solid #2A2A2A" }}>
                 <div className="flex items-center justify-between mb-2">
                     <h2 className="text-xl font-bold text-white">

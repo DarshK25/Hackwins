@@ -1,23 +1,47 @@
 import { useEffect, useState } from "react";
+import { useAuth } from "@clerk/clerk-react";
 import { MarketResearchDashboard } from "@/components/MarketResearchDashboard";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
 export default function MarketResearchPage() {
     const [isHydrated, setIsHydrated] = useState(false);
-    const [businessId, setBusinessId] = useState(1);
     const [loading, setLoading] = useState(true);
     const [data, setData] = useState(null);
+    const { orgId, userId } = useAuth();
 
     useEffect(() => {
         setIsHydrated(true);
-        initBusiness();
-    }, []);
+        if (orgId) fetchMarketData();
+    }, [orgId]);
 
-    async function initBusiness() {
+    async function fetchMarketData() {
+        setLoading(true);
         try {
-            setBusinessId(1);
-            // await fetchData(1);
+            // Step 1: resolve internal UUID from Spring Boot backend
+            // Note: /api/org/my depends on X-Org-Id header mapping
+            const orgRes = await fetch("/api/org/my", {
+                headers: { 
+                    "X-Org-Id": orgId,
+                    "X-User-Id": userId,
+                    "Content-Type": "application/json"
+                }
+            });
+            const orgJson = await orgRes.json();
+            const internalOrgUuid = orgJson?.data?.id || orgId;
+
+            // Step 2: fetch market intelligence with resolved UUID from AI Gateway
+            const res = await fetch(
+                `http://localhost:8001/api/v1/market/intelligence?org_uuid=${internalOrgUuid}&business_id=1&user_id=${userId || ""}`,
+                { headers: { "Content-Type": "application/json" } }
+            );
+            const json = await res.json();
+            if (json.success) {
+                setData(json);
+                if (json.cached) {
+                    toast.info("Showing cached market data", { duration: 2000 });
+                }
+            }
         } catch (error) {
             console.error(error);
             toast.error("Failed to load market data");
@@ -25,10 +49,6 @@ export default function MarketResearchPage() {
             setLoading(false);
         }
     }
-
-    // function fetchData(bId) {
-    //   // Stubs for future use
-    // }
 
     if (!isHydrated || loading) {
         return (
@@ -41,9 +61,9 @@ export default function MarketResearchPage() {
     return (
         <div className="flex flex-col gap-6">
             <MarketResearchDashboard
-                businessId={businessId}
+                businessId={1}
                 data={data}
-                onRefresh={() => initBusiness()}
+                onRefresh={fetchMarketData}
             />
         </div>
     );
