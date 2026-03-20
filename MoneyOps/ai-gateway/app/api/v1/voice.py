@@ -87,9 +87,11 @@ async def process_voice(request: VoiceProcessRequest, fastapi_request: Request):
         result = await voice_processor.process(request.text, context)
         return result
     except Exception as e:
+        import traceback
+        err_msg = traceback.format_exc()
         logger.error("voice_process_failed", error=str(e), exc_info=True)
         return {
-            "response_text": "I'm having trouble processing that right now. Could you repeat?", 
+            "response_text": f"DEBUG_ERROR: {str(e)}", 
             "success": False,
             "intent": "ERROR"
         }

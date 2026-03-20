@@ -105,7 +105,12 @@ class VoiceProcessor:
                 return {"response_text": "Invoice cancelled.", "success": True, "intent": "CANCELLATION"}
             
             # Use already classified intent
-            if intent_val not in (Intent.INVOICE_CREATE, Intent.CONFIRMATION, Intent.CANCELLATION, Intent.GENERAL_QUERY, Intent.GREETING):
+            if intent_val not in (
+                Intent.INVOICE_CREATE.value, Intent.INVOICE_UPDATE.value, 
+                Intent.CONFIRMATION.value, Intent.CANCELLATION.value, 
+                Intent.GENERAL_QUERY.value, Intent.GREETING.value, 
+                Intent.FOLLOWUP_QUESTION.value, Intent.CLARIFICATION_REQUEST.value
+            ):
                 session.locked_intent = None
                 # Fall through to normal path
             else:
@@ -160,7 +165,12 @@ class VoiceProcessor:
                 self.state_manager.save_session(session)
                 return {"response_text": "Client creation cancelled.", "success": True, "intent": "CANCELLATION"}
 
-            if intent_val not in (Intent.CLIENT_CREATE, Intent.CONFIRMATION, Intent.CANCELLATION, Intent.GENERAL_QUERY, Intent.GREETING):
+            if intent_val not in (
+                Intent.CLIENT_CREATE.value, Intent.CLIENT_UPDATE.value, 
+                Intent.CONFIRMATION.value, Intent.CANCELLATION.value, 
+                Intent.GENERAL_QUERY.value, Intent.GREETING.value,
+                Intent.FOLLOWUP_QUESTION.value, Intent.CLARIFICATION_REQUEST.value
+            ):
                 session.locked_intent = None
             else:
                 result = await self._handle_client_create(text, context)

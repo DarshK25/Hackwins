@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = None
     
     # LLM Models
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"  
-    GROQ_MODEL_COMPLEX: str = "llama-3.3-70b-versatile"  # For complex tasks
+    GROQ_MODEL: str = "llama-3.1-8b-instant"  
+    GROQ_MODEL_COMPLEX: str = "llama-3.1-8b-instant"  # For complex tasks
     
     # LLM Settings
     LLM_TEMPERATURE: float = 0.3

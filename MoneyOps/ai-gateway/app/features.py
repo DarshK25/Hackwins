@@ -2,7 +2,7 @@
 Feature Flags - Control which features are enabled
 Easy toggling between MVP and v2.0 features
 """
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class FeatureFlags(BaseSettings):
@@ -47,9 +47,11 @@ class FeatureFlags(BaseSettings):
     ENABLE_WEB_SCRAPING: bool = False            # Competitor data
     ENABLE_INDUSTRY_BENCHMARKS: bool = False     # External benchmark APIs
     
-    class Config:
-        env_file = ".env"
-        env_prefix = "FEATURE_"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="FEATURE_",
+        extra="ignore"
+    )
 
 
 # Global singleton
