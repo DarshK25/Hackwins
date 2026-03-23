@@ -5,22 +5,22 @@ import java.util.UUID;
 
 public class OrgContext {
 
-    private static final ThreadLocal<UUID> orgId = new ThreadLocal<>();
-    private static final ThreadLocal<UUID> userId = new ThreadLocal<>();
+    private static final ThreadLocal<String> orgId = new ThreadLocal<>();
+    private static final ThreadLocal<String> userId = new ThreadLocal<>();
 
-    public static void setOrgId(UUID orgId) {
+    public static void setOrgId(String orgId) {
         OrgContext.orgId.set(orgId);
     }
 
-    public static UUID getOrgId() {
+    public static String getOrgId() {
         return orgId.get();
     }
 
-    public static void setUserId(UUID userId) {
+    public static void setUserId(String userId) {
         OrgContext.userId.set(userId);
     }
 
-    public static UUID getUserId() {
+    public static String getUserId() {
         return userId.get();
     }
 

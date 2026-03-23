@@ -98,46 +98,70 @@ async def process_voice(request: VoiceProcessRequest, fastapi_request: Request):
 
 @router.post("/voice/dialog-response")
 async def dialog_response(request: Request):
-    """Handle UI-submitted client data form."""
+    """Handle UI-submitted data form for drafts (Invoices or Clients)."""
     payload = await request.json()
     session_id = payload.get("session_id")
+    dialog_id = payload.get("dialog_id")
     
     from app.state.session_manager import session_manager
-    from app.voice_processor import voice_processor
-    
     session = session_manager.get_session(session_id)
-    # Check if session is brand new (missing metadata we set in process())
-    if not session or not session.client_draft:
-        logger.warning(f"dialog_response_failed_session_missing_or_draft_null: {session_id}")
-        return {
-            "success": False, 
-            "message": "Session expired or Gateway reloaded. Please try again.",
-            "error": "SESSION_EXPIRED"
-        }
     
-    # Merge form fields into draft (robust check for both flat and nested payloads)
-    if session.client_draft is None:
-        session.client_draft = {}
+    if not session:
+        return {"success": False, "message": "Session expired."}
     
     form_fields = payload.get("fields", payload)
-    # Support both flat and nested keys
-    for key in ["phone", "gst_number", "email", "address", "description", "taxId", "phoneNumber"]:
-        if key in form_fields and form_fields[key]:
-            # Map canonical keys
-            if key == "phoneNumber": session.client_draft["phone"] = form_fields[key]
-            elif key == "taxId": session.client_draft["gst_number"] = form_fields[key]
-            else: session.client_draft[key] = form_fields[key]
     
+    # Identify which draft we are updating
+    # Logic: Prefer dialog_id or locked_intent
+    is_invoice = (dialog_id == "invoice_preview_form" or session.locked_intent == "INVOICE_CREATE")
+    
+    if is_invoice and session.invoice_draft:
+        draft = session.invoice_draft
+        # Update invoice fields
+        for k, v in form_fields.items():
+            if v is None: continue
+            if k == "amount" or k == "total_amount": 
+                try: draft.amount = float(v)
+                except: pass
+            elif k == "gst_percent":
+                try: draft.gst_percent = float(v)
+                except: pass
+            elif k == "due_date": draft.due_date = v
+            elif k == "description" or k == "service_description": draft.service_description = v
+            elif k == "client_name": draft.client_name = v
+            
+        session.invoice_draft = draft
+        session_manager.save_session(session)
+        message = "Invoice draft updated. You can now tell me to create it."
+        title = "Invoice Draft Updated"
+    else:
+        # Fallback to client
+        if session.client_draft is None:
+            session.client_draft = {}
+        
+        for key in ["name", "client_name", "company_name", "phone", "gst_number", "email", "address", "taxId", "phoneNumber"]:
+            if key in form_fields and form_fields[key]:
+                if key in ("name", "client_name", "company_name"): session.client_draft["client_name"] = form_fields[key]
+                elif key in ("phoneNumber", "phone"): session.client_draft["phone"] = form_fields[key]
+                elif key in ("taxId", "gst_number"): session.client_draft["gst_number"] = form_fields[key]
+                else: session.client_draft[key] = form_fields[key]
+        
+        session_manager.save_session(session)
+        message = "Client draft updated. Tell me 'Save Client' to finalize."
+        title = "Client Draft Updated"
+
     session.dialog_pending = False
     session.dialog_id = None
     session_manager.save_session(session)
     
-    # Finalize creation
-    result = await voice_processor.finalize_client_create(session)
-    
     return {
-        "success": result.get("success", False),
-        "message": result.get("response_text", "Client saved."),
-        "ui_event": result.get("ui_event")
+        "success": True,
+        "message": message,
+        "ui_event": {
+            "type": "toast",
+            "variant": "success",
+            "title": title,
+            "message": message
+        }
     }
  

@@ -65,12 +65,29 @@ class VoiceProcessor:
         })
         
         # 3. CONTEXT PERSISTENCE (Merge new text with session draft)
-        # Classify first to know what to extract
-        classification = await self.intent_classifier.classify(text, conversation_history=session.history)
+        # Classify with session context to avoid classification drifting (Issue 2/3)
+        classification = await self.intent_classifier.classify(
+            text, 
+            conversation_history=session.history,
+            locked_intent=session.locked_intent,
+            collected_entities=session.invoice_draft.__dict__ if session.invoice_draft else session.client_draft
+        )
         intent_obj = classification.intent
+
+        # State Machine: If LOCKED, we tend to stay locked unless it's a clear cancel
+        if session.locked_intent and classification.intent in (Intent.GENERAL_QUERY, Intent.GREETING):
+             # Force back to locked intent if we are in the middle of a creation
+             intent_obj = Intent[session.locked_intent]
+             logger.info("state_machine_forced_locked_intent", intent=session.locked_intent)
+
         intent_val = intent_obj.value if hasattr(intent_obj, 'value') else str(intent_obj)
 
-        entities_result = await self.entity_extractor.extract(text, classification.intent, context)
+        entities_result = await self.entity_extractor.extract(
+            text, 
+            intent_obj, 
+            context, 
+            locked_intent=session.locked_intent
+        )
         new_entities = {e.entity_type.value.lower(): e.value for e in entities_result.entities} if hasattr(entities_result, 'entities') else {}
         
         if intent_val == "CLIENT_CREATE" or session.locked_intent == "CLIENT_CREATE":
@@ -159,11 +176,28 @@ class VoiceProcessor:
                 and session.client_draft is not None):
 
             cancel_words = {"cancel", "stop", "never mind", "forget it", "abort"}
-            if any(w in text.lower() for w in cancel_words):
+            if any(w in text.lower().strip() for w in cancel_words):
                 session.locked_intent = None
                 session.client_draft = None
                 self.state_manager.save_session(session)
                 return {"response_text": "Client creation cancelled.", "success": True, "intent": "CANCELLATION"}
+
+            confirm_words = {"yes", "yeah", "yep", "sure", "ok", "okay", "correct", "proceed", "go ahead", "save it", "save", "save client"}
+            if any(w in text.lower().strip() for w in confirm_words):
+                # Finalize!
+                result = await self.finalize_client_create(session)
+                if result.get("success"):
+                    session.locked_intent = None
+                    session.client_draft = None
+                    session.dialog_pending = False
+                    self.state_manager.save_session(session)
+                
+                return {
+                    "response_text": result.get("response_text"),
+                    "success": result.get("success"),
+                    "intent": "CLIENT_CREATE",
+                    "ui_event": result.get("ui_event")
+                }
 
             if intent_val not in (
                 Intent.CLIENT_CREATE.value, Intent.CLIENT_UPDATE.value, 
@@ -174,17 +208,6 @@ class VoiceProcessor:
                 session.locked_intent = None
             else:
                 result = await self._handle_client_create(text, context)
-
-                if result.success:
-                    # Only clear draft if dialog was NOT opened
-                    session_after = self.state_manager.get_session(context.session_id)
-                    if not session_after.dialog_pending:
-                        session_after.locked_intent = None
-                        session_after.client_draft = None
-                        self.state_manager.save_session(session_after)
-                    self.state_manager.add_turn(context.session_id, "user", text, "CLIENT_CREATE")
-                    self.state_manager.add_turn(context.session_id, "assistant", result.message, "CLIENT_CREATE")
-
                 return {
                     "response_text": result.message,
                     "success": result.success,
@@ -234,18 +257,12 @@ class VoiceProcessor:
             result = await self.finance_agent.handle_invoice_create(context)
         elif intent == "CLIENT_CREATE":
             session.locked_intent = "CLIENT_CREATE"
-            session.dialog_pending = False # Reset on fresh intent
+            # Keep existing draft if we are just entering context again
+            if not session.client_draft:
+                session.client_draft = {}
+            session.dialog_pending = False 
             self.state_manager.save_session(session)
             result = await self._handle_client_create(text, context)
-            if result.success:
-                # Only clear draft if dialog was NOT opened (i.e., direct save happened)
-                # If dialog_pending is True, it means the dialog was just opened
-                # and we need the draft to survive until dialog-response comes in
-                session_after = self.state_manager.get_session(context.session_id)
-                if not session_after.dialog_pending:
-                    session_after.locked_intent = None
-                    session_after.client_draft = None
-                    self.state_manager.save_session(session_after)
         elif intent == "CLIENT_QUERY":
             result = await self._handle_client_query(context)
         elif intent in MARKET_INTENTS:
@@ -350,10 +367,10 @@ class VoiceProcessor:
                 user_id=session.user_id,
                 data={
                     "name": name,
-                    "email": draft.get("email"),
-                    "phoneNumber": draft.get("phone") or draft.get("phoneNumber"),
-                    "address": draft.get("address"),
-                    "taxId": draft.get("gst_number") or draft.get("taxId"),
+                    "email": draft.get("email") or None,
+                    "phoneNumber": draft.get("phone") or draft.get("phoneNumber") or None,
+                    "address": draft.get("address") or city or None,
+                    "taxId": draft.get("gst_number") or draft.get("taxId") or None,
                     "notes": smart_notes,
                 }
             )
@@ -430,94 +447,44 @@ class VoiceProcessor:
         lead_score = self._calculate_lead_score(raw_text, city)
         smart_notes = self._generate_smart_notes(name, city, industry)
 
-        # 🚀 UI DIALOG TRIGGER
-        # Only show dialog if we are missing key contact info (phone/gst)
-        dialog_fields = []
-        if not entities.get("phone"):
-            dialog_fields.append({"id": "phone", "label": "Phone Number", "type": "tel", "required": False})
-        if not entities.get("gst_number") and not entities.get("tax_id"):
-            dialog_fields.append({"id": "gst_number", "label": "GST / Tax ID", "type": "text", "placeholder": "22AAAAA0000A1Z5", "required": False})
+        # 🚀 UI PREVIEW DIALOG
+        # Always show preview dialog once we have the name
+        dialog_fields = [
+            {"id": "name", "label": "Client Name", "type": "text", "defaultValue": name, "required": True},
+            {"id": "email", "label": "Email Address", "type": "email", "defaultValue": entities.get("email", ""), "required": False},
+            {"id": "phone", "label": "Phone Number", "type": "tel", "defaultValue": entities.get("phone", ""), "required": False},
+            {"id": "address", "label": "City / Address", "type": "text", "defaultValue": city if city != "an unknown location" else "", "required": False},
+            {"id": "gst_number", "label": "GST / Tax ID", "type": "text", "defaultValue": entities.get("gst_number") or entities.get("tax_id") or "", "required": False},
+        ]
 
         session = self.state_manager.get_session(context.session_id)
-        if session and not session.dialog_pending and dialog_fields:
-            session.dialog_pending = True
-            session.dialog_id = "client_details_form"
-            # Update draft with current entities
-            if not session.client_draft: session.client_draft = {}
-            session.client_draft.update(entities)
-            self.state_manager.save_session(session)
-            
-            return AgentResponse(
-                success=True,
-                message=f"I've got {name}. Please provide the remaining details on the form—it's much easier than speaking them!",
-                agent_type=AgentType.FINANCE_AGENT,
-                ui_event={
-                    "type": "open_input_dialog",
-                    "dialog_id": "client_details_form",
-                    "session_id": context.session_id,
-                    "title": f"Add Details for {name}",
-                    "message": "Enter missing client info below.",
-                    "fields": dialog_fields,
-                    "submit_endpoint": "/api/v1/voice/dialog-response"
-                }
-            )
+        session.dialog_pending = True
+        session.dialog_id = "client_preview_form"
+        # Update draft with current entities
+        if not session.client_draft: session.client_draft = {}
+        session.client_draft.update(entities)
+        self.state_manager.save_session(session)
+        
+        message = f"I've prepared a draft for {name}. "
+        if not entities.get("phone") or not entities.get("email"):
+            message += "I'm missing some contact details—you can add them in the preview window I've opened. "
+        message += "Does everything look correct, or should I change something?"
 
-        # Fallback if dialog already happened or skipped (direct save)
-        try:
-            resp = await self.backend._request(
-                "POST", "/api/clients",
-                org_id=context.org_uuid,
-                user_id=context.user_id,
-                data={
-                    "name": name,
-                    "email": entities.get("email"),
-                    "phoneNumber": entities.get("phone"), # Fixed field name
-                    "address": city,
-                    "taxId": None,
-                    "notes": smart_notes,
-                }
-            )
-            
-            logger.info({
-                "event": "client_create_backend_response",
-                "success": resp.success if resp else None,
-                "data": str(resp.data)[:200] if resp else "None",
-                "error": str(resp.error)[:200] if resp and hasattr(resp, 'error') else "None",
-                "status": getattr(resp, 'status_code', 'unknown')
-            })
-            
-            if resp and hasattr(resp, 'success') and resp.success:
-                action_text = ""
-                if lead_score > 70:
-                    action_text = f"This is a high-value lead (Score: {lead_score}/100) in {industry}. I've compiled smart-notes for your CRM. Would you like me to fetch contact data or create a proposal draft next?"
-                else:
-                    action_text = f"They score {lead_score} in {industry}. Do you have an email or number for them?"
-
-                return AgentResponse(
-                    success=True,
-                    message=f"I've added {name}. {action_text}",
-                    agent_type=AgentType.FINANCE_AGENT,
-                    ui_event={
-                        "type": "toast",
-                        "variant": "success",
-                        "title": "Client Added",
-                        "message": f"{name} added as {industry} lead",
-                        "duration": 5000,
-                    }
-                )
-            else:
-                return AgentResponse(
-                    success=False,
-                    message=f"Couldn't add {name}. Please try again.",
-                    agent_type=AgentType.FINANCE_AGENT,
-                )
-        except Exception as e:
-            return AgentResponse(
-                success=False,
-                message="Something went wrong adding the client.",
-                agent_type=AgentType.FINANCE_AGENT,
-                error=str(e),
-            )
+        return AgentResponse(
+            success=True,
+            message=message,
+            agent_type=AgentType.FINANCE_AGENT,
+            ui_event={
+                "type": "open_input_dialog",
+                "dialog_id": "client_preview_form",
+                "session_id": context.session_id,
+                "title": f"Preview: {name}",
+                "message": "Review and edit client details below.",
+                "fields": dialog_fields,
+                "submit_btn_label": "Update Draft",
+                "submit_endpoint": "/api/v1/voice/dialog-response"
+            }
+        )
 
     async def _handle_client_query(self, context):
         from app.agents.base_agent import AgentResponse

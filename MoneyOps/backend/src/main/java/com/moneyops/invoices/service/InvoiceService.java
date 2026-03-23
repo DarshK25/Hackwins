@@ -39,8 +39,9 @@ public class InvoiceService {
     private final com.moneyops.audit.service.AuditLogService auditLogService;
     private final com.moneyops.transactions.service.TransactionService transactionService;
 
-    public List<InvoiceDto> getAllInvoices(UUID orgId) {
-        var invoices = invoiceRepository.findAllByOrgId(orgId);
+    public List<InvoiceDto> getAllInvoices(String orgId) {
+        if (orgId == null || orgId.isBlank()) throw new com.moneyops.shared.exceptions.UnauthorizedException("Missing organization context");
+        var invoices = invoiceRepository.findAllByOrgIdAndDeletedAtIsNull(orgId);
         return populateClientDetails(invoices, orgId);
     }
 
@@ -48,8 +49,8 @@ public class InvoiceService {
         invoiceValidator.validate(dto);
     }
 
-    public List<InvoiceDto> searchInvoices(UUID orgId, String status, String clientName, String clientId, int limit) {
-        List<Invoice> allInvoices = invoiceRepository.findAllByOrgId(orgId);
+    public List<InvoiceDto> searchInvoices(String orgId, String status, String clientName, String clientId, int limit) {
+        List<Invoice> allInvoices = invoiceRepository.findAllByOrgIdAndDeletedAtIsNull(orgId);
         
         // Use a wrapper or just process sequentially to keep it simple and final-safe
         List<Invoice> filtered = allInvoices;
@@ -65,14 +66,14 @@ public class InvoiceService {
         // 2. Filter by clientId if provided
         if (clientId != null && !clientId.trim().isEmpty()) {
             filtered = filtered.stream()
-                    .filter(inv -> inv.getClientId() != null && inv.getClientId().toString().equals(clientId))
+                    .filter(inv -> inv.getClientId() != null && inv.getClientId().equals(clientId))
                     .collect(Collectors.toList());
         }
 
         // 3. Filter by client name (Fuzzy Match) - only if clientId is NOT provided
         if ((clientId == null || clientId.trim().isEmpty()) && clientName != null && !clientName.trim().isEmpty()) {
             final String query = clientName.toLowerCase().trim();
-            var clients = clientRepository.findAllByOrgId(orgId);
+            var clients = clientRepository.findAllByOrgIdAndDeletedAtIsNull(orgId);
             org.apache.commons.text.similarity.JaroWinklerSimilarity similarity = new org.apache.commons.text.similarity.JaroWinklerSimilarity();
             
             var matchedClientIds = clients.stream()
@@ -81,38 +82,33 @@ public class InvoiceService {
                 .collect(Collectors.toSet());
                 
             filtered = filtered.stream()
-                .filter(inv -> inv.getClientId() != null && matchedClientIds.contains(inv.getClientId().toString()))
+                .filter(inv -> inv.getClientId() != null && matchedClientIds.contains(inv.getClientId()))
                 .collect(Collectors.toList());
         }
 
         return populateClientDetails(filtered.stream().limit(limit).collect(Collectors.toList()), orgId);
     }
 
-    public InvoiceDto getInvoiceById(String id, UUID orgId) {
-        try {
-            org.slf4j.LoggerFactory.getLogger(InvoiceService.class).info("Fetching invoice with id [{}] for orgId [{}]", id, orgId);
-            
-            Invoice invoice = invoiceRepository.findByIdAndOrgId(id, orgId)
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found with id: " + id));
+    public InvoiceDto getInvoiceById(String id, String orgId) {
+        Invoice invoice = invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));
 
-            return populateClientDetails(invoice);
-        } catch (ResponseStatusException e) {
-            throw e;
-        } catch (Exception e) {
-            org.slf4j.LoggerFactory.getLogger(InvoiceService.class).error("Unexpected error in getInvoiceById for id " + id, e);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error processing invoice: " + e.getMessage());
-        }
+        return populateClientDetails(invoice);
     }
 
-    public InvoiceDto createInvoice(InvoiceDto dto, UUID orgId, UUID userId) {
-        dto.setId(null); 
+    public InvoiceDto createInvoice(InvoiceDto dto, String orgId, String userId) {
+        if (orgId == null || orgId.isBlank()) throw new com.moneyops.shared.exceptions.UnauthorizedException("Missing organization context");
+        
+        // ✨ Idempotency check 
+        if (dto.getIdempotencyKey() != null) {
+            var existing = invoiceRepository.findByOrgIdAndInvoiceNumberAndDeletedAtIsNull(orgId, dto.getInvoiceNumber());
+            if (existing.isPresent()) return populateClientDetails(existing.get());
+        }
+
         invoiceValidator.validate(dto);
 
         if (dto.getClientId() != null) {
-            clientRepository.findById(dto.getClientId().toString()).ifPresentOrElse(client -> {
-                if (!client.getOrgId().equals(orgId)) {
-                    throw new RuntimeException("Invalid client selected - does not belong to your organization.");
-                }
+            clientRepository.findByIdAndOrgIdAndDeletedAtIsNull(dto.getClientId(), orgId).ifPresentOrElse(client -> {
                 // Lock in the snapshot data
                 dto.setClientName(client.getName());
                 dto.setClientEmail(client.getEmail());
@@ -137,6 +133,9 @@ public class InvoiceService {
         invoice.setStatus(InvoiceStatus.DRAFT);
         invoice.setCreatedAt(LocalDateTime.now());
         invoice.setUpdatedAt(LocalDateTime.now());
+        // Balance initialization
+        invoice.setAmountPaid(BigDecimal.ZERO);
+        invoice.setBalanceDue(BigDecimal.ZERO); // Will be updated by recalculateInvoiceTotals
 
         // Recalculate totals server-side (do not trust frontend)
         recalculateInvoiceTotals(invoice);
@@ -145,8 +144,8 @@ public class InvoiceService {
         return populateClientDetails(saved);
     }
 
-    public InvoiceDto updateInvoice(String id, InvoiceDto dto, UUID orgId) {
-        Invoice existing = invoiceRepository.findByIdAndOrgId(id, orgId)
+    public InvoiceDto updateInvoice(String id, InvoiceDto dto, String orgId) {
+        Invoice existing = invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));
 
         if (existing.getStatus() != InvoiceStatus.DRAFT) {
@@ -161,25 +160,29 @@ public class InvoiceService {
         updated.setCreatedAt(existing.getCreatedAt());
         updated.setCreatedBy(existing.getCreatedBy());
         updated.setUpdatedAt(LocalDateTime.now());
+        updated.setAmountPaid(existing.getAmountPaid()); // Preserve amount paid
 
         // Since items are embedded, simply saving the updated invoice includes its items
+        recalculateInvoiceTotals(updated); // Recalculate totals after item changes
         Invoice saved = invoiceRepository.save(updated);
         return populateClientDetails(saved);
     }
 
-    public void deleteInvoice(String id, UUID orgId) {
-        Invoice invoice = invoiceRepository.findByIdAndOrgId(id, orgId)
+    public void deleteInvoice(String id, String orgId) {
+        Invoice invoice = invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));
 
         if (invoice.getStatus() == InvoiceStatus.PAID) {
             throw new IllegalStateException("Cannot delete paid invoices");
         }
 
-        invoiceRepository.deleteByIdAndOrgId(id, orgId);
+        // ✨ Soft Delete
+        invoice.setDeletedAt(LocalDateTime.now());
+        invoiceRepository.save(invoice);
     }
 
-    public InvoiceDto sendInvoice(String id, UUID orgId) {
-        Invoice invoice = invoiceRepository.findByIdAndOrgId(id, orgId)
+    public InvoiceDto sendInvoice(String id, String orgId) {
+        Invoice invoice = invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));
 
         if (invoice.getStatus() != InvoiceStatus.DRAFT) {
@@ -192,8 +195,8 @@ public class InvoiceService {
         return populateClientDetails(saved);
     }
 
-    public InvoiceDto markPaid(String id, UUID orgId) {
-        Invoice invoice = invoiceRepository.findByIdAndOrgId(id, orgId)
+    public InvoiceDto markPaid(String id, String orgId) {
+        Invoice invoice = invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));
 
         if (invoice.getStatus() != InvoiceStatus.SENT) {
@@ -202,12 +205,14 @@ public class InvoiceService {
 
         invoice.setStatus(InvoiceStatus.PAID);
         invoice.setPaymentDate(LocalDate.now());
+        invoice.setAmountPaid(invoice.getTotalAmount());
+        invoice.setBalanceDue(BigDecimal.ZERO);
         invoice.setUpdatedAt(LocalDateTime.now());
         Invoice saved = invoiceRepository.save(invoice);
         return populateClientDetails(saved);
     }
 
-    public List<InvoiceDto> getOverdueInvoices(UUID orgId) {
+    public List<InvoiceDto> getOverdueInvoices(String orgId) {
         List<Invoice> overdue = invoiceRepository.findOverdueByOrgId(orgId, LocalDate.now());
         for (Invoice invoice : overdue) {
             invoice.setStatus(InvoiceStatus.OVERDUE);
@@ -217,8 +222,8 @@ public class InvoiceService {
     }
 
     // InvoiceItem operations
-    public InvoiceItemDto addItem(String invoiceId, InvoiceItemDto itemDto, UUID orgId) {
-        Invoice invoice = invoiceRepository.findByIdAndOrgId(invoiceId, orgId)
+    public InvoiceItemDto addItem(String invoiceId, InvoiceItemDto itemDto, String orgId) {
+        Invoice invoice = invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(invoiceId, orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));
 
         if (invoice.getStatus() != InvoiceStatus.DRAFT) {
@@ -254,10 +259,10 @@ public class InvoiceService {
         return invoiceMapper.toItemDto(item);
     }
 
-    public void updateItem(UUID itemId, InvoiceItemDto itemDto, UUID orgId) {
+    public void updateItem(String itemId, InvoiceItemDto itemDto, String orgId) {
         // Need to find which invoice contains this item
         // In MongoDB we usually know the invoice ID, but if only itemId is provided:
-        Invoice invoice = invoiceRepository.findAllByOrgId(orgId).stream()
+        Invoice invoice = invoiceRepository.findAllByOrgIdAndDeletedAtIsNull(orgId).stream()
                 .filter(inv -> inv.getItems() != null && inv.getItems().stream().anyMatch(i -> i.getId().equals(itemId)))
                 .findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Item not found in any invoice for this org"));
@@ -291,8 +296,8 @@ public class InvoiceService {
         invoiceRepository.save(invoice);
     }
 
-    public void deleteItem(UUID itemId, UUID orgId) {
-        Invoice invoice = invoiceRepository.findAllByOrgId(orgId).stream()
+    public void deleteItem(String itemId, String orgId) {
+        Invoice invoice = invoiceRepository.findAllByOrgIdAndDeletedAtIsNull(orgId).stream()
                 .filter(inv -> inv.getItems() != null && inv.getItems().stream().anyMatch(i -> i.getId().equals(itemId)))
                 .findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Item not found in any invoice for this org"));
@@ -324,6 +329,10 @@ public class InvoiceService {
         invoice.setSubtotal(subtotal);
         invoice.setGstTotal(gstTotal);
         invoice.setTotalAmount(totalAmount);
+        
+        // Update balance due
+        BigDecimal paid = invoice.getAmountPaid() != null ? invoice.getAmountPaid() : BigDecimal.ZERO;
+        invoice.setBalanceDue(totalAmount.subtract(paid));
         invoice.setUpdatedAt(LocalDateTime.now());
     }
 
@@ -333,7 +342,7 @@ public class InvoiceService {
         // If snapshot exists, it's already in the DTO from mapping.
         // We only fallback to lookup if snapshot is missing (for legacy data).
         if (dto.getClientName() == null && invoice.getClientId() != null) {
-            clientRepository.findById(invoice.getClientId().toString())
+            clientRepository.findByIdAndOrgIdAndDeletedAtIsNull(invoice.getClientId(), invoice.getOrgId())
                     .ifPresentOrElse(client -> {
                         dto.setClientName(client.getName());
                         dto.setClientEmail(client.getEmail());
@@ -346,32 +355,28 @@ public class InvoiceService {
         return dto;
     }
 
-    private List<InvoiceDto> populateClientDetails(List<Invoice> invoices, UUID orgId) {
+    private List<InvoiceDto> populateClientDetails(List<Invoice> invoices, String orgId) {
         return invoices.stream()
                 .map(this::populateClientDetails)
                 .collect(Collectors.toList());
     }
 
-    public List<com.moneyops.audit.entity.AuditLog> getInvoiceLogs(String id, UUID orgId) {
+    public List<com.moneyops.audit.entity.AuditLog> getInvoiceLogs(String id, String orgId) {
         // First verify ownership
         getInvoiceById(id, orgId);
         return auditLogService.getAuditLogsByEntityId(id);
     }
 
-    public List<com.moneyops.transactions.dto.TransactionDto> getInvoicePayments(String id, UUID orgId) {
+    public List<com.moneyops.transactions.dto.TransactionDto> getInvoicePayments(String id, String orgId) {
         // First verify ownership
         getInvoiceById(id, orgId);
         return transactionService.getTransactionsByInvoice(id, orgId);
     }
 
-    public com.moneyops.transactions.dto.TransactionDto recordPayment(String id, com.moneyops.transactions.dto.TransactionDto paymentDto, UUID orgId, UUID userId) {
-        Invoice invoice = invoiceRepository.findById(id)
+    public com.moneyops.transactions.dto.TransactionDto recordPayment(String id, com.moneyops.transactions.dto.TransactionDto paymentDto, String orgId, String userId) {
+        Invoice invoice = invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));
         
-        if (!orgId.equals(invoice.getOrgId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
-        }
-
         paymentDto.setInvoiceId(id);
         paymentDto.setClientId(invoice.getClientId());
         paymentDto.setType("INCOME");
@@ -382,19 +387,18 @@ public class InvoiceService {
             paymentDto.setTransactionDate(LocalDate.now());
         }
 
+        // ✨ We don't call transactionService here if we want to avoid double-processing, 
+        // but transactionService is where the DB write happens.
         com.moneyops.transactions.dto.TransactionDto saved = transactionService.createTransaction(paymentDto, orgId, userId);
 
-        // Update invoice payment info
-        invoice.setPaymentDate(paymentDto.getTransactionDate());
+        // ✨ Denormalized sync
+        BigDecimal paid = invoice.getAmountPaid() != null ? invoice.getAmountPaid() : BigDecimal.ZERO;
+        invoice.setAmountPaid(paid.add(paymentDto.getAmount()));
+        invoice.setBalanceDue(invoice.getTotalAmount().subtract(invoice.getAmountPaid()));
         
-        // Simple heuristic: if this is the first payment or amount >= total, mark paid
-        // In a real system, we'd sum all payments.
-        BigDecimal totalPaid = transactionService.getTransactionsByInvoice(id, orgId).stream()
-                .map(com.moneyops.transactions.dto.TransactionDto::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        
-        if (totalPaid.compareTo(invoice.getTotalAmount()) >= 0) {
+        if (invoice.getBalanceDue().compareTo(BigDecimal.ZERO) <= 0) {
             invoice.setStatus(InvoiceStatus.PAID);
+            invoice.setPaymentDate(paymentDto.getTransactionDate());
         } else if (invoice.getStatus() == InvoiceStatus.DRAFT) {
             invoice.setStatus(InvoiceStatus.SENT); // Transition out of draft if payment received
         }

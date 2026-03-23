@@ -11,23 +11,35 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ClientDto {
     private String id;
+    private String orgId;      // ✨ New per schema
     private String name;
-    private String taxId;
+    private String gstin;      // WAS taxId
     private String email;
     private String phoneNumber;
-    private String address;
-    private String city;
-    private String state;
-    private String country;
-    private String postalCode;
-    private String paymentTerms;
+    
+    // ✨ Expanded address per schema
+    private Address billingAddress;
+    private Address shippingAddress;
+    
+    private Integer paymentTerms; // WAS String, NOW Integer (Days)
     private String currency;
     private String company;
     private String notes;
     private String status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    private UUID createdBy;
-    private UUID updatedBy;
+    private String createdBy;
+    private String updatedBy;
     private Double searchScore;
+    private String idempotencyKey; // ✨ New
+
+    @Data
+    public static class Address {
+        private String line1;
+        private String line2;
+        private String city;
+        private String state;
+        private String country;
+        private String pincode;
+    }
 }

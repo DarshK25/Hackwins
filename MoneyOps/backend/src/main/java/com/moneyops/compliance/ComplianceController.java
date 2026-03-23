@@ -12,7 +12,7 @@ public class ComplianceController {
     private ComplianceService complianceService;
 
     @GetMapping("/deadlines")
-    public ResponseEntity<ComplianceService.DeadlinesResponse> getDeadlines(@RequestParam(required = false) Long businessId) {
+    public ResponseEntity<ComplianceService.DeadlinesResponse> getDeadlines(@RequestParam(required = false) String businessId) {
         return ResponseEntity.ok(complianceService.getDeadlines(businessId));
     }
 

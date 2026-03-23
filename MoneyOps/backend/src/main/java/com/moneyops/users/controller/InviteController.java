@@ -10,8 +10,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.UUID;
-
 @RestController
 @RequestMapping("/api/invites")
 public class InviteController {
@@ -22,8 +20,8 @@ public class InviteController {
     @PostMapping
     public ResponseEntity<Invite> createInvite(
             @RequestBody CreateInviteRequest request,
-            @RequestHeader("X-Org-Id") UUID orgId,
-            @RequestHeader("X-User-Id") UUID userId) {
+            @RequestHeader("X-Org-Id") String orgId,
+            @RequestHeader("X-User-Id") String userId) {
         return ResponseEntity.ok(userService.createInvite(request, orgId, userId));
     }
 
@@ -33,7 +31,7 @@ public class InviteController {
     }
 
     @GetMapping("/pending")
-    public ResponseEntity<List<Invite>> getPendingInvites(@RequestHeader("X-Org-Id") UUID orgId) {
+    public ResponseEntity<List<Invite>> getPendingInvites(@RequestHeader("X-Org-Id") String orgId) {
         List<Invite> invites = userService.getPendingInvites(orgId);
         return ResponseEntity.ok(invites);
     }

@@ -5,13 +5,12 @@ import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
-import java.util.UUID;
 
 @Repository
-public interface DocumentRepository extends MongoRepository<MoneyOpsDocument, UUID> {
+public interface DocumentRepository extends MongoRepository<MoneyOpsDocument, String> {
 
-    List<MoneyOpsDocument> findByOrgId(UUID orgId);
-    List<MoneyOpsDocument> findByOrgIdAndIsConfidential(UUID orgId, boolean isConfidential);
-    List<MoneyOpsDocument> findByOrgIdAndUploadedByAndIsConfidential(UUID orgId, UUID uploadedBy, boolean isConfidential);
-    List<MoneyOpsDocument> findByLinkedEntityTypeAndLinkedEntityId(String linkedEntityType, UUID linkedEntityId);
+    List<MoneyOpsDocument> findByOrgIdAndDeletedAtIsNull(String orgId);
+    List<MoneyOpsDocument> findByOrgIdAndIsConfidentialAndDeletedAtIsNull(String orgId, boolean isConfidential);
+    List<MoneyOpsDocument> findByOrgIdAndUploadedByAndIsConfidentialAndDeletedAtIsNull(String orgId, String uploadedBy, boolean isConfidential);
+    List<MoneyOpsDocument> findByLinkedEntityTypeAndLinkedEntityIdAndDeletedAtIsNull(String linkedEntityType, String linkedEntityId);
 }

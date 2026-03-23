@@ -244,6 +244,7 @@ async def entrypoint(ctx: JobContext):
                         "stage": response.get("stage", "COLLECTING"),
                         "ui_event": ui_event,
                         "dev_event": response.get("dev_event"),
+                        "stt_confidence": response.get("stt_confidence", 1.0) # Gateway could also verify
                     }), 
                     topic="gateway_results",
                     destination_identities=dest_identities
@@ -322,7 +323,23 @@ async def entrypoint(ctx: JobContext):
         if not text:
             return
 
-        logger.info("utterance_received", text=text)
+        # ── Confidence Gate (Issue 2 Fix) ──
+        # ev.alternatives[0] should contain confidence for the whole transcription in assemblyai/whisper
+        # but the safest way is to average segments if available
+        confidence = 1.0
+        if hasattr(ev, "confidence") and ev.confidence is not None:
+             confidence = ev.confidence
+        elif hasattr(ev, "alternatives") and ev.alternatives:
+             confidence = ev.alternatives[0].confidence
+             
+        logger.info("utterance_received", text=text, confidence=confidence)
+        
+        # If confidence is too low, we trigger a "re-ask" directly
+        if confidence < 0.65: # Lower than 0.75 to be safe / not too annoying
+            logger.warning("stt_confidence_low_blocking", text=text, confidence=confidence)
+            asyncio.create_task(session.say("I didn't quite catch that. Could you repeat?"))
+            return
+
         transcript_buffer.append(text)
         
         if debounce_task:

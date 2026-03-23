@@ -9,6 +9,7 @@ import com.moneyops.invoices.entity.InvoiceStatus;
 
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.util.stream.Collectors;
 
 @Component
@@ -17,6 +18,7 @@ public class InvoiceMapper {
     public InvoiceDto toDto(Invoice invoice) {
         InvoiceDto dto = new InvoiceDto();
         dto.setId(invoice.getId());
+        dto.setOrgId(invoice.getOrgId());
         dto.setInvoiceNumber(invoice.getInvoiceNumber());
         dto.setClientId(invoice.getClientId());
         dto.setClientName(invoice.getClientName());
@@ -29,9 +31,14 @@ public class InvoiceMapper {
         dto.setSubtotal(invoice.getSubtotal());
         dto.setGstTotal(invoice.getGstTotal());
         dto.setTotalAmount(invoice.getTotalAmount());
+        dto.setAmountPaid(invoice.getAmountPaid());
+        dto.setBalanceDue(invoice.getBalanceDue());
         dto.setCurrency(invoice.getCurrency());
         dto.setPaymentDate(invoice.getPaymentDate());
         dto.setNotes(invoice.getNotes());
+        dto.setTermsAndConditions(invoice.getTermsAndConditions());
+        dto.setIdempotencyKey(invoice.getIdempotencyKey());
+        dto.setVoiceContext(invoice.getVoiceContext());
         if (invoice.getItems() != null) {
             dto.setItems(invoice.getItems().stream()
                     .map(this::toItemDto)
@@ -45,6 +52,7 @@ public class InvoiceMapper {
         if (dto.getId() != null) {
             invoice.setId(dto.getId());
         }
+        invoice.setOrgId(dto.getOrgId());
         invoice.setInvoiceNumber(dto.getInvoiceNumber());
         invoice.setClientId(dto.getClientId());
         invoice.setClientName(dto.getClientName());
@@ -53,13 +61,20 @@ public class InvoiceMapper {
         invoice.setClientPhone(dto.getClientPhone());
         invoice.setIssueDate(dto.getIssueDate());
         invoice.setDueDate(dto.getDueDate());
-        invoice.setStatus(InvoiceStatus.valueOf(dto.getStatus()));
+        if (dto.getStatus() != null) {
+            invoice.setStatus(InvoiceStatus.valueOf(dto.getStatus()));
+        }
         invoice.setSubtotal(dto.getSubtotal());
         invoice.setGstTotal(dto.getGstTotal());
         invoice.setTotalAmount(dto.getTotalAmount());
+        invoice.setAmountPaid(dto.getAmountPaid() != null ? dto.getAmountPaid() : BigDecimal.ZERO);
+        invoice.setBalanceDue(dto.getBalanceDue());
         invoice.setCurrency(dto.getCurrency());
         invoice.setPaymentDate(dto.getPaymentDate());
         invoice.setNotes(dto.getNotes());
+        invoice.setTermsAndConditions(dto.getTermsAndConditions());
+        invoice.setIdempotencyKey(dto.getIdempotencyKey());
+        invoice.setVoiceContext(dto.getVoiceContext());
         if (dto.getItems() != null) {
             invoice.setItems(dto.getItems().stream()
                     .map(itemDto -> toItemEntity(itemDto, invoice))

@@ -46,40 +46,37 @@ public class UserService {
     @Autowired
     private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
-    public List<UserDto> getAllUsers(UUID orgId) {
-        return userRepository.findAllByOrgId(orgId)
+    public List<UserDto> getAllUsers(String orgId) {
+        return userRepository.findAllByOrgIdAndDeletedAtIsNull(orgId)
                 .stream()
                 .map(userMapper::toDto)
                 .collect(Collectors.toList());
     }
 
-    public UserDto getUserById(UUID id, UUID orgId) {
-        User user = userRepository.findByIdAndOrgId(id, orgId)
+    public UserDto getUserById(String id, String orgId) {
+        User user = userRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
         return userMapper.toDto(user);
     }
 
-    public UserDto createUser(UserDto dto, UUID orgId, UUID createdBy) {
+    public UserDto createUser(UserDto dto, String orgId, String createdBy) {
         userValidator.validate(dto);
-        if (userRepository.existsByEmailAndOrgId(dto.getEmail(), orgId)) {
+        if (userRepository.existsByEmailAndOrgIdAndDeletedAtIsNull(dto.getEmail(), orgId)) {
             throw new RuntimeException("User with this email already exists");
         }
 
         User user = userMapper.toEntity(dto);
         user.setOrgId(orgId);
         user.setCreatedBy(createdBy);
-        user.setUpdatedBy(createdBy);
-        user.setCreatedAt(LocalDateTime.now());
-        user.setUpdatedAt(LocalDateTime.now());
 
         User saved = userRepository.save(user);
-        auditLogService.logCreate("User", saved.getId().toString(), saved);
+        auditLogService.logCreate("User", saved.getId(), saved);
         return userMapper.toDto(saved);
     }
 
-    public UserDto updateUser(UUID id, UserDto dto, UUID orgId, UUID updatedBy) {
+    public UserDto updateUser(String id, UserDto dto, String orgId, String updatedBy) {
         userValidator.validate(dto);
-        User user = userRepository.findByIdAndOrgId(id, orgId)
+        User user = userRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         User oldUser = new User();
@@ -93,42 +90,44 @@ public class UserService {
         user.setRole(User.Role.valueOf(dto.getRole()));
         user.setStatus(User.Status.valueOf(dto.getStatus()));
         user.setUpdatedBy(updatedBy);
-        user.setUpdatedAt(LocalDateTime.now());
 
         User saved = userRepository.save(user);
-        auditLogService.logUpdate("User", saved.getId().toString(), oldUser, saved);
+        auditLogService.logUpdate("User", saved.getId(), oldUser, saved);
         return userMapper.toDto(saved);
     }
 
-    public void deleteUser(UUID id, UUID orgId) {
-        User user = userRepository.findByIdAndOrgId(id, orgId)
+    public void deleteUser(String id, String orgId) {
+        User user = userRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
-        auditLogService.logDelete("User", id.toString(), user);
-        userRepository.deleteByIdAndOrgId(id, orgId);
+        
+        // ✨ Soft Delete
+        user.setDeletedAt(LocalDateTime.now());
+        userRepository.save(user);
+        
+        auditLogService.logDelete("User", id, user);
     }
 
-    public List<UserDto> searchUsers(UUID orgId, String search) {
+    public List<UserDto> searchUsers(String orgId, String search) {
         return userRepository.searchByOrgIdWithFilters(orgId, search)
                 .stream()
                 .map(userMapper::toDto)
                 .collect(Collectors.toList());
     }
 
-    public Invite createInvite(CreateInviteRequest request, UUID orgId, UUID createdBy) {
+    public Invite createInvite(CreateInviteRequest request, String orgId, String createdBy) {
         userValidator.validateInvite(request);
-        if (inviteRepository.existsByEmailAndOrgIdAndStatus(request.getEmail(), orgId, Invite.InviteStatus.PENDING)) {
+        if (inviteRepository.existsByEmailAndOrgIdAndStatusAndDeletedAtIsNull(request.getEmail(), orgId, Invite.InviteStatus.PENDING)) {
             throw new RuntimeException("Invite already exists for this email");
         }
 
         Invite invite = new Invite();
         invite.setEmail(request.getEmail());
         invite.setRole(User.Role.valueOf(request.getRole()));
-        invite.setToken(UUID.randomUUID().toString().substring(0, 8).toUpperCase()); // Shorter, more sharable code
+        invite.setToken(UUID.randomUUID().toString().substring(0, 8).toUpperCase());
         invite.setExpiresAt(LocalDateTime.now().plusDays(7));
         invite.setStatus(Invite.InviteStatus.PENDING);
         invite.setOrgId(orgId);
         invite.setCreatedBy(createdBy);
-        invite.setCreatedAt(LocalDateTime.now());
 
         return inviteRepository.save(invite);
     }
@@ -136,7 +135,7 @@ public class UserService {
     public UserDto acceptInvite(AcceptInviteRequest request) {
         inviteValidator.validateAcceptInvite(request);
 
-        Invite invite = inviteRepository.findByToken(request.getToken())
+        Invite invite = inviteRepository.findByTokenAndDeletedAtIsNull(request.getToken())
                 .orElseThrow(() -> new RuntimeException("Invalid invite token"));
 
         if (invite.getExpiresAt().isBefore(LocalDateTime.now())) {
@@ -147,31 +146,25 @@ public class UserService {
             throw new RuntimeException("Invite has already been used");
         }
 
-        // Create user
         User user = new User();
         user.setName(request.getName());
         user.setEmail(invite.getEmail());
         user.setRole(invite.getRole());
         user.setStatus(User.Status.ACTIVE);
-        user.setPasswordHash(hashPassword(request.getPassword())); // Implement password hashing
+        user.setPasswordHash(hashPassword(request.getPassword()));
         user.setOrgId(invite.getOrgId());
         user.setCreatedBy(invite.getCreatedBy());
-        user.setUpdatedBy(invite.getCreatedBy());
-        user.setCreatedAt(LocalDateTime.now());
-        user.setUpdatedAt(LocalDateTime.now());
 
         User saved = userRepository.save(user);
 
-        // Mark invite as accepted
         invite.setStatus(Invite.InviteStatus.ACCEPTED);
-        invite.setUpdatedAt(LocalDateTime.now());
         inviteRepository.save(invite);
 
         return userMapper.toDto(saved);
     }
 
-    public List<Invite> getPendingInvites(UUID orgId) {
-        return inviteRepository.findAllByOrgIdAndStatus(orgId, Invite.InviteStatus.PENDING);
+    public List<Invite> getPendingInvites(String orgId) {
+        return inviteRepository.findAllByOrgIdAndStatusAndDeletedAtIsNull(orgId, Invite.InviteStatus.PENDING);
     }
 
     private String hashPassword(String password) {

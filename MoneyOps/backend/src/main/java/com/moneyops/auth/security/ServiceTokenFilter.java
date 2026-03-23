@@ -16,7 +16,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.UUID;
 
 /**
  * ServiceTokenFilter — authenticates internal service-to-service calls.
@@ -70,31 +69,23 @@ public class ServiceTokenFilter extends OncePerRequestFilter {
                     String orgIdHeader = request.getHeader("X-Org-Id");
                     String userIdHeader = request.getHeader("X-User-Id");
 
-                    if (StringUtils.hasText(userIdHeader) && userIdHeader.startsWith("user_")) {
-                        userRepository.findByClerkId(userIdHeader).ifPresent(user -> {
+                    if (StringUtils.hasText(userIdHeader)) {
+                        userRepository.findByClerkIdAndDeletedAtIsNull(userIdHeader).ifPresentOrElse(user -> {
                             OrgContext.setUserId(user.getId());
                             if (user.getOrgId() != null) {
                                 OrgContext.setOrgId(user.getOrgId());
-                            } else if (StringUtils.hasText(orgIdHeader) && !orgIdHeader.startsWith("org_")) {
-                                try { OrgContext.setOrgId(UUID.fromString(orgIdHeader)); } catch (IllegalArgumentException ignored) {}
+                            } else if (StringUtils.hasText(orgIdHeader)) {
+                                OrgContext.setOrgId(orgIdHeader);
+                            }
+                        }, () -> {
+                            // Fallback: If no user record found, treat as new/unregistered user but set IDs
+                            OrgContext.setUserId(userIdHeader);
+                            if (StringUtils.hasText(orgIdHeader)) {
+                                OrgContext.setOrgId(orgIdHeader);
                             }
                         });
-                    } else {
-                        // Standard UUID processing
-                        if (StringUtils.hasText(orgIdHeader) && !orgIdHeader.startsWith("org_")) {
-                            try {
-                                OrgContext.setOrgId(UUID.fromString(orgIdHeader));
-                            } catch (IllegalArgumentException e) {
-                                logger.warn("Invalid X-Org-Id header value: " + orgIdHeader);
-                            }
-                        }
-                        if (StringUtils.hasText(userIdHeader)) {
-                            try {
-                                OrgContext.setUserId(UUID.fromString(userIdHeader));
-                            } catch (IllegalArgumentException e) {
-                                logger.warn("Invalid X-User-Id header value: " + userIdHeader);
-                            }
-                        }
+                    } else if (StringUtils.hasText(orgIdHeader)) {
+                        OrgContext.setOrgId(orgIdHeader);
                     }
 
                     filterChain.doFilter(request, response);

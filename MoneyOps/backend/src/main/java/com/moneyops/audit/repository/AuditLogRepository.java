@@ -8,17 +8,17 @@ import java.util.List;
 import java.util.UUID;
 
 @Repository
-public interface AuditLogRepository extends MongoRepository<AuditLog, UUID> {
+public interface AuditLogRepository extends MongoRepository<AuditLog, String> {
 
-    List<AuditLog> findByOrgIdOrderByTimestampDesc(UUID orgId);
+    List<AuditLog> findByOrgIdOrderByTimestampDesc(String orgId);
 
-    List<AuditLog> findByOrgIdAndEntityTypeOrderByTimestampDesc(UUID orgId, String entityType);
+    List<AuditLog> findByOrgIdAndEntityTypeOrderByTimestampDesc(String orgId, String entityType);
 
-    List<AuditLog> findByOrgIdAndEntityIdOrderByTimestampDesc(UUID orgId, String entityId);
+    List<AuditLog> findByOrgIdAndEntityIdOrderByTimestampDesc(String orgId, String entityId);
 
-    List<AuditLog> findByOrgIdAndUserIdOrderByTimestampDesc(UUID orgId, UUID userId);
+    List<AuditLog> findByOrgIdAndUserIdOrderByTimestampDesc(String orgId, String userId);
 
-    List<AuditLog> findByOrgIdAndOperation(UUID orgId, AuditLog.Operation operation);
+    List<AuditLog> findByOrgIdAndOperation(String orgId, AuditLog.Operation operation);
 
-    List<AuditLog> findByOrgIdAndTimestampBetween(UUID orgId, java.time.LocalDateTime start, java.time.LocalDateTime end);
+    List<AuditLog> findByOrgIdAndTimestampBetween(String orgId, java.time.LocalDateTime start, java.time.LocalDateTime end);
 }

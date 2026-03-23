@@ -47,6 +47,7 @@ class EntityExtractor:
         user_input: str,
         intent: Intent,
         context: Optional[Dict[str, Any]] = None,
+        locked_intent: Optional[str] = None,
     ) -> ExtractedEntities:
         start_time = time.time()
         entities: List[Entity] = []
@@ -96,7 +97,7 @@ class EntityExtractor:
 
         if call_llm:
             try:
-                llm_entities = await self._llm_extract(user_input, intent, context)
+                llm_entities = await self._llm_extract(user_input, intent, context, locked_intent)
                 if self.max_llm_entities and len(llm_entities) > self.max_llm_entities:
                     logger.debug("llm_entities_truncated", returned=len(llm_entities), max=self.max_llm_entities)
                     llm_entities = llm_entities[: self.max_llm_entities]
@@ -190,9 +191,9 @@ class EntityExtractor:
 
         return entities
 
-    async def _llm_extract(self, user_input: str, intent: Intent, context: Optional[Dict[str, Any]]) -> List[Entity]:
+    async def _llm_extract(self, user_input: str, intent: Intent, context: Optional[Dict[str, Any]], locked_intent: Optional[str] = None) -> List[Entity]:
         """Run Groq and parse returned entities. Uses chat_completion_with_json for structured response."""
-        prompt = self._build_extraction_prompt(user_input, intent, context)
+        prompt = self._build_extraction_prompt(user_input, intent, context, locked_intent)
 
         messages = [{"role": "user", "content": prompt}]
 
@@ -201,11 +202,12 @@ class EntityExtractor:
 
         return self._parse_llm_entities(response)
 
-    def _build_extraction_prompt(self, user_input: str, intent: Intent, context: Optional[Dict[str, Any]]) -> str:
+    def _build_extraction_prompt(self, user_input: str, intent: Intent, context: Optional[Dict[str, Any]], locked_intent: Optional[str] = None) -> str:
         prompt = f"""You are an entity extractor for MoneyOps. Extract explicit entities from the user input.
 
 User Input: "{user_input}"
 Intent: {intent.name}
+Locked Intent: {locked_intent or "None"}
 Today's Date: {datetime.now().strftime("%Y-%m-%d")} (use this to resolve relative dates)
 
 Return ONLY a JSON array of entities like:
@@ -217,8 +219,8 @@ Return ONLY a JSON array of entities like:
 Important:
 - Return [] if none found
 - Confidence 0.0 - 1.0
-- Use snake_case types: client_name, amount, invoice_id, phone, email, gst_number, tax_id, gst_percent, due_date, due_days, company_name
-- For INVOICE_CREATE: extract client_name, amount, gst_percent, due_date. 
+- Use snake_case types: client_name, amount, invoice_id, phone, email, gst_number, tax_id, gst_percent, due_date, due_days, company_name, city, address
+- For CLIENT_CREATE or INVOICE_CREATE: Extract as many details as possible (email, phone, address, etc.)
 - For relative dates (e.g., "next 15 days", "in 2 weeks", "fifteen days"): 
   → Extract numeric value as `due_days`
   → Do NOT try to resolve into `due_date`

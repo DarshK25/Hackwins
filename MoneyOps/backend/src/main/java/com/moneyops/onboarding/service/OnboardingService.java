@@ -15,8 +15,6 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
-
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -30,20 +28,19 @@ public class OnboardingService {
     // ── Status check ──────────────────────────────────────────────────────────
 
     public OnboardingStatusResponse getStatus(String clerkId) {
-        Optional<User> userOpt = userRepository.findByClerkId(clerkId);
+        Optional<User> userOpt = userRepository.findByClerkIdAndDeletedAtIsNull(clerkId);
 
         if (userOpt.isEmpty()) {
             return new OnboardingStatusResponse(false, null, null, "New user — onboarding required");
         }
 
         User user = userOpt.get();
-        UUID orgId = user.getOrgId();
-
+        String orgId = user.getOrgId();
 
         // Healing: If user has no orgId at all, check if they created one
         if (orgId == null) {
             log.info("User {} has no orgId, checking for created organizations", user.getEmail());
-            var createdOrgs = orgRepository.findAllByCreatedBy(user.getId());
+            var createdOrgs = orgRepository.findAllByCreatedByAndDeletedAtIsNull(user.getId());
             if (!createdOrgs.isEmpty()) {
                 orgId = createdOrgs.get(0).getId();
                 user.setOrgId(orgId);
@@ -52,14 +49,14 @@ public class OnboardingService {
                 log.info("Healed user {} with orgId {}", user.getEmail(), orgId);
             }
         }
-        // ... (rest of the method)
+
         boolean hasOrg = orgId != null;
         boolean isComplete = user.isOnboardingComplete() || hasOrg;
 
         return new OnboardingStatusResponse(
                 isComplete,
-                user.getId().toString(),
-                hasOrg ? orgId.toString() : null,
+                user.getId(),
+                hasOrg ? orgId : null,
                 isComplete ? "Onboarding complete" : "Onboarding incomplete"
         );
     }
@@ -117,8 +114,8 @@ public class OnboardingService {
 
         return new OnboardingStatusResponse(
                 true,
-                user.getId().toString(),
-                savedOrg.getId().toString(),
+                user.getId(),
+                savedOrg.getId(),
                 "Business created successfully"
         );
     }
@@ -126,7 +123,7 @@ public class OnboardingService {
     // ── Join business ─────────────────────────────────────────────────────────
 
     public Map<String, Object> verifyInvite(String code) {
-        Invite invite = inviteRepository.findByToken(code)
+        Invite invite = inviteRepository.findByTokenAndDeletedAtIsNull(code)
                 .orElseThrow(() -> new RuntimeException("Invalid or expired invite code"));
 
         if (invite.getStatus() != Invite.InviteStatus.PENDING) {
@@ -137,7 +134,7 @@ public class OnboardingService {
             throw new RuntimeException("This invite code has expired");
         }
 
-        BusinessOrganization org = orgRepository.findById(invite.getOrgId())
+        BusinessOrganization org = orgRepository.findByIdAndDeletedAtIsNull(invite.getOrgId())
                 .orElseThrow(() -> new RuntimeException("Organisation no longer exists"));
 
         return Map.of(
@@ -150,14 +147,14 @@ public class OnboardingService {
     public OnboardingStatusResponse joinBusiness(OnboardingRequest req) {
         log.info("User clerkId={} joining via code={}", req.getClerkId(), req.getInviteCode());
         
-        Invite invite = inviteRepository.findByToken(req.getInviteCode())
+        Invite invite = inviteRepository.findByTokenAndDeletedAtIsNull(req.getInviteCode())
                 .orElseThrow(() -> new RuntimeException("Invalid invite code"));
 
         if (invite.getStatus() != Invite.InviteStatus.PENDING) {
             throw new RuntimeException("Invite code already used");
         }
 
-        BusinessOrganization org = orgRepository.findById(invite.getOrgId())
+        BusinessOrganization org = orgRepository.findByIdAndDeletedAtIsNull(invite.getOrgId())
                 .orElseThrow(() -> new RuntimeException("Organisation not found"));
 
         User user = getOrCreateUser(req);
@@ -173,21 +170,20 @@ public class OnboardingService {
 
         return new OnboardingStatusResponse(
                 true,
-                user.getId().toString(),
-                org.getId().toString(),
+                user.getId(),
+                org.getId(),
                 "Joined organisation successfully"
         );
     }
 
     private User getOrCreateUser(OnboardingRequest req) {
-        return userRepository.findByClerkId(req.getClerkId()).orElseGet(() -> {
+        return userRepository.findByClerkIdAndDeletedAtIsNull(req.getClerkId()).orElseGet(() -> {
             User newUser = new User();
             newUser.setClerkId(req.getClerkId());
             newUser.setEmail(req.getEmail());
             newUser.setName(req.getName());
             newUser.setPasswordHash("");
-            newUser.setCreatedBy(newUser.getId());
-            newUser.setUpdatedBy(newUser.getId());
+            // Audit populated by @EnableMongoAuditing
             return userRepository.save(newUser);
         });
     }

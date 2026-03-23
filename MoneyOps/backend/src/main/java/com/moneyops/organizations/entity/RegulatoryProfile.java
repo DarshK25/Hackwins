@@ -1,9 +1,12 @@
 package com.moneyops.organizations.entity;
 
+import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Document(collection = "regulatory_profiles")
@@ -11,9 +14,10 @@ import java.util.UUID;
 public class RegulatoryProfile {
 
     @Id
-    private UUID id = UUID.randomUUID();
+    private String id;
 
-    private UUID orgId; // references BusinessOrganization._id
+    @Indexed
+    private String orgId; // 🔗 Tenant isolation
 
     private String panNumber;
     private String stateOfRegistration;
@@ -23,4 +27,13 @@ public class RegulatoryProfile {
     private String cinOrLlpIn;
     private String msmeNumber;
     private String iecCode;
+
+    private LocalDateTime deletedAt; // ✨ Soft delete support
+
+    @PostConstruct
+    public void generateId() {
+        if (this.id == null) {
+            this.id = UUID.randomUUID().toString();
+        }
+    }
 }

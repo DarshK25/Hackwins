@@ -7,6 +7,10 @@ import com.moneyops.invoices.entity.InvoiceStatus;
 import com.moneyops.invoices.mapper.InvoiceMapper;
 import com.moneyops.invoices.repository.InvoiceRepository;
 import com.moneyops.invoices.validator.InvoiceValidator;
+import com.moneyops.clients.repository.ClientRepository;
+import com.moneyops.clients.mapper.ClientMapper;
+import com.moneyops.audit.service.AuditLogService;
+import com.moneyops.transactions.service.TransactionService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -28,45 +32,58 @@ public class InvoiceServiceTest {
     @Mock
     private InvoiceRepository invoiceRepository;
 
+    @Mock
+    private ClientRepository clientRepository;
 
     @Mock
     private InvoiceMapper invoiceMapper;
 
     @Mock
+    private ClientMapper clientMapper;
+
+    @Mock
     private InvoiceValidator invoiceValidator;
+
+    @Mock
+    private AuditLogService auditLogService;
+
+    @Mock
+    private TransactionService transactionService;
 
     @InjectMocks
     private InvoiceService invoiceService;
 
     @Test
     public void testCreateInvoice() {
-        UUID orgId = UUID.randomUUID();
-        UUID userId = UUID.randomUUID();
+        String orgId = UUID.randomUUID().toString();
+        String userId = UUID.randomUUID().toString();
         InvoiceDto dto = new InvoiceDto();
         dto.setInvoiceNumber("INV-001");
 
         Invoice invoice = new Invoice();
         invoice.setId(UUID.randomUUID().toString());
+        invoice.setInvoiceNumber("INV-001");
 
         when(invoiceMapper.toEntity(dto)).thenReturn(invoice);
-        when(invoiceRepository.save(any(Invoice.class))).thenReturn(invoice);
-        when(invoiceMapper.toDto(invoice)).thenReturn(dto);
+        when(invoiceRepository.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(invoiceMapper.toDto(any(Invoice.class))).thenReturn(dto);
 
         InvoiceDto result = invoiceService.createInvoice(dto, orgId, userId);
 
         assertNotNull(result);
         verify(invoiceValidator).validate(dto);
-        verify(invoiceRepository).save(invoice);
+        verify(invoiceRepository).save(any(Invoice.class));
     }
 
     @Test
     public void testGetInvoiceById() {
         String id = UUID.randomUUID().toString();
-        UUID orgId = UUID.randomUUID();
+        String orgId = UUID.randomUUID().toString();
         Invoice invoice = new Invoice();
+        invoice.setOrgId(orgId);
         InvoiceDto dto = new InvoiceDto();
 
-        when(invoiceRepository.findByIdAndOrgId(id, orgId)).thenReturn(Optional.of(invoice));
+        when(invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)).thenReturn(Optional.of(invoice));
         when(invoiceMapper.toDto(invoice)).thenReturn(dto);
 
         InvoiceDto result = invoiceService.getInvoiceById(id, orgId);
@@ -77,11 +94,13 @@ public class InvoiceServiceTest {
     @Test
     public void testSendInvoice() {
         String id = UUID.randomUUID().toString();
-        UUID orgId = UUID.randomUUID();
+        String orgId = UUID.randomUUID().toString();
         Invoice invoice = new Invoice();
+        invoice.setId(id);
+        invoice.setOrgId(orgId);
         invoice.setStatus(InvoiceStatus.DRAFT);
 
-        when(invoiceRepository.findByIdAndOrgId(id, orgId)).thenReturn(Optional.of(invoice));
+        when(invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)).thenReturn(Optional.of(invoice));
         when(invoiceRepository.save(any(Invoice.class))).thenReturn(invoice);
         when(invoiceMapper.toDto(invoice)).thenReturn(new InvoiceDto());
 
@@ -94,11 +113,14 @@ public class InvoiceServiceTest {
     @Test
     public void testMarkPaid() {
         String id = UUID.randomUUID().toString();
-        UUID orgId = UUID.randomUUID();
+        String orgId = UUID.randomUUID().toString();
         Invoice invoice = new Invoice();
+        invoice.setId(id);
+        invoice.setOrgId(orgId);
         invoice.setStatus(InvoiceStatus.SENT);
+        invoice.setTotalAmount(BigDecimal.valueOf(100));
 
-        when(invoiceRepository.findByIdAndOrgId(id, orgId)).thenReturn(Optional.of(invoice));
+        when(invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)).thenReturn(Optional.of(invoice));
         when(invoiceRepository.save(any(Invoice.class))).thenReturn(invoice);
         when(invoiceMapper.toDto(invoice)).thenReturn(new InvoiceDto());
 

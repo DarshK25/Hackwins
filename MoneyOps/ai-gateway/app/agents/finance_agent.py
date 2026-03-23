@@ -31,6 +31,7 @@ class FinanceAgent(BaseAgent):
     def get_supported_intents(self) -> List[Intent]:
         return [
             Intent.INVOICE_CREATE,
+            Intent.INVOICE_UPDATE,
             Intent.INVOICE_QUERY,
             Intent.BUSINESS_HEALTH_CHECK,
             Intent.PROBLEM_DIAGNOSIS,
@@ -225,15 +226,28 @@ class FinanceAgent(BaseAgent):
         if not draft.confirmed:
             gst_total = round(draft.amount * (draft.gst_percent / 100), 2)
             total = round(draft.amount + gst_total, 2)
+            
+            # Show preview dialog
+            preview_fields = [
+                {"id": "client_name", "label": "Client", "type": "text", "defaultValue": draft.client_name, "required": True},
+                {"id": "amount", "label": "Base Amount (₹)", "type": "number", "defaultValue": draft.amount, "required": True},
+                {"id": "gst_percent", "label": "GST %", "type": "number", "defaultValue": draft.gst_percent, "required": True},
+                {"id": "due_date", "label": "Due Date", "type": "date", "defaultValue": draft.due_date, "required": True},
+                {"id": "description", "label": "Service Description", "type": "textarea", "defaultValue": draft.service_description, "required": True},
+            ]
+
             return AgentResponse(
-                message=f"Ready to create: {draft.service_description} for {draft.client_name}, ₹{draft.amount:,.0f} + {draft.gst_percent}% GST = ₹{total:,.0f}, due {draft.due_date}. Shall I proceed?",
+                message=f"I've prepared the invoice for {draft.client_name}. I've opened a preview for you to check. Shall I go ahead and create it now?",
                 success=True,
                 ui_event={
-                    "type": "confirmation", 
-                    "variant": "warning", 
-                    "title": "Confirm Invoice", 
-                    "message": f"{draft.client_name} · ₹{total:,.0f} due {draft.due_date}", 
-                    "actions": [{"label": "Yes, create"}, {"label": "Cancel"}]
+                    "type": "open_input_dialog",
+                    "dialog_id": "invoice_preview_form",
+                    "session_id": context.session_id,
+                    "title": "Review Invoice",
+                    "message": f"Total: ₹{total:,.0f} (incl. {draft.gst_percent}% GST)",
+                    "fields": preview_fields,
+                    "submit_btn_label": "Update Draft",
+                    "submit_endpoint": "/api/v1/voice/dialog-response"
                 },
                 agent_type=self.get_agent_type()
             )
@@ -340,7 +354,7 @@ class FinanceAgent(BaseAgent):
     # Handler stubs for other intents
     async def _handle_business_health_score(self, params, context=None): 
         org_uuid = context.get("org_uuid") or context.get("org_id")
-        business_id = context.get("business_id", 1)
+        business_id = context.get("business_id", "default")
         user_id = context.get("user_id")
         
         resp = await self.backend.get_finance_metrics(business_id, org_uuid, user_id)
@@ -381,7 +395,7 @@ class FinanceAgent(BaseAgent):
 
     async def _handle_analytics_query(self, params, context=None): 
         org_uuid = context.get("org_uuid") or context.get("org_id")
-        business_id = context.get("business_id", 1)
+        business_id = context.get("business_id", "default")
         user_id = context.get("user_id")
         
         resp = await self.backend.get_finance_metrics(business_id, org_uuid, user_id)
@@ -394,7 +408,7 @@ class FinanceAgent(BaseAgent):
         return {"message": "I couldn't retrieve your analytics data at the moment."}
 
     async def process(self, intent: Intent, entities: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> AgentResponse:
-        if intent == Intent.INVOICE_CREATE:
+        if intent in (Intent.INVOICE_CREATE, Intent.INVOICE_UPDATE):
             from app.voice_processor import VoiceContext
             safe_context = context or {}
             ctx = VoiceContext(

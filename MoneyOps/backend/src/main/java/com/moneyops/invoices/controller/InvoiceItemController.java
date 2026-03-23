@@ -7,8 +7,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.UUID;
-
 @RestController
 @RequestMapping("/api/invoices/{invoiceId}/items")
 @RequiredArgsConstructor
@@ -19,24 +17,24 @@ public class InvoiceItemController {
     @PostMapping
     public ResponseEntity<InvoiceItemDto> addItem(@PathVariable String invoiceId,
                                                   @RequestBody InvoiceItemDto itemDto,
-                                                  @RequestHeader("X-Org-Id") UUID orgId) {
+                                                  @RequestHeader("X-Org-Id") String orgId) {
         InvoiceItemDto added = invoiceService.addItem(invoiceId, itemDto, orgId);
         return ResponseEntity.ok(added);
     }
 
     @PatchMapping("/{itemId}")
     public ResponseEntity<Void> updateItem(@PathVariable String invoiceId,
-                                           @PathVariable UUID itemId,
+                                           @PathVariable String itemId,
                                            @RequestBody InvoiceItemDto itemDto,
-                                           @RequestHeader("X-Org-Id") UUID orgId) {
+                                           @RequestHeader("X-Org-Id") String orgId) {
         invoiceService.updateItem(itemId, itemDto, orgId);
         return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/{itemId}")
     public ResponseEntity<Void> deleteItem(@PathVariable String invoiceId,
-                                           @PathVariable UUID itemId,
-                                           @RequestHeader("X-Org-Id") UUID orgId) {
+                                           @PathVariable String itemId,
+                                           @RequestHeader("X-Org-Id") String orgId) {
         invoiceService.deleteItem(itemId, orgId);
         return ResponseEntity.noContent().build();
     }

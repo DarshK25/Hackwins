@@ -14,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -95,7 +94,7 @@ public class AuditLogService {
         return auditLogRepository.findByOrgIdAndEntityIdOrderByTimestampDesc(OrgContext.getOrgId(), entityId);
     }
 
-    public List<AuditLog> getAuditLogsByUserId(UUID userId) {
+    public List<AuditLog> getAuditLogsByUserId(String userId) {
         return auditLogRepository.findByOrgIdAndUserIdOrderByTimestampDesc(OrgContext.getOrgId(), userId);
     }
 

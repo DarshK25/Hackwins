@@ -21,22 +21,16 @@ import org.springframework.context.annotation.Configuration;
  *   - Result: ALL UUID-based queries silently return 0 rows — including
  *     findByOrgId(), findById(), getAllClients(), etc.
  *
- * Fix:
- *   Register a MongoClientSettingsBuilderCustomizer that switches the codec
- *   back to JAVA_LEGACY (subType 03). This is the PERMANENT fix — it matches
- *   every existing document without any data migration.
- *
- * Side-effects resolved by this fix:
- *   • "Client not found" errors when looking up by orgId.
- *   • Voice-agent invoice creation failures (org/client lookup returning empty).
- *   • Any future query using a UUID field over a pre-existing collection.
+ * Fix (Update v2):
+ *   Standardized to UUID as plain strings or subType 04 (STANDARD) for cross-platform
+ *   compatibility (Python, etc.). This ensures all new documents use the modern format.
  */
 @Configuration
 public class MongoConfig {
 
     @Bean
     public MongoClientSettingsBuilderCustomizer uuidRepresentationCustomizer() {
-        return builder -> builder.uuidRepresentation(UuidRepresentation.JAVA_LEGACY);
+        return builder -> builder.uuidRepresentation(UuidRepresentation.STANDARD);
     }
 }
 

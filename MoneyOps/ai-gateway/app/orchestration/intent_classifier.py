@@ -156,6 +156,8 @@ class IntentClassifier:
         user_input: str,
         conversation_history: Optional[List[Dict[str, Any]]] = None,
         business_context: Optional[Dict[str, Any]] = None,
+        locked_intent: Optional[str] = None,
+        collected_entities: Optional[Dict[str, Any]] = None,
     ) -> IntentClassification:
         """Classify user intent with agent routing information"""
         start_time = time.time()
@@ -185,7 +187,7 @@ class IntentClassifier:
             )
 
         # Step 3: Use LLM for complex classification
-        llm_result = await self._llm_classify(user_input, conversation_history, business_context)
+        llm_result = await self._llm_classify(user_input, conversation_history, business_context, locked_intent, collected_entities)
 
         # attach processing time if not already set
         try:
@@ -224,9 +226,11 @@ class IntentClassifier:
         user_input: str,
         conversation_history: Optional[List[Dict[str, Any]]] = None,
         business_context: Optional[Dict[str, Any]] = None,
+        locked_intent: Optional[str] = None,
+        collected_entities: Optional[Dict[str, Any]] = None,
     ) -> IntentClassification:
         """LLM-based classification for complex cases"""
-        prompt = self._build_classification_prompt(user_input, conversation_history, business_context)
+        prompt = self._build_classification_prompt(user_input, conversation_history, business_context, locked_intent, collected_entities)
 
         # Use chat_completion_with_json to get a parsed JSON response from Groq
         messages = [{"role": "user", "content": prompt}]
@@ -239,6 +243,8 @@ class IntentClassifier:
         user_input: str,
         conversation_history: Optional[List[Dict[str, Any]]],
         business_context: Optional[Dict[str, Any]],
+        locked_intent: Optional[str] = None,
+        collected_entities: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Build classification prompt with strategic intents"""
         prompt = f"""You are an intent classifier for MoneyOps, an AI-powered financial operations assistant.
@@ -287,6 +293,15 @@ CONVERSATIONAL INTENTS:
 - GENERAL_QUERY: General questions
 
 User Input: "{user_input}"
+
+ACTIVE WORKFLOW CONTEXT:
+- Locked Intent: {locked_intent or "None"}
+- Entities Collected So Far: {collected_entities or "None"}
+
+INSTRUCTIONS:
+1. If Locked Intent is not None, favor it heavily unless the user explicitly wants to "cancel" or start something completely unrelated.
+2. Even if the input is garbled (e.g., "you did his first april" instead of "due 1st of april"), use the Active Workflow and Entities to infer the true intent.
+3. If an entity like a name or date is provided, and we are in a creation flow, it is likely continuing that flow.
 """
 
         if isinstance(conversation_history, list) and len(conversation_history) > 0:

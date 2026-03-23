@@ -10,7 +10,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/users")
@@ -20,43 +19,43 @@ public class UserController {
     private UserService userService;
 
     @GetMapping
-    public ResponseEntity<List<UserDto>> getAllUsers(@RequestHeader("X-Org-Id") UUID orgId) {
+    public ResponseEntity<List<UserDto>> getAllUsers(@RequestHeader("X-Org-Id") String orgId) {
         List<UserDto> users = userService.getAllUsers(orgId);
         return ResponseEntity.ok(users);
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<UserDto> getUserById(@PathVariable UUID id, @RequestHeader("X-Org-Id") UUID orgId) {
+    public ResponseEntity<UserDto> getUserById(@PathVariable String id, @RequestHeader("X-Org-Id") String orgId) {
         UserDto user = userService.getUserById(id, orgId);
         return ResponseEntity.ok(user);
     }
 
     @PostMapping
-    public ResponseEntity<UserDto> createUser(@RequestBody UserDto dto, @RequestHeader("X-Org-Id") UUID orgId, @RequestHeader("X-User-Id") UUID createdBy) {
+    public ResponseEntity<UserDto> createUser(@RequestBody UserDto dto, @RequestHeader("X-Org-Id") String orgId, @RequestHeader("X-User-Id") String createdBy) {
         UserDto created = userService.createUser(dto, orgId, createdBy);
         return ResponseEntity.ok(created);
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<UserDto> updateUser(@PathVariable UUID id, @RequestBody UserDto dto, @RequestHeader("X-Org-Id") UUID orgId, @RequestHeader("X-User-Id") UUID updatedBy) {
+    public ResponseEntity<UserDto> updateUser(@PathVariable String id, @RequestBody UserDto dto, @RequestHeader("X-Org-Id") String orgId, @RequestHeader("X-User-Id") String updatedBy) {
         UserDto updated = userService.updateUser(id, dto, orgId, updatedBy);
         return ResponseEntity.ok(updated);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteUser(@PathVariable UUID id, @RequestHeader("X-Org-Id") UUID orgId) {
+    public ResponseEntity<Void> deleteUser(@PathVariable String id, @RequestHeader("X-Org-Id") String orgId) {
         userService.deleteUser(id, orgId);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/search")
-    public ResponseEntity<List<UserDto>> searchUsers(@RequestParam String q, @RequestHeader("X-Org-Id") UUID orgId) {
+    public ResponseEntity<List<UserDto>> searchUsers(@RequestParam String q, @RequestHeader("X-Org-Id") String orgId) {
         List<UserDto> users = userService.searchUsers(orgId, q);
         return ResponseEntity.ok(users);
     }
 
     @PostMapping("/invite")
-    public ResponseEntity<Void> createInvite(@RequestBody CreateInviteRequest request, @RequestHeader("X-Org-Id") UUID orgId, @RequestHeader("X-User-Id") UUID createdBy) {
+    public ResponseEntity<Void> createInvite(@RequestBody CreateInviteRequest request, @RequestHeader("X-Org-Id") String orgId, @RequestHeader("X-User-Id") String createdBy) {
         userService.createInvite(request, orgId, createdBy);
         return ResponseEntity.ok().build();
     }

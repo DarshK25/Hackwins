@@ -178,7 +178,7 @@ class MarketAgent(BaseAgent):
 
     # ── market monitoring Scheduler ─────────────────────────────────────────
 
-    def start_market_monitor(self, org_uuid: str, business_id: int, industry: str = "fintech services"):
+    def start_market_monitor(self, org_uuid: str, business_id: str, industry: str = "fintech services"):
         """Start background market monitoring for an org — call this on session start"""
         job_id = f"market_monitor_{org_uuid}"
 
@@ -213,7 +213,7 @@ class MarketAgent(BaseAgent):
             self._scheduler.remove_job(job_id)
             logger.info({"event": "market_monitor_stopped", "org_uuid": org_uuid})
 
-    async def _market_monitor_tick(self, org_uuid: str, business_id: int, industry: str):
+    async def _market_monitor_tick(self, org_uuid: str, business_id: str, industry: str):
         """Background job — fetch market data every 30 mins, cache it"""
         logger.info({"event": "market_monitor_tick", "org_uuid": org_uuid})
         try:
@@ -258,7 +258,7 @@ class MarketAgent(BaseAgent):
         try:
             org_uuid = context.org_uuid if hasattr(context, 'org_uuid') else context.get("org_uuid", "")
             user_id = context.user_id if hasattr(context, 'user_id') else context.get("user_id", "")
-            business_id = context.business_id if hasattr(context, 'business_id') else context.get("business_id", 1)
+            business_id = context.business_id if hasattr(context, 'business_id') else context.get("business_id", "default")
 
             metrics_task = self.backend.get_finance_metrics(business_id, org_uuid, user_id)
             invoices_task = self.backend._request("GET", "/api/invoices", org_id=org_uuid, user_id=user_id)
@@ -319,7 +319,7 @@ class MarketAgent(BaseAgent):
             )
 
         # 1. Start or check background monitor
-        business_id = context.business_id if hasattr(context, 'business_id') else context.get("business_id", 1)
+        business_id = context.business_id if hasattr(context, 'business_id') else context.get("business_id", "default")
         self.start_market_monitor(org_uuid, business_id)
 
         # 2. Get business snapshot
@@ -557,7 +557,7 @@ Explain the specific impact on this business and give one protective action to t
         class _Ctx:
             org_uuid = (context or {}).get("org_uuid", "")
             user_id = (context or {}).get("user_id", "")
-            business_id = (context or {}).get("business_id", 1)
+            business_id = (context or {}).get("business_id", "default")
 
         ctx = _Ctx()
 

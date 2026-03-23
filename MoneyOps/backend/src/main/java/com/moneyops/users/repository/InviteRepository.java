@@ -6,19 +6,13 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
 @Repository
-public interface InviteRepository extends MongoRepository<Invite, UUID> {
+public interface InviteRepository extends MongoRepository<Invite, String> {
 
-    Optional<Invite> findByToken(String token);
-
-    List<Invite> findAllByOrgId(UUID orgId);
-
-    List<Invite> findAllByOrgIdAndStatus(UUID orgId, Invite.InviteStatus status);
-
-    boolean existsByEmailAndOrgIdAndStatus(String email, UUID orgId, Invite.InviteStatus status);
-
-    // Note: expired invite cleanup should be done via a scheduled task using mongoTemplate
-    // (MongoDB does not support JPA-style @Modifying DELETE queries)
+    Optional<Invite> findByIdAndDeletedAtIsNull(String id);
+    Optional<Invite> findByTokenAndDeletedAtIsNull(String token);
+    List<Invite> findAllByOrgIdAndDeletedAtIsNull(String orgId);
+    List<Invite> findAllByOrgIdAndStatusAndDeletedAtIsNull(String orgId, Invite.InviteStatus status);
+    boolean existsByEmailAndOrgIdAndStatusAndDeletedAtIsNull(String email, String orgId, Invite.InviteStatus status);
 }

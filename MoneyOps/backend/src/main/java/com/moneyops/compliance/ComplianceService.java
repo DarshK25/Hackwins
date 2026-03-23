@@ -47,7 +47,7 @@ public class ComplianceService {
         private String deductible;
     }
 
-    public DeadlinesResponse getDeadlines(Long businessId) {
+    public DeadlinesResponse getDeadlines(String businessId) {
         // Build mock deadlines matching UI expectations
         DeadlinesResponse response = new DeadlinesResponse();
         int currentYear = LocalDate.now().getYear();

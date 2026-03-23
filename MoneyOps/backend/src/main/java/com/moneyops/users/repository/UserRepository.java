@@ -9,23 +9,23 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-public interface UserRepository extends MongoRepository<User, UUID> {
+public interface UserRepository extends MongoRepository<User, String> {
+    Optional<User> findByIdAndDeletedAtIsNull(String id);
+    Optional<User> findByIdAndOrgIdAndDeletedAtIsNull(String id, String orgId);
+    List<User> findAllByOrgIdAndDeletedAtIsNull(String orgId);
+    boolean existsByIdAndOrgIdAndDeletedAtIsNull(String id, String orgId);
+    void deleteByIdAndOrgId(String id, String orgId); // Note: still keep method for hard delete if needed, or remove
 
-    Optional<User> findByIdAndOrgId(UUID id, UUID orgId);
-    List<User> findAllByOrgId(UUID orgId);
-    boolean existsByIdAndOrgId(UUID id, UUID orgId);
-    void deleteByIdAndOrgId(UUID id, UUID orgId);
+    Optional<User> findByEmailAndOrgIdAndDeletedAtIsNull(String email, String orgId);
+    Optional<User> findByEmailAndDeletedAtIsNull(String email);
+    Optional<User> findByClerkIdAndDeletedAtIsNull(String clerkId);
 
-    Optional<User> findByEmailAndOrgId(String email, UUID orgId);
-    Optional<User> findByEmail(String email);
-    Optional<User> findByClerkId(String clerkId);
+    boolean existsByEmailAndOrgIdAndDeletedAtIsNull(String email, String orgId);
+    boolean existsByEmailAndDeletedAtIsNull(String email);
 
-    boolean existsByEmailAndOrgId(String email, UUID orgId);
-    boolean existsByEmail(String email);
+    List<User> findAllByOrgIdAndRoleAndDeletedAtIsNull(String orgId, User.Role role);
+    List<User> findAllByOrgIdAndStatusAndDeletedAtIsNull(String orgId, User.Status status);
 
-    List<User> findAllByOrgIdAndRole(UUID orgId, User.Role role);
-    List<User> findAllByOrgIdAndStatus(UUID orgId, User.Status status);
-
-    @org.springframework.data.mongodb.repository.Query("{ 'orgId': ?0, $or: [ { 'firstName': { $regex: ?1, $options: 'i' } }, { 'lastName': { $regex: ?1, $options: 'i' } }, { 'email': { $regex: ?1, $options: 'i' } } ] }")
-    List<User> searchByOrgIdWithFilters(UUID orgId, String query);
+    @org.springframework.data.mongodb.repository.Query("{ 'orgId': ?0, 'deletedAt': null, $or: [ { 'name': { $regex: ?1, $options: 'i' } }, { 'email': { $regex: ?1, $options: 'i' } } ] }")
+    List<User> searchByOrgIdWithFilters(String orgId, String query);
 }

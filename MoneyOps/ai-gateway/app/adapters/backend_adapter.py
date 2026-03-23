@@ -143,7 +143,7 @@ class BackendHttpAdapter:
             return resp.data if isinstance(resp.data, list) else resp.data.get("clients", [])
         return []
 
-    async def get_finance_metrics(self, business_id: int, org_id: str, user_id: Optional[str] = None) -> BackendResponse:
+    async def get_finance_metrics(self, business_id: str, org_id: str, user_id: Optional[str] = None) -> BackendResponse:
         return await self._request("GET", "/api/finance-intelligence/metrics", params={"businessId": business_id}, org_id=org_id, user_id=user_id)
 
     def set_auth_token(self, token: str):

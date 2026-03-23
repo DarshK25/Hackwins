@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Save, Phone, Mail, MapPin, Hash } from 'lucide-react';
+import { X, Save, Phone, Mail, MapPin, Hash, User, IndianRupee, Calendar, FileText, Percent } from 'lucide-react';
 
 export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
   const [values, setValues] = useState({});
@@ -26,7 +26,7 @@ export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
       onSubmit(data);
       onClose();
     } catch (err) {
-      console.error("Failed to submit client dialog", err);
+      console.error("Failed to submit dialog", err);
     } finally {
       setIsSubmitting(false);
     }
@@ -34,10 +34,15 @@ export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
 
   const getIcon = (id) => {
     switch (id) {
-      case 'phone': return <Phone className="h-4 w-4" />;
+      case 'phone': case 'phoneNumber': return <Phone className="h-4 w-4" />;
       case 'email': return <Mail className="h-4 w-4" />;
       case 'address': return <MapPin className="h-4 w-4" />;
-      case 'gst_number': return <Hash className="h-4 w-4" />;
+      case 'gst_number': case 'taxId': case 'tax_id': return <Hash className="h-4 w-4" />;
+      case 'client_name': case 'name': case 'company_name': return <User className="h-4 w-4" />;
+      case 'amount': case 'total_amount': return <IndianRupee className="h-4 w-4" />;
+      case 'due_date': case 'issue_date': return <Calendar className="h-4 w-4" />;
+      case 'service_description': case 'description': case 'notes': return <FileText className="h-4 w-4" />;
+      case 'gst_percent': case 'gst': return <Percent className="h-4 w-4" />;
       default: return null;
     }
   };
@@ -52,15 +57,15 @@ export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
       >
         <div className="flex justify-between items-start">
           <div className="space-y-1">
-            <h2 className="text-white text-lg font-semibold tracking-tight">{dialog.title}</h2>
-            <p className="text-white/40 text-xs leading-relaxed">{dialog.message}</p>
+            <h2 className="text-white text-lg font-semibold tracking-tight">{dialog.title || 'Review Details'}</h2>
+            <p className="text-white/40 text-xs leading-relaxed">{dialog.message || 'Check the details and update if needed.'}</p>
           </div>
           <button onClick={onClose} className="text-white/20 hover:text-white transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-4 max-h-[60vh] overflow-y-auto px-1 -mx-1 scrollbar-none">
           {dialog.fields.map(field => (
             <div key={field.id} className="space-y-1.5">
               <label className="text-white/60 text-[11px] font-medium uppercase tracking-wider flex items-center gap-2">
@@ -70,6 +75,7 @@ export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
               {field.type === 'textarea' ? (
                 <textarea 
                   className="w-full bg-white/[0.03] text-white rounded-xl px-4 py-2.5 text-sm border border-white/10 focus:border-blue-500/50 focus:bg-white/[0.05] outline-none transition-all resize-none"
+                  defaultValue={field.defaultValue || values[field.id] || ''}
                   onChange={e => setValues(v => ({...v, [field.id]: e.target.value}))}
                   placeholder={field.placeholder || ''} 
                   rows={2} 
@@ -78,6 +84,7 @@ export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
                 <input 
                   type={field.type} 
                   className="w-full bg-white/[0.03] text-white rounded-xl px-4 py-2.5 text-sm border border-white/10 focus:border-blue-500/50 focus:bg-white/[0.05] outline-none transition-all"
+                  defaultValue={field.defaultValue || values[field.id] || ''}
                   onChange={e => setValues(v => ({...v, [field.id]: e.target.value}))}
                   placeholder={field.placeholder || ''} 
                 />
@@ -93,13 +100,13 @@ export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
             className="flex-1 bg-blue-600 hover:bg-blue-500 text-white rounded-xl py-3 text-sm font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {isSubmitting ? <span className="animate-spin text-lg">◌</span> : <Save className="h-4 w-4" />}
-            Save Client
+            {dialog.submit_btn_label || 'Update Draft'}
           </button>
           <button 
             onClick={onClose} 
             className="flex-1 bg-white/5 hover:bg-white/10 text-white/70 rounded-xl py-3 text-sm font-medium transition-all"
           >
-            Skip
+            {dialog.cancel_btn_label || 'Close'}
           </button>
         </div>
       </motion.div>

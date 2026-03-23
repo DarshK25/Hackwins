@@ -14,7 +14,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/audit")
@@ -65,7 +64,7 @@ public class AuditLogController {
     @GetMapping("/user/{userId}")
     @Operation(summary = "Get audit logs for a specific user")
     public ResponseEntity<ApiResponse<List<AuditLog>>> getAuditLogsByUserId(
-            @PathVariable UUID userId) {
+            @PathVariable String userId) {
 
         List<AuditLog> logs = auditLogService.getAuditLogsByUserId(userId);
         return ResponseEntity.ok(ApiResponse.success(logs));

@@ -18,10 +18,8 @@ spring:
   data:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/moneyops}
-      # CRITICAL: existing documents store UUIDs as BSON Binary subType 03 (JAVA_LEGACY).
-      # Without this setting, Spring Data MongoDB uses subType 04 (STANDARD) by default,
-      # making all UUID-based queries (findByOrgId, findById, etc.) silently return empty.
-      uuid-representation: java_legacy
+      # CRITICAL: standardized to plain string UUIDs (STANDARD) to avoid BinData(3) type mismatches.
+      uuid-representation: STANDARD
 
 
   kafka:

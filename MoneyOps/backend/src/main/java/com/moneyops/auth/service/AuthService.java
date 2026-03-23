@@ -18,8 +18,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.UUID;
-
 @Service
 @Transactional
 public class AuthService {
@@ -37,7 +35,7 @@ public class AuthService {
     private PasswordEncoder passwordEncoder;
 
     public TokenResponse login(LoginRequest request) {
-        User user = userRepository.findByEmail(request.getEmail())
+        User user = userRepository.findByEmailAndDeletedAtIsNull(request.getEmail())
                 .orElseThrow(() -> new UnauthorizedException("Invalid credentials"));
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
@@ -48,22 +46,21 @@ public class AuthService {
             throw new UnauthorizedException("User account is not active");
         }
 
-        String token = jwtProvider.generateToken(user.getId().toString());
+        String token = jwtProvider.generateToken(user.getId());
         return new TokenResponse(token, null, "Bearer", 86400);
     }
 
     public TokenResponse register(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.getEmail())) {
+        if (userRepository.existsByEmailAndDeletedAtIsNull(request.getEmail())) {
             throw new ConflictException("User already exists");
         }
 
         // Create organization
         BusinessOrganization org = new BusinessOrganization();
         org.setLegalName(request.getOrgName());
-        org.setCreatedAt(LocalDateTime.now());
-        org.setUpdatedAt(LocalDateTime.now());
-        // Use a temporary creator to satisfy non-null constraint, will be corrected after user creation
-        org.setCreatedBy(UUID.randomUUID());
+        
+        // ✨ Bootstrap ID until user is created
+        org.setCreatedBy("BOOTSTRAP");
         BusinessOrganization savedOrg = orgRepository.save(org);
 
         // Create user
@@ -74,46 +71,42 @@ public class AuthService {
         user.setRole(User.Role.OWNER);
         user.setStatus(User.Status.ACTIVE);
         user.setOrgId(savedOrg.getId());
-        user.setCreatedAt(LocalDateTime.now());
-        user.setUpdatedAt(LocalDateTime.now());
-        // Temporarily set createdBy/updatedBy to org id to satisfy non-null constraints
-        user.setCreatedBy(savedOrg.getId());
-        user.setUpdatedBy(savedOrg.getId());
+        
+        // Temporarily set createdBy/updatedBy for non-null constraints if enforced
+        user.setCreatedBy("SELF");
         User savedUser = userRepository.save(user);
 
-        // Now correct the org.createdBy to point to the actual user who created it
+        // Now correct the parent references
         savedOrg.setCreatedBy(savedUser.getId());
         orgRepository.save(savedOrg);
 
-        // Also ensure user's createdBy/updatedBy reference themselves
         savedUser.setCreatedBy(savedUser.getId());
         savedUser.setUpdatedBy(savedUser.getId());
         userRepository.save(savedUser);
 
-        String token = jwtProvider.generateToken(savedUser.getId().toString());
+        String token = jwtProvider.generateToken(savedUser.getId());
         return new TokenResponse(token, null, "Bearer", 86400);
     }
 
     public String handleOAuth2Login(OAuthUserInfo userInfo) {
         // Find or create user
-        User user = userRepository.findByEmail(userInfo.getEmail())
+        User user = userRepository.findByEmailAndDeletedAtIsNull(userInfo.getEmail())
                 .orElseGet(() -> {
                     User newUser = new User();
                     newUser.setName(userInfo.getName());
                     newUser.setEmail(userInfo.getEmail());
                     newUser.setRole(User.Role.STAFF);
                     newUser.setStatus(User.Status.ACTIVE);
-                    // OAuth bootstrap user must satisfy required non-null columns.
-                    UUID bootstrapId = UUID.randomUUID();
+                    
+                    // OAuth bootstrap user
+                    String bootstrapId = "OAUTH_BOOTSTRAP";
                     newUser.setOrgId(bootstrapId);
                     newUser.setCreatedBy(bootstrapId);
                     newUser.setUpdatedBy(bootstrapId);
-                    newUser.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));
-                    newUser.setCreatedAt(LocalDateTime.now());
-                    newUser.setUpdatedAt(LocalDateTime.now());
+                    newUser.setPasswordHash(passwordEncoder.encode(java.util.UUID.randomUUID().toString()));
                     return userRepository.save(newUser);
                 });
 
-        return jwtProvider.generateToken(user.getId().toString());
+        return jwtProvider.generateToken(user.getId());
     }
 }

@@ -13,7 +13,6 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/transactions")
@@ -24,8 +23,8 @@ public class TransactionController {
 
     @PostMapping
     public ResponseEntity<TransactionDto> createTransaction(@RequestBody TransactionDto dto) {
-        UUID orgId = OrgContext.getOrgId();
-        UUID userId = OrgContext.getUserId();
+        String orgId = OrgContext.getOrgId();
+        String userId = OrgContext.getUserId();
         if (orgId == null) return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
 
         TransactionDto created = transactionService.createTransaction(dto, orgId, userId);
@@ -33,9 +32,9 @@ public class TransactionController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<TransactionDto> updateTransaction(@PathVariable UUID id,
+    public ResponseEntity<TransactionDto> updateTransaction(@PathVariable String id,
                                                             @RequestBody TransactionDto dto) {
-        UUID orgId = OrgContext.getOrgId();
+        String orgId = OrgContext.getOrgId();
         if (orgId == null) return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
 
         TransactionDto updated = transactionService.updateTransaction(id, dto, orgId);
@@ -44,7 +43,7 @@ public class TransactionController {
 
     @GetMapping
     public ResponseEntity<List<TransactionDto>> getAllTransactions() {
-        UUID orgId = OrgContext.getOrgId();
+        String orgId = OrgContext.getOrgId();
         if (orgId == null) return ResponseEntity.ok(List.of());
 
         List<TransactionDto> transactions = transactionService.getAllTransactions(orgId);
@@ -52,8 +51,8 @@ public class TransactionController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<TransactionDto> getTransaction(@PathVariable UUID id) {
-        UUID orgId = OrgContext.getOrgId();
+    public ResponseEntity<TransactionDto> getTransaction(@PathVariable String id) {
+        String orgId = OrgContext.getOrgId();
         if (orgId == null) return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
 
         TransactionDto transaction = transactionService.getTransactionById(id, orgId);
@@ -61,8 +60,8 @@ public class TransactionController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteTransaction(@PathVariable UUID id) {
-        UUID orgId = OrgContext.getOrgId();
+    public ResponseEntity<Void> deleteTransaction(@PathVariable String id) {
+        String orgId = OrgContext.getOrgId();
         if (orgId == null) return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
 
         transactionService.deleteTransaction(id, orgId);
@@ -70,8 +69,8 @@ public class TransactionController {
     }
 
     @GetMapping("/client/{clientId}")
-    public ResponseEntity<List<TransactionDto>> getTransactionsByClient(@PathVariable UUID clientId) {
-        UUID orgId = OrgContext.getOrgId();
+    public ResponseEntity<List<TransactionDto>> getTransactionsByClient(@PathVariable String clientId) {
+        String orgId = OrgContext.getOrgId();
         if (orgId == null) return ResponseEntity.ok(List.of());
 
         List<TransactionDto> transactions = transactionService.getTransactionsByClient(clientId, orgId);
@@ -82,7 +81,7 @@ public class TransactionController {
     public ResponseEntity<List<TransactionDto>> getTransactionsByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        UUID orgId = OrgContext.getOrgId();
+        String orgId = OrgContext.getOrgId();
         if (orgId == null) return ResponseEntity.ok(List.of());
 
         List<TransactionDto> transactions = transactionService.getTransactionsByDateRange(orgId, startDate, endDate);
@@ -91,7 +90,7 @@ public class TransactionController {
 
     @GetMapping("/summary")
     public ResponseEntity<Map<String, BigDecimal>> getFinancialSummary() {
-        UUID orgId = OrgContext.getOrgId();
+        String orgId = OrgContext.getOrgId();
         if (orgId == null) return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
 
         Map<String, BigDecimal> summary = transactionService.getFinancialSummary(orgId);

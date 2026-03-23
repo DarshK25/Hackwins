@@ -9,29 +9,27 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-public interface TransactionRepository extends MongoRepository<Transaction, UUID> {
+public interface TransactionRepository extends MongoRepository<Transaction, String> {
 
-    Optional<Transaction> findByIdAndOrgId(UUID id, UUID orgId);
+    Optional<Transaction> findByIdAndOrgIdAndDeletedAtIsNull(String id, String orgId);
 
-    List<Transaction> findAllByOrgId(UUID orgId);
+    List<Transaction> findAllByOrgIdAndDeletedAtIsNull(String orgId);
 
-    boolean existsByIdAndOrgId(UUID id, UUID orgId);
+    boolean existsByIdAndOrgIdAndDeletedAtIsNull(String id, String orgId);
 
-    List<Transaction> findByOrgIdAndClientId(UUID orgId, UUID clientId);
+    List<Transaction> findByOrgIdAndClientIdAndDeletedAtIsNull(String orgId, String clientId);
     
-    List<Transaction> findByOrgIdAndInvoiceId(UUID orgId, String invoiceId);
+    List<Transaction> findByOrgIdAndInvoiceIdAndDeletedAtIsNull(String orgId, String invoiceId);
 
-    List<Transaction> findByOrgIdAndType(UUID orgId, TransactionType type);
+    List<Transaction> findByOrgIdAndTypeAndDeletedAtIsNull(String orgId, TransactionType type);
 
-    List<Transaction> findByOrgIdAndTransactionDateBetween(UUID orgId, LocalDate startDate, LocalDate endDate);
-
-    void deleteByIdAndOrgId(UUID id, UUID orgId);
+    List<Transaction> findByOrgIdAndTransactionDateBetweenAndDeletedAtIsNull(String orgId, LocalDate startDate, LocalDate endDate);
 
     @org.springframework.data.mongodb.repository.Aggregation(pipeline = {
-        "{ $match: { 'orgId': ?0, 'type': ?1 } }",
+        "{ $match: { 'orgId': ?0, 'type': ?1, 'deletedAt': null } }",
         "{ $group: { _id: null, total: { $sum: '$amount' } } }"
     })
-    TotalResult getTotalByOrgIdAndType(UUID orgId, TransactionType type);
+    TotalResult getTotalByOrgIdAndType(String orgId, TransactionType type);
 
     record TotalResult(Double total) {}
 }

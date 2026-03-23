@@ -9,41 +9,77 @@ import org.springframework.data.mongodb.core.mapping.MongoId;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+import org.springframework.data.annotation.CreatedBy;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.LastModifiedBy;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.Document;
+import jakarta.annotation.PostConstruct;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
+
 @Document(collection = "clients")
 @Data
 public class Client {
 
-    /**
-     * Use String as the @Id type to avoid "Cannot autogenerate id of type UUID"
-     * from Spring Data MongoDB. We generate a UUID ourselves and store it as a
-     * string — this gives us stable UUID string IDs that map cleanly to Java UUIDs
-     * via the DTO layer.
-     */
     @Id
-    private String id = UUID.randomUUID().toString();
+    private String id;
 
-    private UUID orgId;
+    @Indexed
+    private String orgId;      // 🔗 Tenant isolation (String ID)
     private String name;
-    private String taxId;       // Client's GST/PAN
+    private String gstin;      // ✨ WAS taxId, NOW gstin as per schema
     private String email;
     private String phoneNumber;
-    private String address;
-    private String city;
-    private String state;
-    private String country;
-    private String postalCode;
-    private String paymentTerms; // e.g. "Net 30"
+    
+    // ✨ Schema-v2: Expanded address structure
+    private Address billingAddress;
+    private Address shippingAddress;
+    
+    private Integer paymentTerms; // WAS String, NOW Integer (Days) as per schema
     private String currency = "INR";
     private String company;
     private String notes;
     private Status status = Status.ACTIVE;
 
-    private LocalDateTime createdAt = LocalDateTime.now();
-    private LocalDateTime updatedAt = LocalDateTime.now();
-    private UUID createdBy;
-    private UUID updatedBy;
+    // ✨ Audit Fields (Auto-populated by @EnableMongoAuditing)
+    @CreatedDate
+    private LocalDateTime createdAt;
+    
+    @LastModifiedDate
+    private LocalDateTime updatedAt;
+    
+    @CreatedBy
+    private String createdBy;  // Clerk userId (String)
+    
+    @LastModifiedBy
+    private String updatedBy;
+    
+    private LocalDateTime deletedAt; // ✨ Soft delete support
+    
+    @Indexed(unique = true, partialFilter = "{'idempotencyKey': {$exists: true}}")
+    private String idempotencyKey; // ✨ From AI Gateway
+
+    @PostConstruct
+    public void generateId() {
+        if (this.id == null) {
+            this.id = UUID.randomUUID().toString();
+        }
+    }
 
     public enum Status {
         ACTIVE, INACTIVE, SUSPENDED
+    }
+
+    @Data
+    public static class Address {
+        private String line1;
+        private String line2;
+        private String city;
+        private String state;
+        private String country;
+        private String pincode;
     }
 }

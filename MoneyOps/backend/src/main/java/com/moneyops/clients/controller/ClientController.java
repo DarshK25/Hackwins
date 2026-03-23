@@ -9,7 +9,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/clients")
@@ -20,10 +19,8 @@ public class ClientController {
 
     @GetMapping
     public ResponseEntity<List<ClientDto>> getAllClients(
-            @RequestHeader(value = "X-Org-Id", required = false) String orgIdStr) {
-        UUID orgId = parseUuid(orgIdStr);
-        if (orgId == null) orgId = OrgContext.getOrgId();
-        org.slf4j.LoggerFactory.getLogger(ClientController.class).info("Fetching all clients for orgId: {}", orgId);
+            @RequestHeader(value = "X-Org-Id", required = false) String orgId) {
+        if (orgId == null || orgId.isEmpty()) orgId = OrgContext.getOrgId();
         List<ClientDto> clients = clientService.getAllClients(orgId);
         return ResponseEntity.ok(clients);
     }
@@ -31,9 +28,8 @@ public class ClientController {
     @GetMapping("/{id}")
     public ResponseEntity<ClientDto> getClientById(
             @PathVariable String id, 
-            @RequestHeader(value = "X-Org-Id", required = false) String orgIdStr) {
-        UUID orgId = parseUuid(orgIdStr);
-        if (orgId == null) orgId = OrgContext.getOrgId();
+            @RequestHeader(value = "X-Org-Id", required = false) String orgId) {
+        if (orgId == null || orgId.isEmpty()) orgId = OrgContext.getOrgId();
         ClientDto client = clientService.getClientById(id, orgId);
         return ResponseEntity.ok(client);
     }
@@ -41,15 +37,11 @@ public class ClientController {
     @PostMapping
     public ResponseEntity<ClientDto> createClient(
             @RequestBody ClientDto dto, 
-            @RequestHeader(value = "X-Org-Id", required = false) String orgIdStr, 
-            @RequestHeader(value = "X-User-Id", required = false) String createdByStr) {
-        UUID orgId = parseUuid(orgIdStr);
-        UUID createdBy = parseUuid(createdByStr);
+            @RequestHeader(value = "X-Org-Id", required = false) String orgId, 
+            @RequestHeader(value = "X-User-Id", required = false) String createdBy) {
         
-        if (orgId == null) orgId = OrgContext.getOrgId();
-        if (createdBy == null) createdBy = OrgContext.getUserId();
-        
-        org.slf4j.LoggerFactory.getLogger(ClientController.class).info("Creating client '{}' for orgId: {} by user: {}", dto.getName(), orgId, createdBy);
+        if (orgId == null || orgId.isEmpty()) orgId = OrgContext.getOrgId();
+        if (createdBy == null || createdBy.isEmpty()) createdBy = OrgContext.getUserId();
         
         ClientDto created = clientService.createClient(dto, orgId, createdBy);
         return ResponseEntity.ok(created);
@@ -59,10 +51,10 @@ public class ClientController {
     public ResponseEntity<ClientDto> updateClient(
             @PathVariable String id, 
             @RequestBody ClientDto dto, 
-            @RequestHeader(value = "X-Org-Id", required = false) String orgIdStr, 
-            @RequestHeader(value = "X-User-Id", required = false) String updatedByStr) {
-        UUID orgId = parseUuid(orgIdStr);
-        UUID updatedBy = parseUuid(updatedByStr);
+            @RequestHeader(value = "X-Org-Id", required = false) String orgId, 
+            @RequestHeader(value = "X-User-Id", required = false) String updatedBy) {
+        if (orgId == null || orgId.isEmpty()) orgId = OrgContext.getOrgId();
+        if (updatedBy == null || updatedBy.isEmpty()) updatedBy = OrgContext.getUserId();
         ClientDto updated = clientService.updateClient(id, dto, orgId, updatedBy);
         return ResponseEntity.ok(updated);
     }
@@ -70,8 +62,8 @@ public class ClientController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteClient(
             @PathVariable String id, 
-            @RequestHeader(value = "X-Org-Id", required = false) String orgIdStr) {
-        UUID orgId = parseUuid(orgIdStr);
+            @RequestHeader(value = "X-Org-Id", required = false) String orgId) {
+        if (orgId == null || orgId.isEmpty()) orgId = OrgContext.getOrgId();
         clientService.deleteClient(id, orgId);
         return ResponseEntity.noContent().build();
     }
@@ -79,21 +71,9 @@ public class ClientController {
     @GetMapping("/search")
     public ResponseEntity<List<ClientDto>> searchClients(
             @RequestParam String q, 
-            @RequestHeader(value = "X-Org-Id", required = false) String orgIdStr) {
-        UUID orgId = parseUuid(orgIdStr);
-        if (orgId == null) orgId = OrgContext.getOrgId();
+            @RequestHeader(value = "X-Org-Id", required = false) String orgId) {
+        if (orgId == null || orgId.isEmpty()) orgId = OrgContext.getOrgId();
         List<ClientDto> clients = clientService.searchClients(orgId, q);
         return ResponseEntity.ok(clients);
-    }
-
-    private UUID parseUuid(String uuidStr) {
-        if (uuidStr == null || uuidStr.isEmpty() || "unknown".equalsIgnoreCase(uuidStr) || uuidStr.startsWith("placeholder")) {
-            return null;
-        }
-        try {
-            return UUID.fromString(uuidStr);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
     }
 }

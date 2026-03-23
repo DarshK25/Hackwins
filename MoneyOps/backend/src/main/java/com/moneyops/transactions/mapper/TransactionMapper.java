@@ -12,6 +12,7 @@ public class TransactionMapper {
     public TransactionDto toDto(Transaction transaction) {
         TransactionDto dto = new TransactionDto();
         dto.setId(transaction.getId());
+        dto.setOrgId(transaction.getOrgId());
         dto.setClientId(transaction.getClientId());
         dto.setInvoiceId(transaction.getInvoiceId());
         dto.setType(transaction.getType().name());
@@ -24,15 +25,22 @@ public class TransactionMapper {
         dto.setReferenceNumber(transaction.getReferenceNumber());
         dto.setAiCategory(transaction.getAiCategory());
         dto.setAiConfidence(transaction.getAiConfidence());
+        dto.setIdempotencyKey(transaction.getIdempotencyKey());
+        dto.setVoiceContext(transaction.getVoiceContext());
         return dto;
     }
 
     public Transaction toEntity(TransactionDto dto) {
         Transaction transaction = new Transaction();
-        transaction.setId(dto.getId());
+        if (dto.getId() != null) {
+            transaction.setId(dto.getId());
+        }
+        transaction.setOrgId(dto.getOrgId());
         transaction.setClientId(dto.getClientId());
         transaction.setInvoiceId(dto.getInvoiceId());
-        transaction.setType(TransactionType.valueOf(dto.getType()));
+        if (dto.getType() != null) {
+            transaction.setType(TransactionType.valueOf(dto.getType()));
+        }
         transaction.setAmount(dto.getAmount());
         transaction.setCurrency(dto.getCurrency());
         transaction.setTransactionDate(dto.getTransactionDate());
@@ -42,6 +50,8 @@ public class TransactionMapper {
         transaction.setReferenceNumber(dto.getReferenceNumber());
         transaction.setAiCategory(dto.getAiCategory());
         transaction.setAiConfidence(dto.getAiConfidence());
+        transaction.setIdempotencyKey(dto.getIdempotencyKey());
+        transaction.setVoiceContext(dto.getVoiceContext());
         return transaction;
     }
 }

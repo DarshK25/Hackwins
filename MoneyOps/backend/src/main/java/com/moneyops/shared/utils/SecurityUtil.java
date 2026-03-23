@@ -1,19 +1,16 @@
-// src/main/java/com/moneyops/shared/utils/SecurityUtil.java
 package com.moneyops.shared.utils;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import java.util.UUID;
-
 public class SecurityUtil {
 
-    public static UUID getCurrentUserId() {
+    public static String getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.getPrincipal() instanceof String) {
-            return UUID.fromString((String) auth.getPrincipal());
+            return (String) auth.getPrincipal();
         }
-        return null;
+        return (auth != null) ? auth.getName() : null;
     }
 
     public static String getCurrentUsername() {

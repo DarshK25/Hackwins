@@ -92,10 +92,10 @@ public class FinanceIntelligenceService {
         private int totalEntries = 0;
     }
 
-    public MetricsDTO getMetrics(Long businessId) {
+    public MetricsDTO getMetrics(String businessId) {
         MetricsDTO dto = new MetricsDTO();
         try {
-            UUID orgId = OrgContext.getOrgId();
+            String orgId = OrgContext.getOrgId();
             if (orgId == null) return dto;
 
             List<TransactionDto> txns = transactionService.getAllTransactions(orgId);
@@ -146,10 +146,10 @@ public class FinanceIntelligenceService {
         }
     }
 
-    public BudgetDTO getBudget(Long businessId) {
+    public BudgetDTO getBudget(String businessId) {
         BudgetDTO dto = new BudgetDTO();
         try {
-            UUID orgId = OrgContext.getOrgId();
+            String orgId = OrgContext.getOrgId();
             if (orgId == null) return dto;
 
             List<TransactionDto> txns = transactionService.getAllTransactions(orgId);
@@ -194,10 +194,10 @@ public class FinanceIntelligenceService {
         }
     }
 
-    public InsightsDTO getInsights(Long businessId) {
+    public InsightsDTO getInsights(String businessId) {
         InsightsDTO dto = new InsightsDTO();
         try {
-            UUID orgId = OrgContext.getOrgId();
+            String orgId = OrgContext.getOrgId();
             if (orgId == null) return dto;
 
             MetricsDTO metrics = getMetrics(businessId);
@@ -263,10 +263,10 @@ public class FinanceIntelligenceService {
         }
     }
 
-    public LedgerDTO getLedger(Long businessId, int limit) {
+    public LedgerDTO getLedger(String businessId, int limit) {
         LedgerDTO dto = new LedgerDTO();
         try {
-            UUID orgId = OrgContext.getOrgId();
+            String orgId = OrgContext.getOrgId();
             if (orgId == null) return dto;
 
             List<TransactionDto> txns = transactionService.getAllTransactions(orgId);

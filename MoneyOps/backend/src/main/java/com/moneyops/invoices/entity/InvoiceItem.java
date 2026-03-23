@@ -3,7 +3,6 @@ package com.moneyops.invoices.entity;
 import lombok.Data;
 
 import java.math.BigDecimal;
-import java.util.UUID;
 
 /**
  * Embedded inside Invoice — NOT a separate MongoDB collection.
@@ -12,7 +11,7 @@ import java.util.UUID;
 @Data
 public class InvoiceItem {
 
-    private UUID id = UUID.randomUUID();
+    private String id = java.util.UUID.randomUUID().toString();
     private ItemType type;
     private String description;
     private Integer quantity;

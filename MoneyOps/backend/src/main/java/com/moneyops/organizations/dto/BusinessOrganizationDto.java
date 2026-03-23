@@ -3,11 +3,10 @@ package com.moneyops.organizations.dto;
 
 import lombok.Data;
 import java.time.LocalDate;
-import java.util.UUID;
 
 @Data
 public class BusinessOrganizationDto {
-    private UUID id;
+    private String id;
     private String legalName;
     private String tradingName;
     private String businessType;

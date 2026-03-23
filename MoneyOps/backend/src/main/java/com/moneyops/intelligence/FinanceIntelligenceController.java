@@ -12,23 +12,23 @@ public class FinanceIntelligenceController {
     private FinanceIntelligenceService financeIntelligenceService;
 
     @GetMapping("/metrics")
-    public ResponseEntity<FinanceIntelligenceService.MetricsDTO> getMetrics(@RequestParam Long businessId) {
+    public ResponseEntity<FinanceIntelligenceService.MetricsDTO> getMetrics(@RequestParam String businessId) {
         return ResponseEntity.ok(financeIntelligenceService.getMetrics(businessId));
     }
 
     @GetMapping("/budget")
-    public ResponseEntity<FinanceIntelligenceService.BudgetDTO> getBudget(@RequestParam Long businessId) {
+    public ResponseEntity<FinanceIntelligenceService.BudgetDTO> getBudget(@RequestParam String businessId) {
         return ResponseEntity.ok(financeIntelligenceService.getBudget(businessId));
     }
 
     @GetMapping("/insights")
-    public ResponseEntity<FinanceIntelligenceService.InsightsDTO> getInsights(@RequestParam Long businessId) {
+    public ResponseEntity<FinanceIntelligenceService.InsightsDTO> getInsights(@RequestParam String businessId) {
         return ResponseEntity.ok(financeIntelligenceService.getInsights(businessId));
     }
 
     @GetMapping("/ledger")
     public ResponseEntity<FinanceIntelligenceService.LedgerDTO> getLedger(
-            @RequestParam Long businessId,
+            @RequestParam String businessId,
             @RequestParam(defaultValue = "20") int limit) {
         return ResponseEntity.ok(financeIntelligenceService.getLedger(businessId, limit));
     }

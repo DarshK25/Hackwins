@@ -18,7 +18,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.UUID;
 
 @Component
 @Slf4j
@@ -61,54 +60,40 @@ public class JwtFilter extends OncePerRequestFilter {
                 // Production-level Security: Derive orgId from User record, not from potentially faked headers.
                 // This ensures multi-tenant isolation is strictly maintained.
                 
-                // Final variables for lambda capture
-                final String finalUserId = userId;
-                UUID tempId = null;
-                try {
-                    tempId = UUID.fromString(userId);
-                } catch (IllegalArgumentException e) {
-                    // Not a UUID
-                }
-                final UUID internalId = tempId;
+                final String currentUserId = userId;
 
-                if (internalId != null) {
-                    userRepository.findById(internalId).ifPresentOrElse(user -> {
-                        OrgContext.setUserId(user.getId());
-                        if (user.getOrgId() != null) {
-                            OrgContext.setOrgId(user.getOrgId());
-                        } else {
-                            // Fallback: Check header if user record hasn't been linked to an org yet
-                            String orgIdHeader = request.getHeader("X-Org-Id");
-                            if (orgIdHeader != null && !orgIdHeader.startsWith("placeholder")) {
-                                try {
-                                    OrgContext.setOrgId(UUID.fromString(orgIdHeader));
-                                    log.debug("Assigned orgId {} from header to user {}", orgIdHeader, user.getId());
-                                } catch (Exception e) {}
-                            }
-                        }
-                    }, () -> {
-                        OrgContext.setUserId(internalId);
-                    });
-                } else {
-                    // Fallback: look up by clerkId since it wasn't a UUID
-                    userRepository.findByClerkId(finalUserId).ifPresentOrElse(user -> {
-                        OrgContext.setUserId(user.getId());
-                        if (user.getOrgId() != null) {
-                            OrgContext.setOrgId(user.getOrgId());
-                        } else {
-                            // Fallback: Check header
-                            String orgIdHeader = request.getHeader("X-Org-Id");
-                            if (orgIdHeader != null && !orgIdHeader.startsWith("placeholder")) {
-                                try {
-                                    OrgContext.setOrgId(UUID.fromString(orgIdHeader));
-                                    log.debug("Assigned orgId {} from header to user {}", orgIdHeader, user.getId());
-                                } catch (Exception e) {}
-                            }
-                        }
-                    }, () -> {
-                        log.warn("Authenticated token sub '{}' is not a UUID and no matching user record found", finalUserId);
-                    });
+                // Lookup user by ID first (likely the case for JWT subject)
+                var userOpt = userRepository.findById(currentUserId);
+                
+                // Fallback: look up by clerkId
+                if (userOpt.isEmpty()) {
+                    userOpt = userRepository.findByClerkIdAndDeletedAtIsNull(currentUserId);
                 }
+
+                userOpt.ifPresentOrElse(user -> {
+                    if (user.getDeletedAt() != null) {
+                        log.warn("Authenticated user {} is soft-deleted", user.getId());
+                        return;
+                    }
+                    OrgContext.setUserId(user.getId());
+                    if (user.getOrgId() != null) {
+                        OrgContext.setOrgId(user.getOrgId());
+                    } else {
+                        // Fallback: Check header if user record hasn't been linked to an org yet
+                        String orgIdHeader = request.getHeader("X-Org-Id");
+                        if (orgIdHeader != null && !orgIdHeader.startsWith("placeholder")) {
+                            OrgContext.setOrgId(orgIdHeader);
+                            log.debug("Assigned orgId {} from header to user {}", orgIdHeader, user.getId());
+                        }
+                    }
+                }, () -> {
+                    // If no user record, at least set the userId from token
+                    OrgContext.setUserId(currentUserId);
+                    String orgIdHeader = request.getHeader("X-Org-Id");
+                    if (orgIdHeader != null && !orgIdHeader.startsWith("placeholder")) {
+                        OrgContext.setOrgId(orgIdHeader);
+                    }
+                });
 
                 log.debug("Final context - User: {}, Org: {}", OrgContext.getUserId(), OrgContext.getOrgId());
                 filterChain.doFilter(request, response);
@@ -123,19 +108,15 @@ public class JwtFilter extends OncePerRequestFilter {
             if (userIdHeader != null) {
                 try {
                     final String idStr = userIdHeader;
-                    Optional<com.moneyops.users.entity.User> userOpt;
+                    var userOpt = userRepository.findByClerkIdAndDeletedAtIsNull(idStr);
                     
-                    if (idStr.startsWith("user_")) {
-                        userOpt = userRepository.findByClerkId(idStr);
-                    } else {
-                        try {
-                            userOpt = userRepository.findById(UUID.fromString(idStr));
-                        } catch (Exception e) {
-                            userOpt = Optional.empty();
-                        }
+                    if (userOpt.isEmpty()) {
+                        userOpt = userRepository.findById(idStr);
                     }
 
                     userOpt.ifPresentOrElse(user -> {
+                        if (user.getDeletedAt() != null) return;
+
                         UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                                 user.getEmail(), null, java.util.Collections.emptyList());
                         SecurityContextHolder.getContext().setAuthentication(auth);
@@ -144,11 +125,12 @@ public class JwtFilter extends OncePerRequestFilter {
                         if (user.getOrgId() != null) {
                             OrgContext.setOrgId(user.getOrgId());
                         } else if (orgIdHeader != null && !orgIdHeader.startsWith("placeholder")) {
-                            try {
-                                OrgContext.setOrgId(UUID.fromString(orgIdHeader));
-                            } catch (Exception e) {}
+                            OrgContext.setOrgId(orgIdHeader);
                         }
                     }, () -> {
+                        // Minimal context for new users
+                        OrgContext.setUserId(idStr);
+                        if (orgIdHeader != null) OrgContext.setOrgId(orgIdHeader);
                     });
                     filterChain.doFilter(request, response);
                 } finally {

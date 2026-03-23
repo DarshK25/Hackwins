@@ -10,17 +10,37 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+import org.springframework.data.annotation.CreatedBy;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.LastModifiedBy;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.Document;
+import jakarta.annotation.PostConstruct;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
 @Document(collection = "transactions")
-@CompoundIndex(name = "org_index", def = "{'orgId': 1}")
+@CompoundIndex(name = "org_type_idx", def = "{'orgId': 1, 'type': 1, 'deletedAt': 1}")
 @Data
 public class Transaction {
 
     @Id
-    private UUID id = UUID.randomUUID();
+    private String id;
 
-    private UUID orgId;
-    private UUID clientId;      // null if expense unrelated to a client
-    private String invoiceId;   // null if not linked to an invoice
+    @Indexed
+    private String orgId;      // 🔗 Tenant isolation
+    
+    @Indexed
+    private String clientId;   // 🔗 WAS UUID, NOW String
+    
+    @Indexed
+    private String invoiceId;  // 🔗 Ref to invoices (String)
+    
     private TransactionType type;
     private BigDecimal amount;
     private String currency = "INR";
@@ -34,7 +54,37 @@ public class Transaction {
     private String aiCategory;
     private Float aiConfidence;
 
-    private LocalDateTime createdAt = LocalDateTime.now();
-    private LocalDateTime updatedAt = LocalDateTime.now();
-    private UUID createdBy;
+    // ✨ Voice Context Metadata
+    private VoiceContext voiceContext;
+
+    @CreatedDate
+    private LocalDateTime createdAt;
+    
+    @LastModifiedDate
+    private LocalDateTime updatedAt;
+    
+    @CreatedBy
+    private String createdBy;
+    
+    @LastModifiedBy
+    private String updatedBy;
+    
+    private LocalDateTime deletedAt;
+
+    @Indexed(unique = true, partialFilter = "{'idempotencyKey': {$exists: true}}")
+    private String idempotencyKey;
+
+    @PostConstruct
+    public void generateId() {
+        if (this.id == null) {
+            this.id = UUID.randomUUID().toString();
+        }
+    }
+
+    @Data
+    public static class VoiceContext {
+        private String sessionId;
+        private boolean recordedViaVoice;
+        private String transcript;
+    }
 }
