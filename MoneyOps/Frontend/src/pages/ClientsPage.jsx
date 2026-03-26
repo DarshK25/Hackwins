@@ -39,15 +39,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ClientDetailDialog from "@/components/ClientDetailDialog";
 import { AnimatePresence } from "framer-motion";
+import { getRememberedTeamSecurityCode, rememberTeamSecurityCode } from "@/lib/teamSecurityCode";
 
 const INITIAL_FORM = {
     name: "",
     email: "",
     phoneNumber: "",
     company: "",
-    taxId: "",
-    address: "",
     notes: "",
+    teamActionCode: "",
+    source: "MANUAL",
 };
 
 export default function ClientsPage() {
@@ -67,6 +68,14 @@ export default function ClientsPage() {
             fetchClients();
         }
     }, [internalUserId, internalOrgId]);
+
+    useEffect(() => {
+        if (!internalOrgId) return;
+        setFormData((prev) => ({
+            ...prev,
+            teamActionCode: getRememberedTeamSecurityCode(internalOrgId),
+        }));
+    }, [internalOrgId]);
 
     // LISTEN FOR VOICE ACTIONS (Bug 3 Refresh)
     useEffect(() => {
@@ -105,6 +114,10 @@ export default function ClientsPage() {
             toast.error("Client name is required");
             return;
         }
+        if (!formData.teamActionCode?.trim()) {
+            toast.error("Team security code is required");
+            return;
+        }
         setSaving(true);
         try {
             const token = await getToken();
@@ -121,8 +134,12 @@ export default function ClientsPage() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.message || "Failed to create client");
             toast.success("Client created successfully");
+            rememberTeamSecurityCode(internalOrgId, formData.teamActionCode);
             setDialogOpen(false);
-            setFormData(INITIAL_FORM);
+            setFormData({
+                ...INITIAL_FORM,
+                teamActionCode: getRememberedTeamSecurityCode(internalOrgId),
+            });
             fetchClients();
         } catch (error) {
             toast.error(error?.message || "Failed to create client");
@@ -239,13 +256,34 @@ export default function ClientsPage() {
                                     />
                                 </div>
                                 <div className="grid gap-2">
-                                    <Label htmlFor="address" className="text-white">Address</Label>
+                                    <Label htmlFor="company" className="text-white">Company</Label>
+                                    <input
+                                        id="company"
+                                        className="mo-input px-3 py-2"
+                                        value={formData.company}
+                                        onChange={(e) => setFormData({ ...formData, company: e.target.value })}
+                                        placeholder="Company Name"
+                                    />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="notes" className="text-white">Notes</Label>
                                     <Textarea
-                                        id="address"
+                                        id="notes"
                                         className="mo-input"
-                                        value={formData.address}
-                                        onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                                        placeholder="Office Address"
+                                        value={formData.notes}
+                                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                                        placeholder="Internal Notes"
+                                    />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="teamActionCode" className="text-white">Team Security Code</Label>
+                                    <input
+                                        id="teamActionCode"
+                                        type="password"
+                                        className="mo-input px-3 py-2"
+                                        value={formData.teamActionCode}
+                                        onChange={(e) => setFormData({ ...formData, teamActionCode: e.target.value })}
+                                        placeholder="Enter team security code"
                                     />
                                 </div>
                             </div>
@@ -303,11 +341,6 @@ export default function ClientsPage() {
                                     {client.phoneNumber && (
                                         <div className="flex items-center gap-2 text-xs text-[#A0A0A0]">
                                             <Phone className="h-3 w-3" /> {client.phoneNumber}
-                                        </div>
-                                    )}
-                                    {(client.taxId || client.gstin) && (
-                                        <div className="flex items-center gap-2 text-xs text-[#A0A0A0]">
-                                            <Hash className="h-3 w-3" /> {client.taxId || client.gstin}
                                         </div>
                                     )}
                                 </div>

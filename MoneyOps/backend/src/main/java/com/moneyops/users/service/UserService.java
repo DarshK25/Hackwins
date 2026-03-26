@@ -43,9 +43,6 @@ public class UserService {
     @Autowired
     private AuditLogService auditLogService;
 
-    @Autowired
-    private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
-
     public List<UserDto> getAllUsers(String orgId) {
         return userRepository.findAllByOrgIdAndDeletedAtIsNull(orgId)
                 .stream()
@@ -149,9 +146,9 @@ public class UserService {
         User user = new User();
         user.setName(request.getName());
         user.setEmail(invite.getEmail());
+        user.setPhone(request.getPhone());
         user.setRole(invite.getRole());
         user.setStatus(User.Status.ACTIVE);
-        user.setPasswordHash(hashPassword(request.getPassword()));
         user.setOrgId(invite.getOrgId());
         user.setCreatedBy(invite.getCreatedBy());
 
@@ -165,9 +162,5 @@ public class UserService {
 
     public List<Invite> getPendingInvites(String orgId) {
         return inviteRepository.findAllByOrgIdAndStatusAndDeletedAtIsNull(orgId, Invite.InviteStatus.PENDING);
-    }
-
-    private String hashPassword(String password) {
-        return passwordEncoder.encode(password);
     }
 }

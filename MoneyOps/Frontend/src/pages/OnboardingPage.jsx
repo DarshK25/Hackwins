@@ -8,10 +8,11 @@ import { BusinessInfoStep } from "@/components/onboarding/BusinessInfoStep";
 import { RegulatoryInfoStep } from "@/components/onboarding/RegulatoryInfoStep";
 import { BusinessContextStep } from "@/components/onboarding/BusinessContextStep";
 import { InviteCodeStep } from "@/components/onboarding/InviteCodeStep";
+import { TeamSecurityCodeStep } from "@/components/onboarding/TeamSecurityCodeStep";
 
 const STEP_SEQUENCES = {
-    "new-business": ["business-info", "regulatory", "context"],
-    "join-business": ["invite"],
+    "new-business": ["business-info", "regulatory", "context", "team-security"],
+    "join-business": ["invite", "team-security"],
 };
 
 export default function OnboardingPage() {
@@ -183,6 +184,15 @@ export default function OnboardingPage() {
                 )}
                 {currentStep === "invite" && (
                     <InviteCodeStep onNext={handleNext} loading={loading} />
+                )}
+                {currentStep === "team-security" && (
+                    <TeamSecurityCodeStep 
+                        mode={mode}
+                        onNext={handleNext} 
+                        onBack={handleBack} 
+                        loading={loading}
+                        businessName={formData.legalName || formData.businessName}
+                    />
                 )}
             </div>
         </div>

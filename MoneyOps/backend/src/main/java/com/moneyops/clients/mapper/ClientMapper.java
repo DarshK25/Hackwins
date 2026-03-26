@@ -37,6 +37,9 @@ public class ClientMapper {
         dto.setCreatedAt(client.getCreatedAt());
         dto.setUpdatedAt(client.getUpdatedAt());
         dto.setCreatedBy(client.getCreatedBy());
+        dto.setCreatedByEmail(client.getCreatedByEmail());
+        dto.setCreatedByRole(client.getCreatedByRole());
+        dto.setSource(client.getSource());
         dto.setUpdatedBy(client.getUpdatedBy());
         return dto;
     }

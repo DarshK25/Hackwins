@@ -3,10 +3,12 @@ package com.moneyops.organizations.dto;
 
 import lombok.Data;
 import java.time.LocalDate;
+import java.util.List;
 
 @Data
 public class BusinessOrganizationDto {
     private String id;
+    private Boolean teamSecurityCodeConfigured;
     private String legalName;
     private String tradingName;
     private String businessType;
@@ -24,6 +26,8 @@ public class BusinessOrganizationDto {
     private String primaryActivity;
     private String targetMarket;
     private String accountingMethod;
+    private List<String> keyProducts;
+    private List<String> currentChallenges;
 
     // Regulatory fields
     private String panNumber;

@@ -37,12 +37,16 @@ public class ClientController {
     @PostMapping
     public ResponseEntity<ClientDto> createClient(
             @RequestBody ClientDto dto, 
-            @RequestHeader(value = "X-Org-Id", required = false) String orgId, 
-            @RequestHeader(value = "X-User-Id", required = false) String createdBy) {
-        
-        if (orgId == null || orgId.isEmpty()) orgId = OrgContext.getOrgId();
-        if (createdBy == null || createdBy.isEmpty()) createdBy = OrgContext.getUserId();
-        
+            @RequestHeader(value = "X-Org-Id", required = false) String orgIdHeader,
+            @RequestHeader(value = "X-User-Id", required = false) String createdByHeader) {
+
+        String orgId = OrgContext.getOrgId();
+        String createdBy = OrgContext.getUserId();
+
+        // Fallback for non-standard dev requests (but still prefer OrgContext).
+        if (orgId == null || orgId.isEmpty()) orgId = orgIdHeader;
+        if (createdBy == null || createdBy.isEmpty()) createdBy = createdByHeader;
+
         ClientDto created = clientService.createClient(dto, orgId, createdBy);
         return ResponseEntity.ok(created);
     }

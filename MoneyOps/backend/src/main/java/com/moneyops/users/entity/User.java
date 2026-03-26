@@ -37,7 +37,6 @@ public class User {
     private String phone;
     private Role role = Role.STAFF;
     private Status status = Status.ACTIVE;
-    private String passwordHash;
 
     // Clerk user ID — stored so we can look up a user by their Clerk token
     @Indexed(unique = true)

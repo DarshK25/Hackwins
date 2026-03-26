@@ -4,6 +4,9 @@ import com.moneyops.invoices.dto.InvoiceDto;
 import com.moneyops.invoices.service.InvoiceService;
 import com.moneyops.shared.utils.OrgContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -86,6 +89,20 @@ public class InvoiceController {
         String orgId = OrgContext.getOrgId();
         List<InvoiceDto> overdue = invoiceService.getOverdueInvoices(orgId);
         return ResponseEntity.ok(overdue);
+    }
+
+    @GetMapping("/{id}/download")
+    public ResponseEntity<ByteArrayResource> downloadInvoice(@PathVariable String id) {
+        String orgId = OrgContext.getOrgId();
+        InvoiceDto invoice = invoiceService.getInvoiceById(id, orgId);
+        byte[] pdf = invoiceService.generateInvoicePdf(id, orgId);
+        ByteArrayResource resource = new ByteArrayResource(pdf);
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"invoice-" + invoice.getInvoiceNumber() + ".pdf\"")
+                .contentLength(pdf.length)
+                .body(resource);
     }
 
     @GetMapping("/{id}/logs")

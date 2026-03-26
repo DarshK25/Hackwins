@@ -4,6 +4,7 @@ import { Users, Plus, Mail, UserCheck, Crown, MoreHorizontal, Search, Copy, Chec
 import { toast } from "sonner";
 import { useUser } from "@clerk/clerk-react";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import { getRememberedTeamSecurityCode, rememberTeamSecurityCode } from "@/lib/teamSecurityCode";
 
 const ROLE_STYLES = {
     OWNER: "bg-[#4CBB1720] text-[#4CBB17] border-[#4CBB1740]",
@@ -28,6 +29,13 @@ export default function TeamsPage() {
     const [loading, setLoading] = useState(true);
     const [generatedCode, setGeneratedCode] = useState("");
     const [copied, setCopied] = useState(false);
+    const [teamActionCode, setTeamActionCode] = useState("");
+    const [teamCodeToSet, setTeamCodeToSet] = useState("");
+    const [oldTeamCode, setOldTeamCode] = useState("");
+    const [savingTeamCode, setSavingTeamCode] = useState(false);
+    const [currentUserRole, setCurrentUserRole] = useState(null);
+    const [teamCodeConfigured, setTeamCodeConfigured] = useState(false);
+    const isOwner = currentUserRole === "OWNER";
 
     const fetchMembers = async () => {
         try {
@@ -43,6 +51,12 @@ export default function TeamsPage() {
             const memData = await memRes.json();
             setMembers(memData);
 
+            // Find current user and set their role
+            const currentUser = memData.find(m => m.id === internalUserId);
+            if (currentUser) {
+                setCurrentUserRole(currentUser.role);
+            }
+
             // Fetch Org Name
             const orgRes = await fetch(`/api/org/${internalOrgId}`, {
                 headers: { "X-User-Id": internalUserId }
@@ -51,6 +65,7 @@ export default function TeamsPage() {
                 const result = await orgRes.json();
                 const orgData = result.data;
                 setOrgName(orgData.legalName || "Organization");
+                setTeamCodeConfigured(Boolean(orgData.teamSecurityCodeConfigured));
             }
         } catch (error) {
             console.error("Failed to fetch data:", error);
@@ -63,9 +78,21 @@ export default function TeamsPage() {
         if (internalOrgId) fetchMembers();
     }, [internalOrgId, internalUserId]);
 
+    useEffect(() => {
+        if (!internalOrgId) return;
+        const remembered = getRememberedTeamSecurityCode(internalOrgId);
+        if (remembered) {
+            setTeamActionCode(remembered);
+        }
+    }, [internalOrgId]);
+
     const handleInvite = async () => {
         if (!inviteEmail.trim() || !inviteEmail.includes("@")) {
             toast.error("Please enter a valid email address");
+            return;
+        }
+        if (!teamActionCode.trim()) {
+            toast.error("Team security code is required");
             return;
         }
 
@@ -79,7 +106,8 @@ export default function TeamsPage() {
                 },
                 body: JSON.stringify({
                     email: inviteEmail,
-                    role: "STAFF"
+                    role: "STAFF",
+                    teamActionCode
                 })
             });
 
@@ -88,9 +116,44 @@ export default function TeamsPage() {
             const data = await response.json();
             setGeneratedCode(data.token);
             toast.success(`Invitation code generated for ${inviteEmail}`);
+            rememberTeamSecurityCode(internalOrgId, teamActionCode);
             setInviteEmail("");
         } catch (error) {
             toast.error(error.message);
+        }
+    };
+
+    const handleSetTeamCode = async () => {
+        if (!internalOrgId) return;
+        if (!teamCodeToSet.trim()) {
+            toast.error("Team security code is required");
+            return;
+        }
+        setSavingTeamCode(true);
+        try {
+            const response = await fetch(`/api/org/${internalOrgId}/team-security-code`, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-User-Id": internalUserId
+                },
+                body: JSON.stringify({
+                    teamActionCode: teamCodeToSet,
+                    oldTeamActionCode: oldTeamCode
+                })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data?.message || "Failed to save team security code");
+            toast.success("Team security code updated");
+            setTeamActionCode(teamCodeToSet);
+            rememberTeamSecurityCode(internalOrgId, teamCodeToSet);
+            setTeamCodeConfigured(true);
+            setOldTeamCode("");
+            setTeamCodeToSet("");
+        } catch (error) {
+            toast.error(error?.message || "Failed to save team security code");
+        } finally {
+            setSavingTeamCode(false);
         }
     };
 
@@ -131,15 +194,17 @@ export default function TeamsPage() {
                     <h1 className="mo-h1">Team</h1>
                     <p className="mo-text-secondary mt-1">Manage your workspace team members</p>
                 </div>
-                <button
-                    onClick={() => {
-                        setShowInvite(true);
-                        setGeneratedCode("");
-                    }}
-                    className="mo-btn-primary flex items-center gap-2"
-                >
-                    <Plus className="h-4 w-4" /> Invite Member
-                </button>
+                {isOwner && (
+                    <button
+                        onClick={() => {
+                            setShowInvite(true);
+                            setGeneratedCode("");
+                        }}
+                        className="mo-btn-primary flex items-center gap-2"
+                    >
+                        <Plus className="h-4 w-4" /> Invite Member
+                    </button>
+                )}
             </div>
 
             {/* Stats */}
@@ -171,8 +236,62 @@ export default function TeamsPage() {
                 </div>
             </div>
 
+            {/* Team Security Code (Owner only) */}
+            {isOwner && (
+            <div className="mo-card border-[#4CBB1740]">
+                <h2 className="mo-h2 mb-2">Team Security Code</h2>
+                <p className="mo-text-secondary mb-4 text-sm">
+                    Owner sets a shared code used to create invoices and add clients. Invited members receive it via email.
+                </p>
+                <div className="mb-4 rounded-lg border border-[#2A2A2A] bg-[#111111] px-4 py-3 text-sm">
+                    <p className="text-white">
+                        Status:{" "}
+                        <span className={teamCodeConfigured ? "text-[#4CBB17]" : "text-[#FFB300]"}>
+                            {teamCodeConfigured ? "Configured" : "Not configured"}
+                        </span>
+                    </p>
+                    <p className="mt-1 text-[#A0A0A0]">
+                        The raw code is never returned from the database because only a secure hash is stored.
+                    </p>
+                </div>
+                <div className="grid gap-3">
+                    <div className="grid gap-1">
+                        <label className="text-sm text-[#A0A0A0]">{teamCodeConfigured ? "New Code" : "Set Code"}</label>
+                        <input
+                            type="password"
+                            value={teamCodeToSet}
+                            onChange={(e) => setTeamCodeToSet(e.target.value)}
+                            placeholder="Enter team security code"
+                            className="px-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17]"
+                            style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
+                        />
+                    </div>
+                    {teamCodeConfigured && (
+                        <div className="grid gap-1">
+                            <label className="text-sm text-[#A0A0A0]">Old Code (required to update)</label>
+                            <input
+                                type="password"
+                                value={oldTeamCode}
+                                onChange={(e) => setOldTeamCode(e.target.value)}
+                                placeholder="Enter old code"
+                                className="px-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17]"
+                                style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
+                            />
+                        </div>
+                    )}
+                    <button
+                        onClick={handleSetTeamCode}
+                        disabled={savingTeamCode}
+                        className="mo-btn-primary"
+                    >
+                        {savingTeamCode ? "Saving..." : teamCodeConfigured ? "Update Team Code" : "Set Team Code"}
+                    </button>
+                </div>
+            </div>
+            )}
+
             {/* Invite Box */}
-            {showInvite && (
+            {isOwner && showInvite && (
                 <div className="mo-card border-[#4CBB1740] animate-in fade-in slide-in-from-top-4 duration-300">
                     <h2 className="mo-h2 mb-4">Invite New Member</h2>
                     
@@ -184,6 +303,14 @@ export default function TeamsPage() {
                                 value={inviteEmail}
                                 onChange={(e) => setInviteEmail(e.target.value)}
                                 onKeyDown={(e) => e.key === "Enter" && handleInvite()}
+                                className="flex-1 px-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17]"
+                                style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
+                            />
+                            <input
+                                type="password"
+                                placeholder="Team security code"
+                                value={teamActionCode}
+                                onChange={(e) => setTeamActionCode(e.target.value)}
                                 className="flex-1 px-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17]"
                                 style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
                             />

@@ -55,4 +55,7 @@ public class OnboardingRequest {
 
     // ── join-business only ─────────────────────────────────────────────────────
     private String inviteCode;
+
+    // ── Team Security Code (both create and join) ──────────────────────────────
+    private String teamActionCode;  // The team security code set/entered during onboarding
 }

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useUser } from "@clerk/clerk-react";
 import { Button } from "@/components/ui/button";
-import { X, Phone, PhoneOff, Mic, Loader2 } from "lucide-react";
+import { X, Phone, PhoneOff } from "lucide-react";
 import { toast } from "sonner";
 import {
     LiveKitRoom,
@@ -14,27 +14,66 @@ import "@livekit/components-styles";
 import { AIVoiceInput } from "@/components/ui/ai-voice-input";
 import { motion, AnimatePresence } from "framer-motion";
 import { useVoiceEvents } from "@/hooks/useVoiceEvents";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import ClientInputDialog from "./ClientInputDialog";
 
 export function VoiceCallAgent({ agentType = "orchestrator" }) {
     const { user, isLoaded } = useUser();
+    const { userId: internalUserId, orgId: internalOrgId, loading: onboardingLoading } = useOnboardingStatus();
     const [isVisible, setIsVisible] = useState(true);
     const [token, setToken] = useState("");
     const [url, setUrl] = useState("");
     const [isConnect, setIsConnect] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [activeDialog, setActiveDialog] = useState(null);
+    const [activeClientPicker, setActiveClientPicker] = useState(null);
+
+    const handleClientPick = async (client) => {
+        if (!activeClientPicker?.session_id) return;
+        try {
+            const res = await fetch("/api/v1/voice/dialog-response", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    session_id: activeClientPicker.session_id,
+                    dialog_id: "invoice_preview_form",
+                    fields: { client_name: client.name, client_id: client.id },
+                }),
+            });
+            const data = await res.json();
+            if (data?.message) {
+                window.dispatchEvent(new CustomEvent("voice:manual_agent_response", {
+                    detail: {
+                        responseText: data.message,
+                        uiEvent: data.ui_event || null,
+                    },
+                }));
+            }
+            if (data?.ui_event) {
+                window.dispatchEvent(new CustomEvent("voice:open_client_picker", { detail: null }));
+                window.dispatchEvent(new CustomEvent("voice:manual_ui_event", { detail: data.ui_event }));
+            }
+            setActiveClientPicker(null);
+        } catch (error) {
+            console.error("Failed to select client", error);
+            toast.error("Failed to select client");
+        }
+    };
 
     const startCall = async () => {
         if (!user?.id) {
             toast.error("Please sign in to start a voice call.");
             return;
         }
+        if (onboardingLoading || !internalUserId || !internalOrgId) {
+            toast.error("Voice agent is waiting for your workspace context. Please try again in a moment.");
+            return;
+        }
         setIsProcessing(true);
         try {
-            const userId = user.id;
+            const userId = internalUserId;
             const sessionToken = await window.Clerk?.session?.getToken();
-            const orgId = user.organizationMemberships?.[0]?.organization?.id || userId;
+            const orgId = internalOrgId;
             const metadata = JSON.stringify({
                 user_id: userId,
                 org_id: orgId,
@@ -86,8 +125,13 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
 
     useEffect(() => {
         const handleOpenDialog = (e) => setActiveDialog(e.detail);
+        const handleOpenClientPicker = (e) => setActiveClientPicker(e.detail);
         window.addEventListener("voice:open_input_dialog", handleOpenDialog);
-        return () => window.removeEventListener("voice:open_input_dialog", handleOpenDialog);
+        window.addEventListener("voice:open_client_picker", handleOpenClientPicker);
+        return () => {
+            window.removeEventListener("voice:open_input_dialog", handleOpenDialog);
+            window.removeEventListener("voice:open_client_picker", handleOpenClientPicker);
+        };
     }, []);
 
     // Collapsed pill button when hidden
@@ -182,13 +226,41 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
                             <AIVoiceInput
                                 isActive={false}
                                 isConnecting={isProcessing}
-                                onToggle={isLoaded && user?.id ? startCall : undefined}
+                                onToggle={isLoaded && user?.id && !onboardingLoading ? startCall : undefined}
                             />
                             {(!isLoaded || !user?.id) && (
                                 <p className="text-xs text-center" style={{ color: "rgba(255,255,255,0.3)" }}>
                                     Sign in to start a voice session
                                 </p>
                             )}
+                        </div>
+                    )}
+
+                    {activeClientPicker && (
+                        <div
+                            className="mt-4 rounded-xl border border-white/10 p-3"
+                            style={{ backgroundColor: "rgba(255,255,255,0.03)" }}
+                        >
+                            <p className="text-sm font-semibold text-white">{activeClientPicker.title || "Select Client"}</p>
+                            <p className="text-xs mt-1 mb-3" style={{ color: "rgba(255,255,255,0.55)" }}>
+                                {activeClientPicker.message || "Choose a client or keep speaking."}
+                            </p>
+                            <div className="max-h-40 overflow-y-auto flex flex-col gap-2">
+                                {(activeClientPicker.clients || []).map((client) => (
+                                    <button
+                                        key={client.id}
+                                        className="w-full text-left rounded-lg px-3 py-2 text-sm transition-colors"
+                                        style={{
+                                            backgroundColor: "rgba(255,255,255,0.05)",
+                                            color: "#fff",
+                                            border: "1px solid rgba(255,255,255,0.08)",
+                                        }}
+                                        onClick={() => handleClientPick(client)}
+                                    >
+                                        {client.name}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     )}
                 </div>
@@ -201,6 +273,7 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
                         dialog={activeDialog}
                         onSubmit={(result) => {
                             toast.success(result.message);
+                            setActiveClientPicker(null);
                         }}
                         onClose={() => setActiveDialog(null)}
                     />
@@ -241,6 +314,34 @@ function AgentContent({ onDisconnect }) {
         room.on("transcriptionReceived", handler);
         return () => room.off("transcriptionReceived", handler);
     }, [room]);
+
+    useEffect(() => {
+        const speakManualResponse = (event) => {
+            const responseText = event?.detail?.responseText?.trim();
+            if (!responseText) return;
+
+            setTranscript((prev) => [
+                ...prev.slice(-20),
+                {
+                    id: `manual-${Date.now()}`,
+                    role: "agent",
+                    text: responseText,
+                },
+            ]);
+
+            if (typeof window !== "undefined" && "speechSynthesis" in window) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(responseText);
+                utterance.rate = 1;
+                utterance.pitch = 1;
+                utterance.volume = 1;
+                window.speechSynthesis.speak(utterance);
+            }
+        };
+
+        window.addEventListener("voice:manual_agent_response", speakManualResponse);
+        return () => window.removeEventListener("voice:manual_agent_response", speakManualResponse);
+    }, []);
 
     // Auto-scroll transcript to bottom
     useEffect(() => {

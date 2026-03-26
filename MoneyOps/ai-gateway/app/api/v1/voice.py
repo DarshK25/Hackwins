@@ -81,7 +81,8 @@ async def process_voice(request: VoiceProcessRequest, fastapi_request: Request):
             session_id=request.session_id,
             user_id=request.user_id,
             org_uuid=request.org_id, # Default to clerk org ID, process() will resolve
-            clerk_org_id=request.org_id
+            clerk_org_id=request.org_id,
+            raw_text=request.text,
         )
         
         result = await voice_processor.process(request.text, context)
@@ -116,6 +117,9 @@ async def dialog_response(request: Request):
     is_invoice = (dialog_id == "invoice_preview_form" or session.locked_intent == "INVOICE_CREATE")
     
     if is_invoice and session.invoice_draft:
+        from app.voice_processor import VoiceContext
+        from app.agents.finance_agent import finance_agent
+
         draft = session.invoice_draft
         # Update invoice fields
         for k, v in form_fields.items():
@@ -126,20 +130,39 @@ async def dialog_response(request: Request):
             elif k == "gst_percent":
                 try: draft.gst_percent = float(v)
                 except: pass
+            elif k == "gst_applicable":
+                draft.gst_applicable = str(v).lower() in ("true", "yes", "1")
             elif k == "due_date": draft.due_date = v
-            elif k == "description" or k == "service_description": draft.service_description = v
+            elif k == "description" or k == "item_description" or k == "service_description": draft.item_description = v
+            elif k == "item_type": draft.item_type = str(v).upper()
+            elif k == "quantity":
+                try: draft.quantity = int(v)
+                except: pass
             elif k == "client_name": draft.client_name = v
+            elif k == "client_id": draft.client_id = v
+            elif k == "teamActionCode" or k == "team_action_code":
+                draft.team_action_code = v
             
         session.invoice_draft = draft
         session_manager.save_session(session)
-        message = "Invoice draft updated. You can now tell me to create it."
+        voice_context = VoiceContext(
+            session_id=session.session_id,
+            user_id=session.user_id,
+            org_uuid=session.org_id,
+            business_id=session.business_id,
+            raw_text="",
+            extracted_entities=[],
+        )
+        follow_up = await finance_agent.handle_invoice_create(voice_context)
+        message = follow_up.message if follow_up and follow_up.message else "Invoice draft updated."
         title = "Invoice Draft Updated"
+        ui_event = follow_up.ui_event if follow_up and hasattr(follow_up, "ui_event") else None
     else:
         # Fallback to client
         if session.client_draft is None:
             session.client_draft = {}
         
-        for key in ["name", "client_name", "company_name", "phone", "gst_number", "email", "address", "taxId", "phoneNumber"]:
+        for key in ["name", "client_name", "company_name", "phone", "gst_number", "email", "address", "taxId", "phoneNumber", "teamActionCode"]:
             if key in form_fields and form_fields[key]:
                 if key in ("name", "client_name", "company_name"): session.client_draft["client_name"] = form_fields[key]
                 elif key in ("phoneNumber", "phone"): session.client_draft["phone"] = form_fields[key]
@@ -149,6 +172,7 @@ async def dialog_response(request: Request):
         session_manager.save_session(session)
         message = "Client draft updated. Tell me 'Save Client' to finalize."
         title = "Client Draft Updated"
+        ui_event = None
 
     session.dialog_pending = False
     session.dialog_id = None
@@ -157,7 +181,7 @@ async def dialog_response(request: Request):
     return {
         "success": True,
         "message": message,
-        "ui_event": {
+        "ui_event": ui_event or {
             "type": "toast",
             "variant": "success",
             "title": title,

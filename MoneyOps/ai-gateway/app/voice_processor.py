@@ -19,6 +19,7 @@ class VoiceContext:
     business_id: Optional[int] = 1
     clerk_org_id: Optional[str] = None
     extracted_entities: List[Dict[str, Any]] = None
+    raw_text: Optional[str] = None
 
 class VoiceProcessor:
     def __init__(self):
@@ -131,34 +132,6 @@ class VoiceProcessor:
                 session.locked_intent = None
                 # Fall through to normal path
             else:
-                draft = session.invoice_draft
-
-                # Handle CONFIRMATION
-                confirm_words = {"yes", "yeah", "yep", "sure", "ok", "okay", "correct", "proceed", "go ahead", "create it", "create"}
-                if any(w in text.lower().strip() for w in confirm_words):
-                    if draft.gst_percent is None:
-                        draft.gst_percent = 18.0
-                        session.invoice_draft = draft
-                        self.state_manager.save_session(session)
-                    elif draft.service_description and not draft.confirmed:
-                        draft.confirmed = True
-                        session.invoice_draft = draft
-                        self.state_manager.save_session(session)
-
-                # Handle service description
-                if (draft.client_id and draft.amount is not None 
-                        and draft.due_date and draft.gst_percent is not None
-                        and not draft.service_description
-                        and not any(w in text.lower().strip() for w in confirm_words)):
-                    description = text.strip()
-                    filler_patterns = [r"^this (one |invoice |bill )?is for\s*", r"^it['s| is] for\s*", r"^the service is\s*", r"^the description is\s*", r"^for\s+", r"^invoice for\s*", r"^the (description|service description) is\s*"]
-                    import re
-                    for pattern in filler_patterns:
-                        description = re.sub(pattern, "", description, flags=re.IGNORECASE).strip()
-                    draft.service_description = description.capitalize()
-                    session.invoice_draft = draft
-                    self.state_manager.save_session(session)
-
                 result = await self.finance_agent.handle_invoice_create(context)
                 
                 if result.success:
@@ -354,6 +327,26 @@ class VoiceProcessor:
         draft = session.client_draft
         name = draft.get("client_name") or draft.get("company_name")
         city = draft.get("city") or draft.get("address", "an unknown location")
+        team_code = draft.get("teamActionCode") or draft.get("team_action_code")
+
+        if not team_code:
+            # Avoid backend call; we must have the PIN before creating.
+            return {
+                "success": False,
+                "response_text": "To confirm client creation, please enter your team security code.",
+                "ui_event": {
+                    "type": "open_input_dialog",
+                    "dialog_id": "client_preview_form",
+                    "session_id": session.session_id,
+                    "title": "Team Code Required",
+                    "message": "Please enter your team security code to confirm adding this client.",
+                    "fields": [
+                        {"id": "teamActionCode", "label": "Team Security Code", "type": "password", "defaultValue": "", "required": True}
+                    ],
+                    "submit_btn_label": "Submit Code",
+                    "submit_endpoint": "/api/v1/voice/dialog-response"
+                }
+            }
         
         # Recalculate notes/score with any new data
         industry = self._infer_industry(str(draft))
@@ -372,6 +365,8 @@ class VoiceProcessor:
                     "address": draft.get("address") or city or None,
                     "taxId": draft.get("gst_number") or draft.get("taxId") or None,
                     "notes": smart_notes,
+                    "teamActionCode": draft.get("teamActionCode") or draft.get("team_action_code") or None,
+                    "source": "VOICE"
                 }
             )
             
@@ -402,7 +397,12 @@ class VoiceProcessor:
                     "ui_event": ui_event
                 }
             else:
-                return {"success": False, "response_text": f"Error saving client: {resp.error if resp else 'Unknown'}"}
+                err = resp.error if resp else "Unknown"
+                if "Invalid team security code" in str(err):
+                    return {"success": False, "response_text": "The security code is incorrect. Please try again."}
+                if "Team security code is required" in str(err):
+                    return {"success": False, "response_text": "The security code is required. Please try again."}
+                return {"success": False, "response_text": f"Error saving client: {err}"}
         except Exception as e:
             logger.error("client_finalize_error", error=str(e))
             return {"success": False, "response_text": f"Critical error: {str(e)}"}
@@ -455,6 +455,7 @@ class VoiceProcessor:
             {"id": "phone", "label": "Phone Number", "type": "tel", "defaultValue": entities.get("phone", ""), "required": False},
             {"id": "address", "label": "City / Address", "type": "text", "defaultValue": city if city != "an unknown location" else "", "required": False},
             {"id": "gst_number", "label": "GST / Tax ID", "type": "text", "defaultValue": entities.get("gst_number") or entities.get("tax_id") or "", "required": False},
+            {"id": "teamActionCode", "label": "Team Security Code", "type": "password", "defaultValue": "", "required": True},
         ]
 
         session = self.state_manager.get_session(context.session_id)

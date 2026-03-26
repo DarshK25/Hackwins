@@ -39,6 +39,9 @@ public class InvoiceMapper {
         dto.setTermsAndConditions(invoice.getTermsAndConditions());
         dto.setIdempotencyKey(invoice.getIdempotencyKey());
         dto.setVoiceContext(invoice.getVoiceContext());
+        dto.setCreatedByEmail(invoice.getCreatedByEmail());
+        dto.setCreatedByRole(invoice.getCreatedByRole());
+        dto.setSource(invoice.getSource());
         if (invoice.getItems() != null) {
             dto.setItems(invoice.getItems().stream()
                     .map(this::toItemDto)
@@ -75,6 +78,9 @@ public class InvoiceMapper {
         invoice.setTermsAndConditions(dto.getTermsAndConditions());
         invoice.setIdempotencyKey(dto.getIdempotencyKey());
         invoice.setVoiceContext(dto.getVoiceContext());
+        if (dto.getCreatedByEmail() != null) invoice.setCreatedByEmail(dto.getCreatedByEmail());
+        if (dto.getCreatedByRole() != null) invoice.setCreatedByRole(dto.getCreatedByRole());
+        if (dto.getSource() != null) invoice.setSource(dto.getSource());
         if (dto.getItems() != null) {
             invoice.setItems(dto.getItems().stream()
                     .map(itemDto -> toItemEntity(itemDto, invoice))

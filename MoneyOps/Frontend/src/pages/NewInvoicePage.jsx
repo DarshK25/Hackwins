@@ -16,9 +16,11 @@ import {
 import { Plus, Trash, ArrowLeft, Loader2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useUser } from "@clerk/clerk-react";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import { getRememberedTeamSecurityCode, rememberTeamSecurityCode } from "@/lib/teamSecurityCode";
 
 const BLANK_ITEM = { description: "", quantity: 1, rate: 0, gstPercent: 18, isService: false };
-const BLANK_CLIENT = { name: "", email: "", phone: "", company: "", gstin: "", address: "" };
+const BLANK_CLIENT = { name: "", email: "", phone: "", company: "", gstin: "", address: "", teamActionCode: "", source: "MANUAL" };
 
 const inputStyle = {
     backgroundColor: "#1A1A1A",
@@ -45,6 +47,7 @@ function DarkInput({ ...props }) {
 export default function NewInvoicePage() {
     const { getToken } = useAuth();
     const { user } = useUser();
+    const { userId: internalUserId, orgId: internalOrgId } = useOnboardingStatus();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [previewData, setPreviewData] = useState(null);
@@ -52,6 +55,7 @@ export default function NewInvoicePage() {
     const [loadingClients, setLoadingClients] = useState(true);
     const [clientDialogOpen, setClientDialogOpen] = useState(false);
     const [savingClient, setSavingClient] = useState(false);
+    const [teamActionCode, setTeamActionCode] = useState("");
     const [newClientData, setNewClientData] = useState(BLANK_CLIENT);
     const [formData, setFormData] = useState({
         clientId: "",
@@ -62,10 +66,19 @@ export default function NewInvoicePage() {
     });
 
     useEffect(() => {
-        if (user?.id) {
+        if (internalUserId && internalOrgId) {
             fetchClients();
         }
-    }, [user?.id]);
+    }, [internalUserId, internalOrgId]);
+
+    useEffect(() => {
+        if (!internalOrgId) return;
+        setTeamActionCode(getRememberedTeamSecurityCode(internalOrgId));
+        setNewClientData((prev) => ({
+            ...prev,
+            teamActionCode: getRememberedTeamSecurityCode(internalOrgId),
+        }));
+    }, [internalOrgId]);
 
     const fetchClients = async () => {
         try {
@@ -73,7 +86,8 @@ export default function NewInvoicePage() {
             const res = await fetch("/api/clients", {
                 headers: {
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 }
             });
             const data = await res.json();
@@ -84,6 +98,7 @@ export default function NewInvoicePage() {
 
     const handleCreateClient = async () => {
         if (!newClientData.name.trim()) { toast.error("Client name is required"); return; }
+        if (!newClientData.teamActionCode?.trim()) { toast.error("Team security code is required"); return; }
         setSavingClient(true);
         try {
             const token = await getToken();
@@ -92,15 +107,17 @@ export default function NewInvoicePage() {
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 },
                 body: JSON.stringify(newClientData),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.message || "Failed to create client");
             toast.success("Client created successfully");
+            rememberTeamSecurityCode(internalOrgId, newClientData.teamActionCode);
             setClientDialogOpen(false);
-            setNewClientData(BLANK_CLIENT);
+            setNewClientData({ ...BLANK_CLIENT, teamActionCode: getRememberedTeamSecurityCode(internalOrgId) });
             await fetchClients();
             // Client API returns ClientDto directly
             setFormData((prev) => ({ ...prev, clientId: data.id, customerName: data.name }));
@@ -152,7 +169,8 @@ export default function NewInvoicePage() {
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 },
                 body: JSON.stringify(payload),
             });
@@ -174,6 +192,7 @@ export default function NewInvoicePage() {
 
     const handleCreate = async () => {
         if (!formData.clientId) { toast.error("Please select or create a client first"); return; }
+        if (!teamActionCode.trim()) { toast.error("Team security code is required"); return; }
         setLoading(true);
         try {
             const token = await getToken();
@@ -183,20 +202,24 @@ export default function NewInvoicePage() {
                 dueDate: formData.dueDate,
                 items: buildLineItems(),
                 currency: "INR",
-                status: "DRAFT"
+                status: "DRAFT",
+                teamActionCode,
+                source: "MANUAL"
             };
             const res = await fetch("/api/invoices", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
                 },
                 body: JSON.stringify(payload),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.message || "Failed to create invoice");
             toast.success("Invoice created successfully");
+            rememberTeamSecurityCode(internalOrgId, teamActionCode);
             navigate("/invoices");
         } catch (error) { toast.error(error?.message || "Failed to create invoice"); }
         finally { setLoading(false); }
@@ -387,6 +410,15 @@ export default function NewInvoicePage() {
                                     </ul>
                                 </div>
                             )}
+                            <div className="space-y-2 mb-4">
+                                <label className="text-sm font-medium text-[#A0A0A0] block">Team Security Code *</label>
+                                <DarkInput
+                                    type="password"
+                                    value={teamActionCode}
+                                    onChange={(e) => setTeamActionCode(e.target.value)}
+                                    placeholder="Enter team security code"
+                                />
+                            </div>
                             <button onClick={handleCreate} disabled={loading} className="mo-btn-primary w-full flex items-center justify-center gap-2">
                                 {loading && <Loader2 className="h-4 w-4 animate-spin" />}
                                 Confirm & Create Invoice
@@ -413,6 +445,7 @@ export default function NewInvoicePage() {
                             { label: "Phone", id: "nc-phone", field: "phone", placeholder: "+91 98765 43210" },
                             { label: "Company", id: "nc-company", field: "company", placeholder: "Acme Corp" },
                             { label: "GSTIN (Optional)", id: "nc-gstin", field: "gstin", placeholder: "22AAAAA0000A1Z5" },
+                            { label: "Team Security Code *", id: "nc-team-code", field: "teamActionCode", type: "password", placeholder: "Enter team security code" },
                         ].map(({ label, id, field, type, placeholder }) => (
                             <div key={id}>
                                 <label htmlFor={id} className="text-sm font-medium text-[#A0A0A0] block mb-1.5">{label}</label>

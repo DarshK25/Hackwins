@@ -157,6 +157,10 @@ export default function InvoiceDetailPage() {
     };
 
     const handleSend = async () => {
+        if (!invoice?.clientEmail?.trim()) {
+            toast.error("Invoice recipient email is missing.");
+            return;
+        }
         setSending(true);
         try {
             const token = await getToken();
@@ -168,10 +172,15 @@ export default function InvoiceDetailPage() {
                     "X-Org-Id": internalOrgId
                 }
             });
-            if (!res.ok) throw new Error("Failed to send invoice");
+            if (!res.ok) {
+                const errorData = await res.json().catch(() => null);
+                throw new Error(errorData?.message || "Failed to send invoice");
+            }
             const updated = await res.json();
             setInvoice(updated);
-            toast.success("Invoice sent successfully");
+            toast.success(invoice.status?.toLowerCase() === "sent"
+                ? "Invoice re-sent successfully"
+                : "Invoice emailed successfully");
             fetchLogs(invoice.id);
         } catch (error) { toast.error(error?.message || "Failed to send invoice"); }
         finally { setSending(false); }
@@ -202,6 +211,10 @@ export default function InvoiceDetailPage() {
 
     const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
     const remainingAmount = invoice ? parseFloat(invoice.totalAmount || 0) - totalPaid : 0;
+    const normalizedStatus = invoice?.status?.toLowerCase();
+    const canSendInvoice = ["draft", "sent"].includes(normalizedStatus) && !!invoice?.clientEmail?.trim();
+    const sendButtonLabel = normalizedStatus === "sent" ? "Resend Invoice" : "Send Invoice";
+    const canRecordPayment = normalizedStatus !== "paid";
 
     if (loading) {
         return (
@@ -241,10 +254,10 @@ export default function InvoiceDetailPage() {
                     <button
                         className="mo-btn-secondary flex items-center gap-2 text-sm disabled:opacity-40"
                         onClick={handleSend}
-                        disabled={sending || invoice.status === "paid"}
+                        disabled={sending || !canSendInvoice}
                     >
                         {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                        Send Invoice
+                        {sendButtonLabel}
                     </button>
                     <button
                         className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-[#CD1C1820] text-[#CD1C18] border border-[#CD1C1840] hover:bg-[#CD1C1830] transition-all disabled:opacity-40"
@@ -255,7 +268,7 @@ export default function InvoiceDetailPage() {
                         Delete
                     </button>
 
-                    {invoice.status !== "paid" && (
+                    {canRecordPayment && (
                         <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
                             <DialogTrigger asChild>
                                 <button className="mo-btn-primary flex items-center gap-2 text-sm">

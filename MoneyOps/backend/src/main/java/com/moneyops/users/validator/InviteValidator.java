@@ -11,9 +11,6 @@ public class InviteValidator {
         if (request.getToken() == null || request.getToken().trim().isEmpty()) {
             throw new IllegalArgumentException("Token is required");
         }
-        if (request.getPassword() == null || request.getPassword().length() < 8) {
-            throw new IllegalArgumentException("Password must be at least 8 characters");
-        }
         if (request.getName() == null || request.getName().trim().isEmpty()) {
             throw new IllegalArgumentException("Name is required");
         }

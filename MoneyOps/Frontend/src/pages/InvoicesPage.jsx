@@ -116,7 +116,12 @@ export default function InvoicesPage() {
     };
 
     const handleSendInvoice = async (invoice) => {
-        if (!invoice.clientEmail && !invoice.notes?.includes("@")) {
+        const normalizedStatus = invoice.status?.toLowerCase();
+        if (!["draft", "sent"].includes(normalizedStatus)) {
+            toast.error(normalizedStatus === "paid" ? "Paid invoices cannot be sent." : "This invoice cannot be sent in its current status.");
+            return;
+        }
+        if (!invoice.clientEmail?.trim()) {
             toast.error("No email address found for this client");
             return;
         }
@@ -132,14 +137,24 @@ export default function InvoicesPage() {
                     "X-Org-Id": internalOrgId
                 }
             });
-            if (!res.ok) throw new Error("Failed to send");
-            toast.success(`Invoice sent to ${invoice.clientEmail || "client"}`);
+            if (!res.ok) {
+                const errorData = await res.json().catch(() => null);
+                throw new Error(errorData?.message || "Failed to send invoice");
+            }
+            toast.success(normalizedStatus === "sent"
+                ? `Invoice re-sent to ${invoice.clientEmail}`
+                : `Invoice emailed to ${invoice.clientEmail}`);
             fetchInvoices();
         } catch (error) {
             toast.error(error?.message || "Failed to send invoice");
         } finally {
             setActionLoading(null);
         }
+    };
+
+    const canEmailInvoice = (invoice) => {
+        const normalizedStatus = invoice.status?.toLowerCase();
+        return ["draft", "sent"].includes(normalizedStatus) && !!invoice.clientEmail?.trim();
     };
 
     const handleDownloadInvoice = async (invoice) => {
@@ -365,7 +380,7 @@ export default function InvoicesPage() {
                                                 </DropdownMenuItem>
                                                 <DropdownMenuItem
                                                     onClick={(e) => { e.stopPropagation(); handleSendInvoice(invoice); }}
-                                                    disabled={actionLoading === (invoice.id || invoice._id)}
+                                                    disabled={actionLoading === (invoice.id || invoice._id) || !canEmailInvoice(invoice)}
                                                     className="text-white hover:bg-[#2A2A2A] cursor-pointer"
                                                 >
                                                     {actionLoading === (invoice.id || invoice._id) ? (
@@ -373,7 +388,7 @@ export default function InvoicesPage() {
                                                     ) : (
                                                         <Send className="h-4 w-4 mr-2" />
                                                     )}
-                                                    Send
+                                                    {invoice.status?.toLowerCase() === "sent" ? "Resend" : "Send"}
                                                 </DropdownMenuItem>
                                                 <DropdownMenuItem
                                                     onClick={(e) => { e.stopPropagation(); handleDownloadInvoice(invoice); }}

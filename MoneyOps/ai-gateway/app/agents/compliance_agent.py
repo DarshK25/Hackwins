@@ -125,7 +125,7 @@ class ComplianceAgent(BaseAgent):
         invoices_resp = await self.backend.get_invoices(org_id=org_id, limit=100)
         invoices = []
         if invoices_resp.success and invoices_resp.data:
-            invoices = invoices_resp.data.get("invoices", [])
+            invoices = invoices_resp.data if isinstance(invoices_resp.data, list) else []
 
         # Calculate GST from paid invoices
         paid_invoices = [i for i in invoices if i.get("status") == "PAID"]
@@ -143,9 +143,12 @@ class ComplianceAgent(BaseAgent):
             gstr1_deadline = f"20th {today.strftime('%B %Y')}"
             gstr3b_deadline = f"20th {today.strftime('%B %Y')}"
         else:
-            next_month = today.replace(day=20, month=today.month % 12 + 1)
-            gstr1_deadline = next_month.strftime("20th %B %Y")
-            gstr3b_deadline = next_month.strftime("20th %B %Y")
+            # Move to next month
+            next_month_val = (today.month % 12) + 1
+            year_val = today.year + (1 if today.month == 12 else 0)
+            next_month_date = date(year_val, next_month_val, 20)
+            gstr1_deadline = next_month_date.strftime("20th %B %Y")
+            gstr3b_deadline = next_month_date.strftime("20th %B %Y")
 
         return {
             "gst_summary": {
@@ -175,64 +178,57 @@ class ComplianceAgent(BaseAgent):
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Check compliance status and deadlines"""
+        org_id = context.get("org_id", "default_org") if context else "default_org"
         today = date.today()
         month = today.month
-        year = today.year
 
-        # Upcoming compliance deadlines
+        # 1. Fetch real data to make it dynamic
+        invoices_resp = await self.backend.get_invoices(org_id=org_id, limit=50)
+        invoices = invoices_resp.data if invoices_resp.success and isinstance(invoices_resp.data, list) else []
+        
+        # Check for overdue items
+        overdue_invoices = [i for i in invoices if i.get("status") == "OVERDUE"]
+        
+        # 2. Upcoming compliance deadlines
         deadlines = []
+        # GST deadlines are usually 11th (GSTR1) and 20th (GSTR3B)
         if today.day <= 20:
             deadlines.append({
-                "filing": "GSTR-1 (Outward Supplies)",
-                "due_date": f"20th {today.strftime('%B %Y')}",
-                "days_remaining": 20 - today.day,
+                "filing": "GSTR-3B Monthly Return",
+                "due_date": date(today.year, today.month, 20).strftime("%Y-%m-%d"),
                 "status": "upcoming" if today.day < 15 else "urgent"
             })
-            deadlines.append({
-                "filing": "GSTR-3B (Monthly Return)",
-                "due_date": f"20th {today.strftime('%B %Y')}",
-                "days_remaining": 20 - today.day,
-                "status": "upcoming" if today.day < 15 else "urgent"
-            })
-
-        # Quarterly deadlines
-        is_quarter_end = month in (3, 6, 9, 12)
-        if is_quarter_end:
-            deadlines.append({
-                "filing": "Advance Tax Payment",
-                "due_date": f"15th {today.strftime('%B %Y')}",
-                "days_remaining": max(0, 15 - today.day),
-                "status": "urgent"
-            })
-            deadlines.append({
-                "filing": "TDS Return (Form 26Q)",
-                "due_date": f"31st {today.strftime('%B %Y')}",
-                "days_remaining": max(0, 31 - today.day),
-                "status": "upcoming"
-            })
-
-        compliance_score = 85  # baseline
+        
+        # 3. Dynamic Score
+        compliance_score = 95
         alerts = []
-        if not deadlines:
-            alerts.append("✅ No immediate compliance deadlines in the next 7 days")
-        else:
-            urgent = [d for d in deadlines if d["status"] == "urgent"]
-            if urgent:
-                alerts.append(f"🚨 {len(urgent)} urgent filing(s) due within 7 days")
-                compliance_score -= 10 * len(urgent)
+        key_reqs = [
+            "GST Registration must be active",
+            "Maintain digital copies of all invoices",
+            "Reconcile monthly bank statements"
+        ]
+
+        if overdue_invoices:
+            compliance_score -= (len(overdue_invoices) * 2)
+            alerts.append(f"⚠️ {len(overdue_invoices)} Overdue invoices may impact liquidity/tax reconciliation")
+            key_reqs.append(f"Follow up on {len(overdue_invoices)} overdue payments")
+
+        # GST Specific Logic
+        unpaid_gst = sum(i.get("gstTotal", 0) or i.get("tax", 0) for i in invoices if i.get("status") == "SENT")
+        if unpaid_gst > 0:
+            alerts.append(f"🚨 ₹{unpaid_gst:,.0f} in pending GST from sent invoices")
+            compliance_score -= 5
+
+        if not alerts:
+            alerts.append("✅ No immediate compliance risks detected")
 
         return {
-            "compliance_score": compliance_score,
-            "status": "compliant" if compliance_score >= 70 else "at_risk",
+            "compliance_score": max(0, compliance_score),
+            "status": "compliant" if compliance_score >= 80 else "at_risk" if compliance_score >= 60 else "critical",
             "upcoming_deadlines": deadlines,
             "alerts": alerts,
-            "key_requirements": [
-                "GST Registration must be active",
-                "E-invoicing required if turnover > ₹5 crore",
-                "Digital signatures needed for all invoices",
-                "Maintain records for minimum 6 years",
-            ],
-            "message": f"Compliance Score: {compliance_score}/100 — {len(deadlines)} upcoming filing(s)"
+            "key_requirements": key_reqs,
+            "message": f"Compliance Health: {compliance_score}/100"
         }
 
     async def _handle_audit_readiness(
@@ -246,7 +242,7 @@ class ComplianceAgent(BaseAgent):
         invoices_resp = await self.backend.get_invoices(org_id=org_id, limit=100)
         invoices = []
         if invoices_resp.success and invoices_resp.data:
-            invoices = invoices_resp.data.get("invoices", [])
+            invoices = invoices_resp.data if isinstance(invoices_resp.data, list) else []
 
         # Check documentation completeness
         invoices_with_gst = [i for i in invoices if i.get("gstTotal") or i.get("tax")]
@@ -315,6 +311,28 @@ class ComplianceAgent(BaseAgent):
             logger.error("compliance_agent_error", error=str(e))
             return self._build_error_response(str(e))
 
+
+    async def get_compliance_dashboard_data(self, org_id: str, context: Optional[Dict[str, Any]] = None) -> AgentResponse:
+        """Aggregate data for the compliance dashboard"""
+        if not context:
+            context = {}
+        context["org_id"] = org_id
+        
+        # Run compliance check
+        status_res = await self._handle_compliance_check({}, context)
+        # Run audit readiness
+        audit_res = await self._handle_audit_readiness({}, context)
+        
+        # Merge data
+        combined_data = {
+            **status_res,
+            "audit_readiness": audit_res
+        }
+        
+        return self._build_success_response(
+            message="Compliance dashboard data retrieved",
+            data=combined_data
+        )
 
 # Singleton
 compliance_agent = ComplianceAgent()

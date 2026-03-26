@@ -101,12 +101,49 @@ public class OrganizationService {
 
         validator.validate(dto);
 
-        BusinessOrganization updated = mapper.toEntity(dto);
-        updated.setId(id);
-        updated.setCreatedBy(existing.getCreatedBy());
-
+        BusinessOrganization updated = mergeOrganization(existing, dto);
         BusinessOrganization saved = orgRepository.save(updated);
         return mapper.toDto(saved);
+    }
+
+    private BusinessOrganization mergeOrganization(BusinessOrganization existing, BusinessOrganizationDto dto) {
+        existing.setLegalName(dto.getLegalName());
+        existing.setTradingName(dto.getTradingName());
+        existing.setBusinessType(dto.getBusinessType());
+        existing.setIndustry(dto.getIndustry());
+        existing.setRegistrationDate(dto.getRegistrationDate());
+        existing.setAnnualTurnover(dto.getAnnualTurnoverRange());
+        existing.setPrimaryEmail(dto.getPrimaryEmail());
+        existing.setPrimaryPhone(dto.getPrimaryPhone());
+        existing.setWebsite(dto.getWebsite());
+        existing.setEmployeeCount(dto.getEmployeeCount());
+        existing.setRegisteredAddress(dto.getRegisteredAddress());
+        existing.setPincode(dto.getPincode());
+        existing.setPreferredLanguage(dto.getPreferredLanguage());
+        existing.setPrimaryActivity(dto.getPrimaryActivity());
+        existing.setTargetMarket(dto.getTargetMarket());
+        existing.setAccountingMethod(dto.getAccountingMethod());
+        existing.setKeyProducts(dto.getKeyProducts());
+        existing.setCurrentChallenges(dto.getCurrentChallenges());
+        existing.setPanNumber(dto.getPanNumber());
+        existing.setStateOfRegistration(dto.getStateOfRegistration());
+        existing.setGstRegistered(dto.getGstRegistered());
+        existing.setGstin(dto.getGstin());
+        existing.setGstFilingFrequency(dto.getGstFilingFrequency());
+        existing.setTanNumber(dto.getTanNumber());
+        existing.setCin(dto.getCin());
+        existing.setLlpin(dto.getLlpin());
+        existing.setMsmeNumber(dto.getMsmeNumber());
+        existing.setIecCode(dto.getIecCode());
+        existing.setProfessionalTaxReg(dto.getProfessionalTaxReg());
+
+        if (dto.getFinancialYearStartMonth() != null && !dto.getFinancialYearStartMonth().isBlank()) {
+            existing.setFyStartMonth(Integer.valueOf(dto.getFinancialYearStartMonth()));
+        } else {
+            existing.setFyStartMonth(null);
+        }
+
+        return existing;
     }
 
     public void deleteOrganization(String id, String userId) {

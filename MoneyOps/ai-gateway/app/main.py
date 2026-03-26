@@ -129,8 +129,10 @@ app.include_router(health.router, prefix="/api/v1", tags=["Health"])
 # Voice router (production endpoint)
 from app.api.v1 import voice
 from app.routes.market import router as market_router
+from app.routes.compliance import router as compliance_router
 app.include_router(voice.router, prefix="/api/v1", tags=["Voice"])
 app.include_router(market_router)
+app.include_router(compliance_router, prefix="/api/v1")
 
 # Test routers
 if settings.ENVIRONMENT != "production":

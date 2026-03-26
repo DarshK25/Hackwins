@@ -73,6 +73,11 @@ public class Invoice {
     
     @CreatedBy
     private String createdBy;
+
+    // Extra creator metadata for protected actions/auditability
+    private String createdByEmail;
+    private String createdByRole;
+    private String source; // MANUAL / AI / VOICE
     
     @LastModifiedBy
     private String updatedBy;

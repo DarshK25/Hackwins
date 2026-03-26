@@ -22,6 +22,7 @@ import FinanceIntelligencePage from "@/pages/FinanceIntelligencePage";
 import CompliancePage from "@/pages/CompliancePage";
 import { OrchestratorDashboard } from "@/components/OrchestratorDashboard";
 import DashboardLayout from "@/components/DashboardLayout";
+import InviteAcceptPage from "@/pages/InviteAcceptPage";
 
 export default function App() {
     return (
@@ -40,6 +41,16 @@ export default function App() {
                     element={
                         <ProtectedRoute>
                             <OnboardingPage />
+                        </ProtectedRoute>
+                    }
+                />
+
+                {/* Invite acceptance route */}
+                <Route
+                    path="/invite/:token"
+                    element={
+                        <ProtectedRoute>
+                            <InviteAcceptPage />
                         </ProtectedRoute>
                     }
                 />

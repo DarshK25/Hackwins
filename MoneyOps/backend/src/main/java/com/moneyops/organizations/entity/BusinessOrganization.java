@@ -35,6 +35,12 @@ public class BusinessOrganization {
     @Id
     private String id;
 
+    /**
+     * Shared team security code for sensitive actions (create client/invoice).
+     * Stored as BCrypt hash; raw code is never persisted.
+     */
+    private String teamActionCodeHash;
+
     // ── Step 1: Business Info ──────────────────────────────────────────────────
     private String legalName;
     private String tradingName;

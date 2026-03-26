@@ -137,14 +137,32 @@ class BackendHttpAdapter:
     async def create_invoice_direct(self, org_id: str, user_id: str, payload: Dict[str, Any]) -> BackendResponse:
         return await self._request("POST", "/api/invoices", data=payload, org_id=org_id, user_id=user_id)
 
+    async def validate_team_action_code(self, org_id: str, user_id: str, team_action_code: str) -> BackendResponse:
+        return await self._request(
+            "POST",
+            f"/api/org/{org_id}/team-security-code/validate",
+            data={"teamActionCode": team_action_code},
+            org_id=org_id,
+            user_id=user_id,
+        )
+
     async def get_clients(self, org_id: str, limit: int = 100, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         resp = await self._request("GET", "/api/clients", params={"limit": limit}, org_id=org_id, user_id=user_id)
         if resp.success and resp.data:
             return resp.data if isinstance(resp.data, list) else resp.data.get("clients", [])
         return []
 
+    async def get_invoices(self, org_id: str, limit: int = 100, status: Optional[str] = None, user_id: Optional[str] = None) -> BackendResponse:
+        params = {"limit": limit}
+        if status:
+            params["status"] = status
+        return await self._request("GET", "/api/invoices", params=params, org_id=org_id, user_id=user_id)
+
     async def get_finance_metrics(self, business_id: str, org_id: str, user_id: Optional[str] = None) -> BackendResponse:
         return await self._request("GET", "/api/finance-intelligence/metrics", params={"businessId": business_id}, org_id=org_id, user_id=user_id)
+
+    async def get_financial_summary(self, org_id: str, user_id: Optional[str] = None) -> BackendResponse:
+        return await self._request("GET", "/api/transactions/summary", org_id=org_id, user_id=user_id)
 
     def set_auth_token(self, token: str):
         self.auth_token = token

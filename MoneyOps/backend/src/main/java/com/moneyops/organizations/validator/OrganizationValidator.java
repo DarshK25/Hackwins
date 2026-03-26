@@ -12,8 +12,43 @@ public class OrganizationValidator {
         if (dto.getLegalName() == null || dto.getLegalName().trim().isEmpty()) {
             throw new IllegalArgumentException("Legal name is required");
         }
+        if (dto.getBusinessType() == null || dto.getBusinessType().trim().isEmpty()) {
+            throw new IllegalArgumentException("Business type is required");
+        }
+        if (dto.getIndustry() == null || dto.getIndustry().trim().isEmpty()) {
+            throw new IllegalArgumentException("Industry is required");
+        }
+        if (dto.getPrimaryEmail() == null || dto.getPrimaryEmail().trim().isEmpty()) {
+            throw new IllegalArgumentException("Primary email is required");
+        }
+        if (dto.getPrimaryPhone() == null || dto.getPrimaryPhone().trim().isEmpty()) {
+            throw new IllegalArgumentException("Primary phone is required");
+        }
+        if (dto.getPanNumber() == null || dto.getPanNumber().trim().isEmpty()) {
+            throw new IllegalArgumentException("PAN number is required");
+        }
+        if (dto.getPrimaryActivity() == null || dto.getPrimaryActivity().trim().isEmpty()) {
+            throw new IllegalArgumentException("Primary activity is required");
+        }
+        if (dto.getTargetMarket() == null || dto.getTargetMarket().trim().isEmpty()) {
+            throw new IllegalArgumentException("Target market is required");
+        }
         if (dto.getPrimaryEmail() != null && !isValidEmail(dto.getPrimaryEmail())) {
             throw new IllegalArgumentException("Invalid email format");
+        }
+        if (dto.getPanNumber() != null && !isValidPan(dto.getPanNumber())) {
+            throw new IllegalArgumentException("Invalid PAN number format");
+        }
+        if (Boolean.TRUE.equals(dto.getGstRegistered())) {
+            if (dto.getGstin() == null || dto.getGstin().trim().isEmpty()) {
+                throw new IllegalArgumentException("GSTIN is required when GST is enabled");
+            }
+            if (dto.getGstFilingFrequency() == null || dto.getGstFilingFrequency().trim().isEmpty()) {
+                throw new IllegalArgumentException("GST filing frequency is required when GST is enabled");
+            }
+        }
+        if (dto.getGstin() != null && !dto.getGstin().trim().isEmpty() && !isValidGst(dto.getGstin())) {
+            throw new IllegalArgumentException("Invalid GST number format");
         }
         if (dto.getEmployeeCount() != null && dto.getEmployeeCount() < 0) {
             throw new IllegalArgumentException("Employee count cannot be negative");

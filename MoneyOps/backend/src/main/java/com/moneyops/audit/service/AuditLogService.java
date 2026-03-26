@@ -44,7 +44,13 @@ public class AuditLogService {
         try {
             AuditLog auditLog = new AuditLog();
             auditLog.setOrgId(OrgContext.getOrgId());
-            auditLog.setUserId(SecurityUtil.getCurrentUserId());
+            // For AI/voice service calls, Spring Security principal may be the service name.
+            // We must attribute actions to the real user via OrgContext.
+            String currentUserId = OrgContext.getUserId();
+            if (currentUserId == null || currentUserId.isBlank()) {
+                currentUserId = SecurityUtil.getCurrentUserId();
+            }
+            auditLog.setUserId(currentUserId);
             auditLog.setEntityType(entityType);
             auditLog.setEntityId(entityId);
             auditLog.setOperation(operation);

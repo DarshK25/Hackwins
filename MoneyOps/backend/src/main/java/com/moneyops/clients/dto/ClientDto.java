@@ -16,6 +16,17 @@ public class ClientDto {
     private String gstin;      // WAS taxId
     private String email;
     private String phoneNumber;
+
+    /**
+     * Raw team security code (PIN) required for protected create actions.
+     * It is verified by the backend against a BCrypt hash stored in the org.
+     */
+    private String teamActionCode;
+
+    /**
+     * Source of the create action: MANUAL / AI / VOICE.
+     */
+    private String source;
     
     // ✨ Expanded address per schema
     private Address billingAddress;
@@ -29,6 +40,8 @@ public class ClientDto {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private String createdBy;
+    private String createdByEmail;
+    private String createdByRole;
     private String updatedBy;
     private Double searchScore;
     private String idempotencyKey; // ✨ New

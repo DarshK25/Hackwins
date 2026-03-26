@@ -147,40 +147,13 @@ export default function ClientDetailDialog({ client, onClose, onUpdate, onDelete
                   icon={Phone} 
                 />
                 <Field 
-                  label="GSTIN / Tax ID" 
-                  value={formData.taxId || formData.gstin} 
+                  label="Company" 
+                  value={formData.company} 
                   edit={isEditMode} 
-                  onChange={v => setFormData({ ...formData, taxId: v })} 
-                  icon={Hash} 
+                  onChange={v => setFormData({ ...formData, company: v })} 
+                  icon={Building} 
                 />
               </div>
-            </Section>
-
-            <Section title="Company Address">
-               <div className="space-y-4">
-                 <Field 
-                    label="Full Address" 
-                    value={formData.address} 
-                    edit={isEditMode} 
-                    onChange={v => setFormData({ ...formData, address: v })} 
-                    icon={MapPin} 
-                    type="textarea"
-                  />
-                  <div className="grid grid-cols-2 gap-4">
-                    <Field 
-                      label="City" 
-                      value={formData.city} 
-                      edit={isEditMode} 
-                      onChange={v => setFormData({ ...formData, city: v })} 
-                    />
-                    <Field 
-                      label="State" 
-                      value={formData.state} 
-                      edit={isEditMode} 
-                      onChange={v => setFormData({ ...formData, state: v })} 
-                    />
-                  </div>
-               </div>
             </Section>
 
             <Section title="Internal Notes">

@@ -34,4 +34,19 @@ public class InvoiceDto {
     private List<InvoiceItemDto> items;
     private String idempotencyKey;
     private com.moneyops.invoices.entity.Invoice.VoiceContext voiceContext;
+
+    /**
+     * Raw team security code (PIN) required for protected invoice creation.
+     * Verified server-side against BCrypt hash stored in the org.
+     */
+    private String teamActionCode;
+
+    /**
+     * Source of the create action: MANUAL / AI / VOICE.
+     */
+    private String source;
+
+    // Creator metadata for protected actions (sensitive auditability)
+    private String createdByEmail;
+    private String createdByRole;
 }

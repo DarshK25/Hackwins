@@ -14,6 +14,7 @@ public class OrganizationMapper {
         
         BusinessOrganizationDto dto = new BusinessOrganizationDto();
         dto.setId(org.getId());
+        dto.setTeamSecurityCodeConfigured(org.getTeamActionCodeHash() != null && !org.getTeamActionCodeHash().isBlank());
         dto.setLegalName(org.getLegalName());
         dto.setTradingName(org.getTradingName());
         dto.setBusinessType(org.getBusinessType());
@@ -31,6 +32,8 @@ public class OrganizationMapper {
         dto.setPrimaryActivity(org.getPrimaryActivity());
         dto.setTargetMarket(org.getTargetMarket());
         dto.setAccountingMethod(org.getAccountingMethod());
+        dto.setKeyProducts(org.getKeyProducts());
+        dto.setCurrentChallenges(org.getCurrentChallenges());
 
         // Mapping regulatory fields from BusinessOrganization entity to DTO
         dto.setPanNumber(org.getPanNumber());
@@ -70,6 +73,8 @@ public class OrganizationMapper {
         org.setPrimaryActivity(dto.getPrimaryActivity());
         org.setTargetMarket(dto.getTargetMarket());
         org.setAccountingMethod(dto.getAccountingMethod());
+        org.setKeyProducts(dto.getKeyProducts());
+        org.setCurrentChallenges(dto.getCurrentChallenges());
 
         // Mapping regulatory fields from DTO to BusinessOrganization entity
         org.setPanNumber(dto.getPanNumber());

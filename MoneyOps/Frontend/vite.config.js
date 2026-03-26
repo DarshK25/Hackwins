@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // https://vitejs.dev/config/
 export default defineConfig({
-    envDir: "../../",
+    envDir: "../",
     plugins: [react()],
     resolve: {
         alias: {
@@ -18,6 +18,12 @@ export default defineConfig({
         port: 3000,
         open: true,
         proxy: {
+            // Compatibility route for older compliance UI calls.
+            "/api/v1/compliance/status": {
+                target: "http://127.0.0.1:8000",
+                changeOrigin: true,
+                rewrite: (path) => path.replace("/api/v1/compliance/status", "/api/compliance/status"),
+            },
             // Proxy /api/v1 to AI Gateway (port 8001)
             "/api/v1": {
                 target: "http://127.0.0.1:8001",

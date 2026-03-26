@@ -36,6 +36,16 @@ export function useVoiceEvents() {
     room.on("dataReceived", onDataReceived);
     return () => { room.off("dataReceived", onDataReceived); };
   }, [room, navigate]);
+
+  useEffect(() => {
+    const onManualUiEvent = (event) => {
+      if (event?.detail) {
+        dispatchUIEvent(event.detail, navigate);
+      }
+    };
+    window.addEventListener("voice:manual_ui_event", onManualUiEvent);
+    return () => window.removeEventListener("voice:manual_ui_event", onManualUiEvent);
+  }, [navigate]);
 }
 
 function dispatchUIEvent(event, navigate) {
@@ -99,6 +109,10 @@ function dispatchUIEvent(event, navigate) {
 
   if (type === "open_input_dialog") {
     window.dispatchEvent(new CustomEvent("voice:open_input_dialog", { detail: event }));
+  }
+
+  if (type === "open_client_picker") {
+    window.dispatchEvent(new CustomEvent("voice:open_client_picker", { detail: event }));
   }
 
   if (type === "client_created") {

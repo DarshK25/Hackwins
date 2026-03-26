@@ -53,6 +53,11 @@ public class Client {
     
     @CreatedBy
     private String createdBy;  // Clerk userId (String)
+
+    // Extra creator metadata for protected actions/auditability
+    private String createdByEmail;
+    private String createdByRole;
+    private String source; // MANUAL / AI / VOICE
     
     @LastModifiedBy
     private String updatedBy;

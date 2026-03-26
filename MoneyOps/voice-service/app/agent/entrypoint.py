@@ -134,8 +134,8 @@ async def entrypoint(ctx: JobContext):
         tts=tts,
         vad=silero.VAD.load(
             min_speech_duration=settings.VAD_MIN_SPEECH_DURATION,
-            min_silence_duration=0.3,  # Shorter silence = faster cutoff
-            activation_threshold=0.5,
+            min_silence_duration=settings.VAD_MIN_SILENCE_DURATION,
+            activation_threshold=settings.VAD_ACTIVATION_THRESHOLD,
         ),
     )
 
@@ -165,7 +165,7 @@ async def entrypoint(ctx: JobContext):
         if t in complete_short_words:
             return False
             
-        if len(t.split()) <= 2: return True # Too short otherwise
+        if len(t.split()) <= 1: return True
         
         import re
         for p in INCOMPLETE_UTTERANCE_PATTERNS:
@@ -334,8 +334,11 @@ async def entrypoint(ctx: JobContext):
              
         logger.info("utterance_received", text=text, confidence=confidence)
         
+        if len(text.strip()) < 2:
+            return
+
         # If confidence is too low, we trigger a "re-ask" directly
-        if confidence < 0.65: # Lower than 0.75 to be safe / not too annoying
+        if confidence < 0.7:
             logger.warning("stt_confidence_low_blocking", text=text, confidence=confidence)
             asyncio.create_task(session.say("I didn't quite catch that. Could you repeat?"))
             return
@@ -365,8 +368,7 @@ async def entrypoint(ctx: JobContext):
     # Greet the user immediately
     try:
         await session.say(
-            "Hello! MoneyOps AI is ready. You can say things like "
-            "'Create an invoice for Tanoosh Jain for 10,000 rupees'. How can I help?",
+            "Welcome to MoneyOps. What would you like to do?",
             allow_interruptions=True,
         )
     except RuntimeError as e:
@@ -480,6 +482,9 @@ def _create_stt():
             return stt
         except Exception as e:
             logger.warning("assemblyai_init_failed", error=str(e))
+
+    logger.info("stt_provider", provider="groq-whisper")
+    return groq.STT()
 
 
 def prewarm(proc: JobProcess):

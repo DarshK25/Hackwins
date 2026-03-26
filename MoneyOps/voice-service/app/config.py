@@ -8,8 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 # Load the global root .env at the workspace root (MoneyOps/.env, one level above MoneyOps/MoneyOps/).
-# parents[3] from config.py: voice-service/app → voice-service → MoneyOps/MoneyOps → MoneyOps (outer)
-_env_path = Path(__file__).resolve().parents[3] / ".env"
+# parents[2] from config.py: voice-service/app → voice-service → MoneyOps/MoneyOps
+_env_path = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=_env_path, override=True)
 
 
@@ -52,12 +52,12 @@ class Settings(BaseSettings):
 
     # VAD (Voice Activity Detection) — tuned for natural conversation
     # min_speech_duration LOW  → picks up speech quickly (no missed start-of-turn)
-    VAD_MIN_SPEECH_DURATION: float = 0.1   # seconds — lower picks up speech faster
-    VAD_MIN_SILENCE_DURATION: float = 0.3  # seconds — faster end-of-turn
+    VAD_MIN_SPEECH_DURATION: float = 0.18  # seconds — avoid triggering on very short noise bursts
+    VAD_MIN_SILENCE_DURATION: float = 0.45  # seconds — slightly longer to reduce chopped utterances
     # activation_threshold: confidence level needed to declare speech activity (0.0–1.0)
-    VAD_ACTIVATION_THRESHOLD: float = 0.5  # standard Silero default
+    VAD_ACTIVATION_THRESHOLD: float = 0.65  # stricter to suppress background noise
     # How long (seconds) the agent waits after end-of-speech before processing
-    TURN_DETECTION_DELAY: float = 0.4      # seconds
+    TURN_DETECTION_DELAY: float = 0.55      # seconds
 
     @property
     def is_production(self) -> bool:

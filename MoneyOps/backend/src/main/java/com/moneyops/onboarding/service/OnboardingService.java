@@ -10,6 +10,7 @@ import com.moneyops.users.repository.UserRepository;
 import com.moneyops.users.repository.InviteRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -24,6 +25,7 @@ public class OnboardingService {
     private final BusinessOrganizationRepository orgRepository;
     private final InviteRepository inviteRepository;
     private final org.springframework.data.mongodb.core.MongoTemplate mongoTemplate;
+    private final PasswordEncoder passwordEncoder;
 
     // ── Status check ──────────────────────────────────────────────────────────
 
@@ -102,6 +104,12 @@ public class OnboardingService {
         org.setAccountingMethod(req.getAccountingMethod());
         org.setFyStartMonth(req.getFyStartMonth() != null ? req.getFyStartMonth() : 4);
         org.setPreferredLanguage(req.getPreferredLanguage() != null ? req.getPreferredLanguage() : "en");
+
+        // Team Security Code (set by owner during onboarding)
+        if (req.getTeamActionCode() != null && !req.getTeamActionCode().trim().isEmpty()) {
+            org.setTeamActionCodeHash(passwordEncoder.encode(req.getTeamActionCode()));
+            log.info("Team security code set for organization during onboarding");
+        }
 
         User user = getOrCreateUser(req);
         org.setCreatedBy(user.getId());
@@ -182,7 +190,6 @@ public class OnboardingService {
             newUser.setClerkId(req.getClerkId());
             newUser.setEmail(req.getEmail());
             newUser.setName(req.getName());
-            newUser.setPasswordHash("");
             // Audit populated by @EnableMongoAuditing
             return userRepository.save(newUser);
         });

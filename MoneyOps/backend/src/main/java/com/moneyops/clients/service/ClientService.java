@@ -6,6 +6,9 @@ import com.moneyops.clients.entity.Client;
 import com.moneyops.clients.mapper.ClientMapper;
 import com.moneyops.clients.repository.ClientRepository;
 import com.moneyops.clients.validator.ClientValidator;
+import com.moneyops.audit.service.AuditLogService;
+import com.moneyops.security.team.TeamActionAuthorizationService;
+import com.moneyops.users.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +33,15 @@ public class ClientService {
     @Autowired
     private ClientValidator clientValidator;
 
+    @Autowired
+    private TeamActionAuthorizationService teamActionAuthorizationService;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private AuditLogService auditLogService;
+
     public List<ClientDto> getAllClients(String orgId) {
         if (orgId == null || orgId.isBlank()) throw new com.moneyops.shared.exceptions.UnauthorizedException("Missing organization context");
         return clientRepository.findAllByOrgIdAndDeletedAtIsNull(orgId)
@@ -46,7 +58,23 @@ public class ClientService {
 
     public ClientDto createClient(ClientDto dto, String orgId, String createdBy) {
         if (orgId == null || orgId.isBlank()) throw new com.moneyops.shared.exceptions.UnauthorizedException("Missing organization context");
-        
+
+        if (createdBy == null || createdBy.isBlank()) {
+            throw new com.moneyops.shared.exceptions.UnauthorizedException("Missing user context");
+        }
+
+        // Enforce protected create rules (membership + active status + PIN).
+        var creator = teamActionAuthorizationService.assertUserCanCreateSensitiveAction(
+                orgId,
+                createdBy,
+                dto.getTeamActionCode()
+        );
+
+        // Default source to MANUAL if caller didn't specify.
+        if (dto.getSource() == null || dto.getSource().isBlank()) {
+            dto.setSource("MANUAL");
+        }
+
         // ✨ Idempotency check
         if (dto.getIdempotencyKey() != null && clientRepository.existsByEmailAndDeletedAtIsNull(dto.getEmail())) {
              // For simplicity, we check email uniqueness but you could check idempotencyKey explicitly if tracked
@@ -64,10 +92,17 @@ public class ClientService {
         }
         
         client.setOrgId(orgId);
-        // Audit fields auto-populated by @EnableMongoAuditing
-        // but we'll set manual createdBy if needed depending on auditor aware config
+
+        // Protected-action creator metadata
+        client.setCreatedBy(creator.userId());
+        client.setCreatedByEmail(creator.email());
+        client.setCreatedByRole(creator.role());
+        client.setSource(dto.getSource());
+        client.setCreatedAt(LocalDateTime.now());
+        client.setUpdatedAt(LocalDateTime.now());
         
         Client saved = clientRepository.save(client);
+        auditLogService.logCreate("CLIENT", saved.getId(), saved);
         return clientMapper.toDto(saved);
     }
 

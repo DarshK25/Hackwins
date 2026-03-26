@@ -148,6 +148,7 @@ class BaseAgent:
         return AgentResponse(
             success=True,
             message=message,
+            data=data,
             tool_used=tool_used,
             agent_type=self.get_agent_type(),
             confidence=confidence,

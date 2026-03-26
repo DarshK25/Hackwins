@@ -18,21 +18,10 @@ export default function MarketResearchPage() {
     async function fetchMarketData() {
         setLoading(true);
         try {
-            // Step 1: resolve internal UUID from Spring Boot backend
-            // Note: /api/org/my depends on X-Org-Id header mapping
-            const orgRes = await fetch("/api/org/my", {
-                headers: { 
-                    "X-Org-Id": orgId,
-                    "X-User-Id": userId,
-                    "Content-Type": "application/json"
-                }
-            });
-            const orgJson = await orgRes.json();
-            const internalOrgUuid = orgJson?.data?.id || orgId;
-
-            // Step 2: fetch market intelligence with resolved UUID from AI Gateway
+            // Directly fetch market intelligence from AI Gateway using the Clerk orgId.
+            // Our backend adapter resolves the orgId to an internal UUID automatically.
             const res = await fetch(
-                `http://localhost:8001/api/v1/market/intelligence?org_uuid=${internalOrgUuid}&business_id=1&user_id=${userId || ""}`,
+                `http://localhost:8001/api/v1/market/intelligence?org_uuid=${orgId}&business_id=1&user_id=${userId || ""}`,
                 { headers: { "Content-Type": "application/json" } }
             );
             const json = await res.json();

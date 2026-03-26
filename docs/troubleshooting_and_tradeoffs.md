@@ -58,9 +58,9 @@ error = response_data.get("error") or response_data.get("message")
 *   **Problem:** CodeRabbit flagged an unsecured endpoint. Upon investigation, a rogue `ai-gateway` directory was found at the project root.
 *   **Solution:** Deleted the entire `ai-gateway` directory as it was not part of the core backend requirements.
 
-#### 3.2 Plaintext Passwords [CRITICAL]
-*   **Problem:** `UserService` was storing passwords directly as plaintext strings.
-*   **Solution:** Injected `PasswordEncoder` into `UserService` and updated `hashPassword()` to use `passwordEncoder.encode()`.
+#### 3.2 Legacy Password Storage [RESOLVED]
+*   **Problem:** Older invite and auth flows depended on persisted user passwords, which conflicts with the Clerk-based authentication model.
+*   **Solution:** Removed `users.passwordHash` usage from active backend flows and kept hashing only for `business_organizations.teamActionCodeHash`.
 
 #### 3.3 Broken Invite Status Check [BUG]
 *   **Problem:** `UserService` compared an Enum (`invite.getStatus()`) with a String literal `"PENDING"`, which always evaluated to `false`.
