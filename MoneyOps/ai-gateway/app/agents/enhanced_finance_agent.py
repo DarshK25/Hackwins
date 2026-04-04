@@ -3,6 +3,7 @@ Enhanced Finance Agent - Proactive financial intelligence
 Handles invoices, payments, analytics with intelligent context awareness
 """
 
+import os
 import re
 import asyncio
 from typing import Any, Dict, List, Optional
