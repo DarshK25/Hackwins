@@ -35,8 +35,22 @@ async def health_check():
     # Perform health checks
     checks = {
         "api": "healthy",
-        # TODO: Add more checks (Redis, Backend, etc.)
+        "redis": "checking...",
+        "backend": "checking...",
     }
+    try:
+        redis_client = await get_redis()
+        checks["redis"] = await redis_client.ping()
+    except:
+        checks["redis"] = False
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(settings.BACKEND_BASE_URL.rstrip('/') + '/actuator/health')
+            checks["backend"] = resp.status_code == 200
+    except:
+        checks["backend"] = False
     
     return HealthResponse(
         status="healthy",
@@ -53,13 +67,23 @@ async def readiness_check():
     Kubernetes readiness probe
     Checks if service can accept traffic
     """
-    # TODO: Check dependencies (Redis, Backend API)
-    
+    # Check dependencies
     checks = {
         "api": True,
-        # "redis": await check_redis(),
-        # "backend": await check_backend(),
     }
+    try:
+        redis_client = await get_redis()
+        checks["redis"] = await redis_client.ping()
+    except Exception:
+        checks["redis"] = False
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(settings.BACKEND_BASE_URL.rstrip('/') + '/actuator/health')
+            checks["backend"] = resp.status_code == 200
+    except Exception:
+        checks["backend"] = False
     
     all_healthy = all(checks.values())
     
