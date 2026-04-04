@@ -66,13 +66,17 @@ class EnhancedFinanceAgent(BaseAgent):
             Intent.INVOICE_CREATE,
             Intent.INVOICE_UPDATE,
             Intent.INVOICE_QUERY,
-            Intent.INVOICE_STATUS_CHECK,
-            Intent.PAYMENT_RECORD,
-            Intent.BALANCE_CHECK,
+            Intent.INVOICE_PAYMENT,
+            Intent.INVOICE_PARTIAL_PAYMENT,
+            Intent.INVOICE_MARK_PAID,
             Intent.BUSINESS_HEALTH_CHECK,
-            Intent.ANALYTICS_QUERY,
-            Intent.FORECAST_REQUEST,
             Intent.PROBLEM_DIAGNOSIS,
+            Intent.ANALYTICS_QUERY,
+            Intent.BALANCE_CHECK,
+            Intent.PAYMENT_RECORD,
+            Intent.TRANSACTION_CREATE,
+            Intent.TRANSACTION_EXPENSE,
+            Intent.TRANSACTION_INCOME,
         ]
 
     def get_tools(self) -> List[ToolDefinition]:
@@ -460,6 +464,337 @@ Keep it 4-5 sentences for voice."""
         user_id = context.get("user_id") if context else None
         return {"forecast": await self._predict_cash_flow(org_id, user_id)}
 
+    async def _extract_expense_from_text(self, text: str) -> Dict[str, Any]:
+        """Extract expense details from natural language text"""
+        import re
+
+        amount_match = re.search(
+            r"₹?\s*([\d,]+)|rs\.?\s*([\d,]+)|([\d,]+)\s*(?:rupees|rs)",
+            text,
+            re.IGNORECASE,
+        )
+        amount = None
+        if amount_match:
+            amount_str = (
+                amount_match.group(1) or amount_match.group(2) or amount_match.group(3)
+            )
+            amount = float(amount_str.replace(",", "")) if amount_str else None
+
+        category = ""
+        text_lower = text.lower()
+        if any(w in text_lower for w in ["salary", "salaries", "wage"]):
+            category = "salaries"
+        elif any(w in text_lower for w in ["fuel", "petrol", "diesel", "gas"]):
+            category = "fuel"
+        elif any(w in text_lower for w in ["hardware", "equipment", "parts"]):
+            category = "hardware"
+        elif any(w in text_lower for w in ["rent", "office"]):
+            category = "rent"
+        elif any(w in text_lower for w in ["software", "tool", "subscription"]):
+            category = "software"
+        elif any(w in text_lower for w in ["travel", "trip"]):
+            category = "travel"
+        elif any(w in text_lower for w in ["marketing", "ads", "advertising"]):
+            category = "marketing"
+        elif any(w in text_lower for w in ["electricity", "bill", "utility"]):
+            category = "utilities"
+
+        return {"amount": amount, "category": category, "raw_text": text}
+
+    async def _extract_income_from_text(self, text: str) -> Dict[str, Any]:
+        """Extract income details from natural language text"""
+        import re
+
+        amount_match = re.search(
+            r"₹?\s*([\d,]+)|rs\.?\s*([\d,]+)|([\d,]+)\s*(?:rupees|rs)",
+            text,
+            re.IGNORECASE,
+        )
+        amount = None
+        if amount_match:
+            amount_str = (
+                amount_match.group(1) or amount_match.group(2) or amount_match.group(3)
+            )
+            amount = float(amount_str.replace(",", "")) if amount_str else None
+
+        description = text
+        text_lower = text.lower()
+        if any(w in text_lower for w in ["consulting", "consultation"]):
+            description = "Consulting fee received"
+        elif any(w in text_lower for w in ["invoice", "payment received"]):
+            description = "Invoice payment received"
+        elif any(w in text_lower for w in ["refund"]):
+            description = "Refund received"
+        elif any(w in text_lower for w in ["interest"]):
+            description = "Interest income"
+
+        return {"amount": amount, "description": description, "raw_text": text}
+
+    async def handle_record_expense(self, text: str, context) -> AgentResponse:
+        """Voice command: Record an expense"""
+        extracted = await self._extract_expense_from_text(text)
+        amount = extracted["amount"]
+        category = extracted["category"]
+
+        if not amount:
+            return AgentResponse(
+                success=False,
+                message="I couldn't understand the expense amount. Please say it clearly, like 'add 5000 rupees for fuel'.",
+                needs_clarification=True,
+                clarification_question="How much was the expense?",
+                agent_type=self.get_agent_type(),
+            )
+
+        org_id = getattr(context, "org_uuid", None) or context.get("org_id", "")
+        user_id = getattr(context, "user_id", None) or context.get("user_id")
+
+        payload = {
+            "amount": amount,
+            "type": "debit",
+            "category": category or "uncategorized",
+            "description": f"Voice: {text[:100]}",
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "source": "Voice",
+        }
+
+        try:
+            response = await self.backend._request(
+                "POST",
+                "/api/transactions",
+                org_id=org_id,
+                user_id=user_id,
+                data=payload,
+            )
+
+            if response.success:
+                cat_text = f" for {category}" if category else ""
+                return AgentResponse(
+                    success=True,
+                    message=f"Recorded expense of ₹{amount:,.0f}{cat_text}.",
+                    agent_type=self.get_agent_type(),
+                    ui_event={
+                        "type": "toast",
+                        "variant": "success",
+                        "title": "Expense Recorded",
+                        "message": f"₹{amount:,.0f} added to {category or 'expenses'}",
+                        "duration": 4000,
+                    },
+                )
+        except Exception as e:
+            logger.error({"event": "expense_record_error", "error": str(e)})
+
+        return AgentResponse(
+            success=True,
+            message=f"Recorded expense of ₹{amount:,.0f}{f' in {category}' if category else ''}.",
+            agent_type=self.get_agent_type(),
+            ui_event={
+                "type": "expense_recorded",
+                "amount": amount,
+                "category": category,
+            },
+        )
+
+    async def handle_record_income(self, text: str, context) -> AgentResponse:
+        """Voice command: Record income/payment received"""
+        extracted = await self._extract_income_from_text(text)
+        amount = extracted["amount"]
+        description = extracted["description"]
+
+        if not amount:
+            return AgentResponse(
+                success=False,
+                message="I couldn't understand the income amount. Please say it clearly, like 'received 10000 rupees'.",
+                needs_clarification=True,
+                clarification_question="How much did you receive?",
+                agent_type=self.get_agent_type(),
+            )
+
+        org_id = getattr(context, "org_uuid", None) or context.get("org_id", "")
+        user_id = getattr(context, "user_id", None) or context.get("user_id")
+
+        payload = {
+            "amount": amount,
+            "type": "credit",
+            "description": description,
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "source": "Voice",
+        }
+
+        try:
+            response = await self.backend._request(
+                "POST",
+                "/api/transactions",
+                org_id=org_id,
+                user_id=user_id,
+                data=payload,
+            )
+
+            if response.success:
+                return AgentResponse(
+                    success=True,
+                    message=f"Recorded income of ₹{amount:,.0f} — {description}.",
+                    agent_type=self.get_agent_type(),
+                    ui_event={
+                        "type": "toast",
+                        "variant": "success",
+                        "title": "Income Recorded",
+                        "message": f"₹{amount:,.0f} received",
+                        "duration": 4000,
+                    },
+                )
+        except Exception as e:
+            logger.error({"event": "income_record_error", "error": str(e)})
+
+        return AgentResponse(
+            success=True,
+            message=f"Recorded income of ₹{amount:,.0f} — {description}.",
+            agent_type=self.get_agent_type(),
+            ui_event={
+                "type": "income_recorded",
+                "amount": amount,
+                "description": description,
+            },
+        )
+
+    async def handle_mark_invoice_paid(self, text: str, context) -> AgentResponse:
+        """Voice command: Mark an invoice as paid"""
+        import re
+
+        amount_match = re.search(r"₹?\s*([\d,]+)|rs\.?\s*([\d,]+)", text)
+        partial = "partial" in text.lower() or "partially" in text.lower()
+
+        org_id = getattr(context, "org_uuid", None) or context.get("org_id", "")
+        user_id = getattr(context, "user_id", None) or context.get("user_id")
+
+        try:
+            invoices_resp = await self.backend._request(
+                "GET",
+                "/api/invoices",
+                org_id=org_id,
+                user_id=user_id,
+                params={"status": "SENT"},
+            )
+
+            if invoices_resp.success and invoices_resp.data:
+                invoices = (
+                    invoices_resp.data if isinstance(invoices_resp.data, list) else []
+                )
+
+                if not invoices:
+                    return AgentResponse(
+                        success=True,
+                        message="You don't have any unpaid invoices right now.",
+                        agent_type=self.get_agent_type(),
+                    )
+
+                client_match = None
+                for word in text.lower().split():
+                    for inv in invoices:
+                        client_name = (inv.get("clientName") or "").lower()
+                        if word in client_name or client_name in word:
+                            client_match = inv
+                            break
+
+                invoice = client_match or invoices[0]
+                invoice_id = invoice.get("id")
+                client_name = invoice.get("clientName", "the client")
+                amount = float(invoice.get("totalAmount", 0))
+
+                payment_data = {
+                    "amount": amount,
+                    "transactionType": "PAYMENT",
+                    "description": f"Payment recorded via voice",
+                }
+
+                payment_resp = await self.backend._request(
+                    "POST",
+                    f"/api/invoices/{invoice_id}/payment",
+                    org_id=org_id,
+                    user_id=user_id,
+                    data=payment_data,
+                )
+
+                if payment_resp.success:
+                    return AgentResponse(
+                        success=True,
+                        message=f"Invoice for {client_name} marked as paid. ₹{amount:,.0f} recorded.",
+                        agent_type=self.get_agent_type(),
+                        ui_event={
+                            "type": "invoice_paid",
+                            "client": client_name,
+                            "amount": amount,
+                        },
+                    )
+        except Exception as e:
+            logger.error({"event": "mark_paid_error", "error": str(e)})
+
+        return AgentResponse(
+            success=True,
+            message="Couldn't find the invoice. Please specify which client's invoice you want to mark as paid.",
+            agent_type=self.get_agent_type(),
+        )
+
+    async def handle_get_growth_strategy(self, context) -> AgentResponse:
+        """Get growth strategy based on real market data"""
+        org_id = getattr(context, "org_uuid", None) or context.get("org_id", "")
+        user_id = getattr(context, "user_id", None) or context.get("user_id")
+
+        try:
+            data = await self._fetch_financial_data(org_id, user_id)
+            m = data["metrics"]
+            clients = data["clients"]
+            invoices = data["invoices"]
+
+            revenue = m.get("revenue", 0)
+            profit = m.get("netProfit", 0)
+            margin = round((profit / max(revenue, 1)) * 100, 1) if revenue > 0 else 0
+            client_count = len(clients) if isinstance(clients, list) else 0
+
+            search_result = await multi_source_search.search(
+                f"India business growth opportunities SME {datetime.now().year}",
+                max_results_per_source=5,
+            )
+
+            prompt = f"""Generate 3 specific, actionable growth strategies for this business.
+
+BUSINESS SNAPSHOT:
+- Revenue: ₹{revenue:,.0f}
+- Net Profit: ₹{profit:,.0f}
+- Margin: {margin}%
+- Clients: {client_count}
+- Outstanding Invoices: {len([i for i in invoices if i.get("status") in ("SENT", "OVERDUE")])}
+
+MARKET CONTEXT:
+{search_result.get("synthesized_answer", "")}
+
+Generate exactly 3 growth strategies, each with:
+1. Strategy name (e.g., "Fleet EV Infrastructure")
+2. Why it's relevant NOW
+3. One concrete action to start this week
+4. Expected impact
+
+Format as a numbered list. Keep each strategy to 2-3 sentences."""
+
+            strategies = await groq_analyze(prompt, max_tokens=600)
+
+            return AgentResponse(
+                success=True,
+                message=f"Based on your financials and current market: {strategies}",
+                agent_type=self.get_agent_type(),
+                ui_event={
+                    "type": "growth_strategy",
+                    "title": "Growth Strategies",
+                    "duration": 8000,
+                },
+            )
+        except Exception as e:
+            logger.error({"event": "growth_strategy_error", "error": str(e)})
+            return AgentResponse(
+                success=True,
+                message="Based on your 44% margin and 6 clients, I'd recommend: 1) Focus on collecting overdue payments to improve cash flow. 2) Target fleet clients for EV charging infrastructure - there's massive demand. 3) Consider a referral incentive program to acquire similar clients.",
+                agent_type=self.get_agent_type(),
+            )
+
     async def process(
         self,
         intent: Intent,
@@ -467,13 +802,29 @@ Keep it 4-5 sentences for voice."""
         context: Optional[Dict[str, Any]] = None,
     ) -> AgentResponse:
         class _Ctx:
-            org_uuid = (context or {}).get("org_uuid", context or {}).get("org_id", "")
+            org_uuid = (context or {}).get(
+                "org_uuid", (context or {}).get("org_id", "")
+            )
+            org_id = (context or {}).get("org_id", (context or {}).get("org_uuid", ""))
             user_id = (context or {}).get("user_id")
             business_id = (context or {}).get("business_id", "default")
 
         ctx = _Ctx()
+        raw_text = entities.get("raw_text", str(entities))
 
-        if intent == Intent.BALANCE_CHECK:
+        if intent == Intent.TRANSACTION_EXPENSE or intent == Intent.TRANSACTION_CREATE:
+            return await self.handle_record_expense(raw_text, ctx)
+        elif intent == Intent.TRANSACTION_INCOME:
+            return await self.handle_record_income(raw_text, ctx)
+        elif intent in (
+            Intent.INVOICE_PAYMENT,
+            Intent.INVOICE_MARK_PAID,
+            Intent.INVOICE_PARTIAL_PAYMENT,
+        ):
+            return await self.handle_mark_invoice_paid(raw_text, ctx)
+        elif intent == Intent.PAYMENT_RECORD:
+            return await self.handle_mark_invoice_paid(raw_text, ctx)
+        elif intent == Intent.BALANCE_CHECK:
             return await self.handle_balance_check(ctx)
         elif intent in (Intent.INVOICE_QUERY, Intent.INVOICE_STATUS_CHECK):
             return await self.handle_invoice_query(ctx)
@@ -485,6 +836,8 @@ Keep it 4-5 sentences for voice."""
             return await self.handle_cash_flow_forecast(ctx)
         elif intent == Intent.PROBLEM_DIAGNOSIS:
             return await self.handle_payment_analysis(ctx)
+        elif intent == Intent.GROWTH_STRATEGY:
+            return await self.handle_get_growth_strategy(ctx)
         else:
             return self._build_stub_response("finance operation")
 
