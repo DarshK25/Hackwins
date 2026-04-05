@@ -47,6 +47,7 @@ public class OrganizationMapper {
         dto.setMsmeNumber(org.getMsmeNumber());
         dto.setIecCode(org.getIecCode());
         dto.setProfessionalTaxReg(org.getProfessionalTaxReg());
+        dto.setVerificationTier(org.getVerificationTier() != null ? org.getVerificationTier().name() : "UNVERIFIED");
         
         return dto;
     }

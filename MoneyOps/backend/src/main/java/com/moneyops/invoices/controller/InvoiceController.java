@@ -77,6 +77,13 @@ public class InvoiceController {
         return ResponseEntity.ok(sent);
     }
 
+    @PostMapping("/{id}/send-followup")
+    public ResponseEntity<com.moneyops.shared.dto.ApiResponse<Void>> sendFollowUp(@PathVariable String id) {
+        String orgId = OrgContext.getOrgId();
+        invoiceService.sendFollowUpEmail(id, orgId);
+        return ResponseEntity.ok(com.moneyops.shared.dto.ApiResponse.success("Follow-up email sent", null));
+    }
+
     @PatchMapping("/{id}/mark-paid")
     public ResponseEntity<InvoiceDto> markPaid(@PathVariable String id) {
         String orgId = OrgContext.getOrgId();

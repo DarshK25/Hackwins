@@ -154,6 +154,27 @@ public class OrganizationService {
         orgRepository.save(org);
     }
 
+    public BusinessOrganizationDto getVerificationTier(String orgId, String userId) {
+        BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(orgId, userId)
+                .orElseThrow(() -> new RuntimeException("Organization not found"));
+        return mapper.toDto(org);
+    }
+
+    public BusinessOrganizationDto updateVerificationTier(String orgId, String userId, String tier) {
+        BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(orgId, userId)
+                .orElseThrow(() -> new RuntimeException("Organization not found"));
+
+        try {
+            BusinessOrganization.VerificationTier newTier = BusinessOrganization.VerificationTier.valueOf(tier.toUpperCase());
+            org.setVerificationTier(newTier);
+        } catch (IllegalArgumentException e) {
+            throw new RuntimeException("Invalid verification tier: " + tier + ". Must be UNVERIFIED, BASIC, or GST_VERIFIED.");
+        }
+
+        BusinessOrganization saved = orgRepository.save(org);
+        return mapper.toDto(saved);
+    }
+
     // Regulatory Profile operations
     public RegulatoryProfileDto getRegulatoryProfile(String orgId, String userId) {
         verifyAccess(orgId, userId);

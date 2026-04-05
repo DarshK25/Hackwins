@@ -41,4 +41,6 @@ public class BusinessOrganizationDto {
     private String msmeNumber;
     private String iecCode;
     private String professionalTaxReg;
+
+    private String verificationTier;
 }

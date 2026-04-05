@@ -258,6 +258,39 @@ public class InvoiceService {
         return populateClientDetails(saved);
     }
 
+    public void sendFollowUpEmail(String id, String orgId) {
+        Invoice invoice = invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));
+
+        if (invoice.getClientEmail() == null || invoice.getClientEmail().isBlank()) {
+            throw new ValidationException("Invoice recipient email is missing.");
+        }
+
+        if (invoice.getStatus() == InvoiceStatus.PAID) {
+            throw new ValidationException("Cannot send follow-up for a paid invoice.");
+        }
+
+        String orgName = getOrganizationDisplayName(orgId);
+        String dueDate = invoice.getDueDate() != null
+                ? invoice.getDueDate().format(DateTimeFormatter.ofPattern("dd MMM yyyy"))
+                : "N/A";
+        String amount = invoice.getTotalAmount() != null
+                ? invoice.getTotalAmount().toPlainString()
+                : "0.00";
+
+        emailService.sendInvoiceFollowUp(
+                invoice.getClientEmail(),
+                invoice.getInvoiceNumber(),
+                invoice.getClientName(),
+                orgName,
+                dueDate,
+                amount
+        );
+
+        auditLogService.logUpdate("INVOICE", invoice.getId(),
+                invoiceMapper.toEntity(invoiceMapper.toDto(invoice)), invoice);
+    }
+
     public InvoiceDto markPaid(String id, String orgId) {
         Invoice invoice = invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));

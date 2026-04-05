@@ -119,6 +119,9 @@ export default function SettingsPage() {
 
     const [loading, setLoading] = useState(true);
     const [savingBusiness, setSavingBusiness] = useState(false);
+    const [verificationTier, setVerificationTier] = useState("UNVERIFIED");
+    const [verifying, setVerifying] = useState(false);
+    const [certFile, setCertFile] = useState(null);
 
     useEffect(() => {
         if (user) {
@@ -179,6 +182,9 @@ export default function SettingsPage() {
                     financialYearStartMonth: data.financialYearStartMonth || "4",
                     preferredLanguage: data.preferredLanguage || "en",
                 });
+                if (data.verificationTier) {
+                    setVerificationTier(data.verificationTier);
+                }
             } catch (error) {
                 console.error("Failed to fetch business data:", error);
                 toast.error(error.message || "Failed to load business settings");
@@ -193,6 +199,57 @@ export default function SettingsPage() {
     const updateBusiness = (field, value) => {
         setBusiness((prev) => ({ ...prev, [field]: value }));
     };
+
+    const handleBasicVerify = async () => {
+        if (!userId) return;
+        setVerifying(true);
+        try {
+            const resp = await fetch("/api/org/verify/basic", {
+                method: "POST",
+                headers: { "X-User-Id": userId },
+            });
+            const result = await resp.json();
+            if (!resp.ok) throw new Error(result.message || "Verification failed");
+            setVerificationTier("BASIC");
+            toast.success("Basic verification complete!");
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setVerifying(false);
+        }
+    };
+
+    const handleGstCertUpload = async (e) => {
+        e.preventDefault();
+        if (!certFile || !userId) return;
+        setVerifying(true);
+        try {
+            const formData = new FormData();
+            formData.append("file", certFile);
+            const resp = await fetch("/api/org/verify/gst-certificate", {
+                method: "POST",
+                headers: { "X-User-Id": userId },
+                body: formData,
+            });
+            const result = await resp.json();
+            if (!resp.ok) throw new Error(result.message || "GST verification failed");
+            setVerificationTier("GST_VERIFIED");
+            setCertFile(null);
+            toast.success("GST certificate verified!");
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setVerifying(false);
+        }
+    };
+
+    const tierBadge = (tier) => {
+        if (tier === "GST_VERIFIED") return { bg: "bg-[#4CBB17]", text: "text-black", label: "GST Verified" };
+        if (tier === "BASIC") return { bg: "bg-[#F59E0B]", text: "text-black", label: "Basic Verified" };
+        return { bg: "bg-[#2A2A2A]", text: "text-[#888]", label: "Unverified" };
+    };
+
+    const tierInfo = tierBadge(verificationTier);
 
     const validateBusiness = () => {
         if (!business.legalName.trim()) return "Legal name is required";
@@ -463,6 +520,86 @@ export default function SettingsPage() {
                                     <Field label="Current Challenges" id="biz-current-challenges" hint="Enter one challenge per line.">
                                         <textarea id="biz-current-challenges" value={business.currentChallengesText} onChange={(e) => updateBusiness("currentChallengesText", e.target.value)} style={textareaStyle} />
                                     </Field>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-6 rounded-2xl border border-[#2A2A2A] bg-[#0F0F0F] p-5">
+                            <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
+                                <div>
+                                    <div className="flex items-center gap-3">
+                                        <Shield className="h-5 w-5 text-white" />
+                                        <h3 className="text-white font-semibold">Business Verification</h3>
+                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${tierInfo.bg} ${tierInfo.text}`}>
+                                            {tierInfo.label}
+                                        </span>
+                                    </div>
+                                    <p className="text-sm text-[#A0A0A0] mt-1">Unlock higher trust workflows as you complete verification steps.</p>
+                                </div>
+                            </div>
+
+                            <div className="grid gap-3">
+                                <div className="flex items-start gap-3 rounded-xl border border-[#1F1F1F] bg-[#141414] p-4">
+                                    {verificationTier !== "UNVERIFIED"
+                                        ? <CheckCircle2 className="h-5 w-5 text-[#4CBB17] mt-0.5" />
+                                        : <Circle className="h-5 w-5 text-[#666] mt-0.5" />}
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <p className="text-sm font-medium text-white">Basic Profile</p>
+                                            {verificationTier === "BASIC" || verificationTier === "GST_VERIFIED"
+                                                ? <span className="text-[11px] uppercase tracking-wide text-[#4CBB17]">Verified</span>
+                                                : <span className="text-[11px] uppercase tracking-wide text-[#777]">Pending</span>}
+                                        </div>
+                                        <p className="text-xs text-[#A0A0A0] mt-0.5">Business name, phone, and industry on record.</p>
+                                        {verificationTier === "UNVERIFIED" && (
+                                            <button
+                                                onClick={handleBasicVerify}
+                                                disabled={verifying}
+                                                className="mt-3 text-xs px-3 py-1.5 rounded-lg bg-[#4CBB17] text-black font-semibold hover:bg-[#45a815] transition-colors disabled:opacity-50"
+                                            >
+                                                {verifying ? "Verifying..." : "Verify Now"}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="flex items-start gap-3 rounded-xl border border-[#1F1F1F] bg-[#141414] p-4">
+                                    {verificationTier === "GST_VERIFIED"
+                                        ? <CheckCircle2 className="h-5 w-5 text-[#4CBB17] mt-0.5" />
+                                        : verificationTier === "BASIC"
+                                        ? <Clock3 className="h-5 w-5 text-[#F59E0B] mt-0.5" />
+                                        : <Circle className="h-5 w-5 text-[#666] mt-0.5" />}
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <p className="text-sm font-medium text-white">GST Certificate</p>
+                                            {verificationTier === "GST_VERIFIED"
+                                                ? <span className="text-[11px] uppercase tracking-wide text-[#4CBB17]">Verified</span>
+                                                : <span className="text-[11px] uppercase tracking-wide text-[#777]">Optional</span>}
+                                        </div>
+                                        <p className="text-xs text-[#A0A0A0] mt-0.5">Upload your GST certificate for GST_VERIFIED status. Requires valid GSTIN.</p>
+                                        {verificationTier !== "GST_VERIFIED" && business.gstRegistered && business.gstin && (
+                                            <form onSubmit={handleGstCertUpload} className="mt-3 flex items-center gap-2">
+                                                <label className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border border-[#2A2A2A] cursor-pointer hover:border-[#4CBB17] transition-colors">
+                                                    <Upload className="h-3.5 w-3.5 text-[#A0A0A0]" />
+                                                    <span className="text-[#A0A0A0]">{certFile ? certFile.name : "Upload certificate"}</span>
+                                                    <input
+                                                        type="file"
+                                                        accept="application/pdf,image/jpeg,image/png"
+                                                        onChange={(e) => setCertFile(e.target.files[0])}
+                                                        className="hidden"
+                                                    />
+                                                </label>
+                                                {certFile && (
+                                                    <button type="submit" disabled={verifying} className="text-xs px-3 py-1.5 rounded-lg bg-[#4CBB17] text-black font-semibold hover:bg-[#45a815] transition-colors disabled:opacity-50">
+                                                        {verifying ? "Uploading..." : "Verify"}
+                                                    </button>
+                                                )}
+                                            </form>
+                                        )}
+                                        {verificationTier !== "GST_VERIFIED" && (!business.gstRegistered || !business.gstin) && (
+                                            <p className="mt-2 text-xs text-[#777]">Enable GST and add your GSTIN in the fields above to enable certificate upload.</p>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </div>

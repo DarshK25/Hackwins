@@ -32,6 +32,12 @@ import java.util.UUID;
 @Data
 public class BusinessOrganization {
 
+    public enum VerificationTier {
+        UNVERIFIED,
+        BASIC,
+        GST_VERIFIED
+    }
+
     @Id
     private String id;
 
@@ -40,6 +46,8 @@ public class BusinessOrganization {
      * Stored as BCrypt hash; raw code is never persisted.
      */
     private String teamActionCodeHash;
+
+    private VerificationTier verificationTier = VerificationTier.UNVERIFIED;
 
     // ── Step 1: Business Info ──────────────────────────────────────────────────
     private String legalName;

@@ -1,0 +1,528 @@
+"""
+Intelligent Agent — unified ReAct reasoning loop for MoneyOps.
+Single entry point for voice and text; calls backend tools via Groq.
+"""
+
+import os
+import json
+import asyncio
+import re
+from typing import Any, Optional
+from app.adapters.backend_adapter import get_backend_adapter
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+GROQ_KEY_PRIMARY = os.getenv("GROQ_API_KEY", "")
+GROQ_KEY_FAST = os.getenv("GROQ_API_KEY_FAST", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL_FAST = "llama-3.1-8b-instant"
+MAX_ITERATIONS = 5
+
+
+class IntelligentAgent:
+    def __init__(self):
+        self.backend = get_backend_adapter()
+
+    # ── Tool Registry ─────────────────────────────────────────────────────────
+
+    @property
+    def tools(self) -> dict:
+        return {
+            "get_financial_metrics": self._tool_get_financial_metrics,
+            "get_overdue_invoices": self._tool_get_overdue_invoices,
+            "get_all_invoices": self._tool_get_all_invoices,
+            "get_daily_briefing": self._tool_get_daily_briefing,
+            "send_invoice": self._tool_send_invoice,
+            "send_invoice_followup": self._tool_send_invoice_followup,
+            "get_clients": self._tool_get_clients,
+            "get_verification_status": self._tool_get_verification_status,
+            "record_transaction": self._tool_record_transaction,
+        }
+
+    @property
+    def tool_schemas(self) -> list:
+        return [
+            {
+                "name": "get_financial_metrics",
+                "description": "Get real-time financial metrics: revenue, expenses, profit, invoice counts by status.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "org_id": {"type": "string"},
+                        "user_id": {"type": "string"},
+                        "business_id": {"type": "string", "default": "default"},
+                    },
+                    "required": ["org_id"],
+                },
+            },
+            {
+                "name": "get_overdue_invoices",
+                "description": "Get all overdue invoices for the organization.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "org_id": {"type": "string"},
+                        "user_id": {"type": "string"},
+                    },
+                    "required": ["org_id"],
+                },
+            },
+            {
+                "name": "get_all_invoices",
+                "description": "Get all invoices, optionally filtered by status.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "org_id": {"type": "string"},
+                        "user_id": {"type": "string"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["DRAFT", "SENT", "PAID", "OVERDUE"],
+                        },
+                        "limit": {"type": "integer", "default": 20},
+                    },
+                    "required": ["org_id"],
+                },
+            },
+            {
+                "name": "get_daily_briefing",
+                "description": "Get a comprehensive daily business briefing: overdue amounts, today's agenda, pending tasks, key metrics.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "org_id": {"type": "string"},
+                        "user_id": {"type": "string"},
+                    },
+                    "required": ["org_id"],
+                },
+            },
+            {
+                "name": "send_invoice",
+                "description": "Send an invoice to the client via email. Marks DRAFT → SENT.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "org_id": {"type": "string"},
+                        "user_id": {"type": "string"},
+                        "invoice_id": {
+                            "type": "string",
+                            "description": "The invoice UUID",
+                        },
+                    },
+                    "required": ["org_id", "invoice_id"],
+                },
+            },
+            {
+                "name": "send_invoice_followup",
+                "description": "Send a follow-up email for an overdue invoice.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "org_id": {"type": "string"},
+                        "user_id": {"type": "string"},
+                        "invoice_id": {"type": "string"},
+                    },
+                    "required": ["org_id", "invoice_id"],
+                },
+            },
+            {
+                "name": "get_clients",
+                "description": "Get list of all clients with their basic info.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "org_id": {"type": "string"},
+                        "user_id": {"type": "string"},
+                    },
+                    "required": ["org_id"],
+                },
+            },
+            {
+                "name": "get_verification_status",
+                "description": "Get business verification tier status (UNVERIFIED, BASIC, GST_VERIFIED).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "org_id": {"type": "string"},
+                        "user_id": {"type": "string"},
+                    },
+                    "required": ["org_id"],
+                },
+            },
+            {
+                "name": "record_transaction",
+                "description": "Record a financial transaction (income or expense).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "org_id": {"type": "string"},
+                        "user_id": {"type": "string"},
+                        "type": {"type": "string", "enum": ["INCOME", "EXPENSE"]},
+                        "amount": {"type": "number"},
+                        "category": {"type": "string"},
+                        "description": {"type": "string"},
+                        "currency": {"type": "string", "default": "INR"},
+                    },
+                    "required": ["org_id", "type", "amount", "description"],
+                },
+            },
+        ]
+
+    write_tools = {"send_invoice", "send_invoice_followup", "record_transaction"}
+
+    # ── Public Entry Point ──────────────────────────────────────────────────────
+
+    async def process(
+        self,
+        message: str,
+        org_id: str,
+        user_id: Optional[str] = None,
+        business_id: str = "default",
+        session_id: str = "default",
+    ) -> dict:
+        ctx = {"org_id": org_id, "user_id": user_id, "business_id": business_id}
+        history: list[dict] = []
+
+        for iteration in range(MAX_ITERATIONS):
+            thought = await self._reason(message, ctx, history)
+            logger.info(
+                {
+                    "event": "agent_iteration",
+                    "iter": iteration + 1,
+                    "thought": thought[:200],
+                }
+            )
+
+            if thought.get("action") == "respond":
+                return self._format_response(
+                    thought.get("response", ""), thought.get("ui_event")
+                )
+
+            tool_name = thought.get("tool")
+            if not tool_name:
+                return self._format_response(
+                    thought.get("response", "I'm not sure how to help with that."),
+                    thought.get("ui_event"),
+                )
+
+            tool_fn = self.tools.get(tool_name)
+            if not tool_fn:
+                history.append(
+                    {
+                        "role": "tool",
+                        "tool": tool_name,
+                        "content": f"Error: unknown tool '{tool_name}'",
+                    }
+                )
+                continue
+
+            args = thought.get("tool_args", {})
+            args.setdefault("org_id", org_id)
+            if user_id:
+                args.setdefault("user_id", user_id)
+
+            try:
+                result = await tool_fn(args)
+            except Exception as e:
+                logger.error(
+                    {"event": "tool_error", "tool": tool_name, "error": str(e)}
+                )
+                result = f"Tool error: {e}"
+
+            history.append(
+                {"role": "tool", "tool": tool_name, "content": str(result)[:1000]}
+            )
+
+        return self._format_response(
+            "I've gathered the information. Here's what I found: "
+            + self._summarize_history(history),
+            None,
+        )
+
+    # ── ReAct Reasoning ────────────────────────────────────────────────────────
+
+    async def _reason(self, message: str, ctx: dict, history: list) -> dict:
+        history_str = self._format_history(history)
+        tools_json = json.dumps(self.tool_schemas, indent=2)
+
+        prompt = f"""You are a CFO-level financial assistant for a small business in India. Think step by step.
+
+CONTEXT:
+- org_id: {ctx.get("org_id")}
+- user message: {message}
+
+CONVERSATION HISTORY:
+{history_str or "(empty)"}
+
+AVAILABLE TOOLS:
+{tools_json}
+
+DECISION RULES:
+- get_daily_briefing: for "morning briefing", "daily digest", "today's summary", "start of day"
+- get_financial_metrics: for revenue, profit, expenses, invoice counts
+- get_overdue_invoices: for "overdue", "unpaid", "past due", "outstanding"
+- get_all_invoices: for invoice lists, status summaries
+- get_clients: for client lists, customer info
+- send_invoice: when user says "send invoice", "email invoice", "deliver invoice" (needs invoice_id — ask if not provided)
+- send_invoice_followup: for "remind", "follow up", "chase", "nudge" on overdue invoices (needs invoice_id)
+- get_verification_status: for "verification", "verification tier", "trust level"
+- record_transaction: for recording income or expense entries
+
+Respond ONLY with valid JSON (no markdown, no explanation):
+{{"action": "tool|respond", "tool": "tool_name|null", "tool_args": {{"key": "value"}}, "response": "text if action=respond", "ui_event": null}}
+"""
+
+        for attempt, (key, model) in enumerate(
+            [(GROQ_KEY_PRIMARY, GROQ_MODEL), (GROQ_KEY_FAST, GROQ_MODEL_FAST)]
+        ):
+            if not key:
+                continue
+            try:
+                return await self._call_groq(prompt, key, model)
+            except Exception as e:
+                logger.warning(
+                    {"event": "groq_retry", "attempt": attempt + 1, "error": str(e)}
+                )
+                if attempt == 0 and GROQ_KEY_FAST:
+                    continue
+                return {
+                    "action": "respond",
+                    "response": "I'm having trouble reasoning right now. Please try again.",
+                }
+        return {"action": "respond", "response": "No LLM keys configured."}
+
+    async def _call_groq(self, prompt: str, api_key: str, model: str) -> dict:
+        async with asyncio.timeout(30):
+            import httpx
+
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 600,
+                        "temperature": 0.3,
+                    },
+                )
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"].strip()
+            for prefix in ["```json", "```"]:
+                if content.startswith(prefix):
+                    content = content[len(prefix) :].strip()
+                if content.endswith(prefix.rstrip("`")):
+                    content = content[: -len(prefix.rstrip("`"))].strip()
+            return json.loads(content)
+
+    # ── Tools ─────────────────────────────────────────────────────────────────
+
+    async def _tool_get_financial_metrics(self, ctx: dict) -> str:
+        r = await self.backend.get_finance_metrics(
+            ctx.get("business_id", "default"), ctx["org_id"], ctx.get("user_id")
+        )
+        if not r.success or not r.data:
+            return f"Could not fetch metrics: {r.error or 'unknown error'}"
+        d = r.data
+        return (
+            f"Revenue: INR {d.get('revenue', 0):,.2f} | "
+            f"Expenses: INR {d.get('expenses', 0):,.2f} | "
+            f"Net Profit: INR {d.get('netProfit', 0):,.2f} | "
+            f"Overdue: {d.get('overdueCount', 0)} invoices totalling INR {d.get('overdueAmount', 0):,.2f}"
+        )
+
+    async def _tool_get_overdue_invoices(self, ctx: dict) -> str:
+        r = await self.backend._request(
+            "GET",
+            "/api/invoices/overdue",
+            org_id=ctx["org_id"],
+            user_id=ctx.get("user_id"),
+        )
+        if not r.success:
+            return f"Error: {r.error}"
+        invs = r.data if isinstance(r.data, list) else []
+        if not invs:
+            return "No overdue invoices."
+        lines = []
+        for inv in invs[:10]:
+            amt = inv.get("totalAmount", 0)
+            num = inv.get("invoiceNumber", "?")
+            client = inv.get("clientName", "Unknown")
+            due = inv.get("dueDate", "?")
+            lines.append(f"- {num} | {client} | INR {amt:,.2f} | due {due}")
+        total = sum(i.get("totalAmount", 0) for i in invs)
+        return f"{len(invs)} overdue invoice(s), total INR {total:,.2f}:\n" + "\n".join(
+            lines
+        )
+
+    async def _tool_get_all_invoices(self, ctx: dict) -> str:
+        params = {"limit": ctx.get("limit", 20)}
+        if ctx.get("status"):
+            params["status"] = ctx["status"]
+        r = await self.backend._request(
+            "GET",
+            "/api/invoices",
+            params=params,
+            org_id=ctx["org_id"],
+            user_id=ctx.get("user_id"),
+        )
+        if not r.success:
+            return f"Error: {r.error}"
+        invs = r.data if isinstance(r.data, list) else []
+        if not invs:
+            return "No invoices found."
+        by_status: dict[str, int] = {}
+        for inv in invs:
+            s = inv.get("status", "UNKNOWN")
+            by_status[s] = by_status.get(s, 0) + 1
+        return f"{len(invs)} invoice(s): " + ", ".join(
+            f"{k}={v}" for k, v in by_status.items()
+        )
+
+    async def _tool_get_daily_briefing(self, ctx: dict) -> str:
+        r_metrics = await self.backend.get_finance_metrics(
+            ctx.get("business_id", "default"), ctx["org_id"], ctx.get("user_id")
+        )
+        r_overdue = await self.backend._request(
+            "GET",
+            "/api/invoices/overdue",
+            org_id=ctx["org_id"],
+            user_id=ctx.get("user_id"),
+        )
+
+        overdue_invs = (
+            r_overdue.data
+            if (r_overdue.success and isinstance(r_overdue.data, list))
+            else []
+        )
+        overdue_total = sum(i.get("totalAmount", 0) for i in overdue_invs)
+        overdue_count = len(overdue_invs)
+
+        metrics = r_metrics.data if (r_metrics.success and r_metrics.data) else {}
+        revenue = metrics.get("revenue", 0)
+        expenses = metrics.get("expenses", 0)
+        profit = metrics.get("netProfit", 0)
+
+        agenda = []
+        if overdue_count > 0:
+            agenda.append(
+                f"ACTION: Follow up on {overdue_count} overdue invoice(s) totalling INR {overdue_total:,.2f}"
+            )
+        if profit < 0:
+            agenda.append("ALERT: Your business is currently operating at a loss")
+        if revenue > 0:
+            margin = (profit / revenue * 100) if revenue > 0 else 0
+            if margin < 10:
+                agenda.append(
+                    f"NOTE: Profit margin is {margin:.1f}% — consider reviewing expenses"
+                )
+        if not agenda:
+            agenda.append("Everything looks good — no urgent actions today")
+
+        return (
+            f"DAILY BRIEFING\n"
+            f"Revenue: INR {revenue:,.2f} | Expenses: INR {expenses:,.2f} | Net: INR {profit:,.2f}\n"
+            f"Overdue: {overdue_count} invoice(s) = INR {overdue_total:,.2f}\n"
+            f"Today's Agenda:\n" + "\n".join(f"  • {a}" for a in agenda)
+        )
+
+    async def _tool_send_invoice(self, ctx: dict) -> str:
+        if not ctx.get("invoice_id"):
+            return "Error: invoice_id is required to send an invoice."
+        r = await self.backend._request(
+            "PATCH",
+            f"/api/invoices/{ctx['invoice_id']}/send",
+            org_id=ctx["org_id"],
+            user_id=ctx.get("user_id"),
+        )
+        if not r.success:
+            return f"Failed to send invoice: {r.error}"
+        inv = r.data.get("data") if isinstance(r.data, dict) else r.data
+        return f"Invoice {inv.get('invoiceNumber', ctx['invoice_id'])} sent successfully to {inv.get('clientEmail', 'the client')}."
+
+    async def _tool_send_invoice_followup(self, ctx: dict) -> str:
+        if not ctx.get("invoice_id"):
+            return "Error: invoice_id is required to send a follow-up."
+        r = await self.backend._request(
+            "POST",
+            f"/api/invoices/{ctx['invoice_id']}/send-followup",
+            org_id=ctx["org_id"],
+            user_id=ctx.get("user_id"),
+        )
+        if not r.success:
+            return f"Failed to send follow-up: {r.error}"
+        return "Follow-up email sent successfully."
+
+    async def _tool_get_clients(self, ctx: dict) -> str:
+        clients = await self.backend.get_clients(
+            ctx["org_id"], user_id=ctx.get("user_id")
+        )
+        if not clients:
+            return "No clients found."
+        lines = [
+            f"{c.get('display_name', c.get('name', '?'))} ({c.get('email', 'no email')}) [{c.get('status', '?')}]"
+            for c in clients[:15]
+        ]
+        return f"{len(clients)} client(s):\n" + "\n".join(f"  • {l}" for l in lines)
+
+    async def _tool_get_verification_status(self, ctx: dict) -> str:
+        r = await self.backend._request(
+            "GET",
+            "/api/org/verify/status",
+            org_id=ctx["org_id"],
+            user_id=ctx.get("user_id"),
+        )
+        if not r.success:
+            return f"Could not fetch verification status: {r.error}"
+        data = r.data.get("data") if isinstance(r.data, dict) else r.data
+        tier = (
+            data.get("verificationTier", "UNVERIFIED")
+            if isinstance(data, dict)
+            else "UNKNOWN"
+        )
+        return f"Verification tier: {tier}"
+
+    async def _tool_record_transaction(self, ctx: dict) -> str:
+        r = await self.backend._request(
+            "POST",
+            "/api/transactions",
+            data={
+                "type": ctx["type"],
+                "amount": ctx["amount"],
+                "category": ctx.get("category", "General"),
+                "description": ctx["description"],
+                "currency": ctx.get("currency", "INR"),
+            },
+            org_id=ctx["org_id"],
+            user_id=ctx.get("user_id"),
+        )
+        if not r.success:
+            return f"Failed to record transaction: {r.error}"
+        return f"Transaction recorded: {ctx['type']} of INR {ctx['amount']:,.2f}"
+
+    # ── Helpers ────────────────────────────────────────────────────────────────
+
+    def _format_history(self, history: list) -> str:
+        if not history:
+            return ""
+        return "\n".join(
+            f"[{h['role'].upper()} via {h.get('tool', 'chat')}]: {h['content'][:300]}"
+            for h in history[-6:]
+        )
+
+    def _summarize_history(self, history: list) -> str:
+        if not history:
+            return "No information available."
+        return " ".join(h["content"][:200] for h in history[-3:])
+
+    def _format_response(self, message: str, ui_event: Optional[dict]) -> dict:
+        return {
+            "message": message,
+            "success": True,
+            "agent_type": "intelligent_agent",
+            "ui_event": ui_event,
+        }
+
+
+intelligent_agent = IntelligentAgent()

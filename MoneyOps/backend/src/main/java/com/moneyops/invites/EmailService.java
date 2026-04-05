@@ -32,7 +32,7 @@ public class EmailService {
         this.resend = new Resend(resendApiKey);
     }
 
-    public void sendInviteEmail(String toEmail, String token, String orgName, String role, String teamActionCode) {
+    public void sendInviteEmail(String toEmail, String token, String orgName, String role) {
         String inviteLink = frontendUrl + "/invite/" + token;
         
         log.info("Attempting to send invite email to {} using sender {}", toEmail, fromEmail);
@@ -44,14 +44,10 @@ public class EmailService {
                     .html("<div style='font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;'>" +
                           "  <h2 style='color: #4CBB17;'>You've been invited to " + (orgName != null ? orgName : "MoneyOps") + "</h2>" +
                           "  <p>You have been added as a <strong>" + (role != null ? role : "MEMBER") + "</strong>.</p>" +
-                          "  <p>Your team security code (required to create invoices/clients) is:</p>" +
-                          "  <div style='background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: center;'>" +
-                          "    <h1 style='margin: 10px 0; letter-spacing: 3px; color: #333;'>" + teamActionCode + "</h1>" +
-                          "  </div>" +
-                          "  <p>You can also join by clicking the button below:</p>" +
+                          "  <p>Your workspace owner will share the team security code with you directly.</p>" +
+                          "  <p>Accept your invitation by clicking the button below:</p>" +
                           "  <a href='" + inviteLink + "' style='display:inline-block; padding: 12px 24px; background-color: #4CBB17; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;'>Accept Invitation</a>" +
                           "  <p style='margin-top: 20px; font-size: 12px; color: #999;'>If the button doesn't work, copy and paste this link: " + inviteLink + "</p>" +
-                          "  <p style='margin-top: 20px; font-size: 12px; color: #999;'>For security, only team members can use this code to create clients and invoices.</p>" +
                           "</div>")
                     .build();
 
@@ -130,6 +126,62 @@ public class EmailService {
         } catch (Exception e) {
             log.error("UNEXPECTED ERROR: during invoice email sending:", e);
             throw e;
+        }
+    }
+
+    public void sendInvoiceFollowUp(String toEmail, String invoiceNumber, String clientName,
+                                     String orgName, String dueDate, String amount) {
+        String safeClientName = clientName != null ? clientName : "there";
+        String safeOrgName = orgName != null ? orgName : "MoneyOps";
+        String formattedAmount = formatInr(amount);
+
+        log.info("Sending follow-up email for invoice {} to {}", invoiceNumber, toEmail);
+
+        String subject = "Reminder: Invoice " + invoiceNumber + " is overdue";
+        String html = "<div style='font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;'>" +
+            "  <h2 style='color: #E53E3E;'>Payment Reminder</h2>" +
+            "  <p>Dear " + safeClientName + ",</p>" +
+            "  <p>This is a friendly reminder that your invoice <strong>" + invoiceNumber + "</strong> from " + safeOrgName + " is past its due date.</p>" +
+            "  <div style='background-color: #f9f9f9; padding: 16px; border-radius: 8px; margin: 20px 0;'>" +
+            "    <p style='margin: 0 0 8px; color: #666;'>Invoice Number: <strong style='color: #111;'>" + invoiceNumber + "</strong></p>" +
+            "    <p style='margin: 0 0 8px; color: #666;'>Due Date: <strong style='color: #111;'>" + (dueDate != null ? dueDate : "N/A") + "</strong></p>" +
+            "    <p style='margin: 0; color: #666;'>Amount Due: <strong style='color: #111; font-size: 18px;'>" + formattedAmount + "</strong></p>" +
+            "  </div>" +
+            "  <p>Please arrange payment at your earliest convenience. If you have already paid, kindly disregard this message or reply to confirm.</p>" +
+            "  <p style='margin-top: 24px;'>Thank you,<br/>" + safeOrgName + "</p>" +
+            "  <p style='margin-top: 24px; font-size: 12px; color: #999;'>Sent via MoneyOps</p>" +
+            "</div>";
+
+        CreateEmailOptions params = CreateEmailOptions.builder()
+                .from(fromEmail)
+                .to(toEmail)
+                .subject(subject)
+                .html(html)
+                .build();
+
+        try {
+            CreateEmailResponse data = resend.emails().send(params);
+            if (data != null && data.getId() != null) {
+                log.info("Follow-up email sent for invoice {} to {}. ID: {}", invoiceNumber, toEmail, data.getId());
+            } else {
+                log.error("Resend API returned success but no ID for follow-up email to {}", toEmail);
+                throw new RuntimeException("Email response missing ID");
+            }
+        } catch (ResendException e) {
+            log.error("RESEND API ERROR: Failed to send follow-up email for invoice {} to {}. Details: {}", invoiceNumber, toEmail, e.getMessage());
+            throw new RuntimeException("Failed to send follow-up email: " + e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("UNEXPECTED ERROR: during follow-up email sending:", e);
+            throw e;
+        }
+    }
+
+    private String formatInr(String amount) {
+        try {
+            double val = Double.parseDouble(amount.replace(",", "").trim());
+            return "INR " + String.format("%,.2f", val);
+        } catch (Exception e) {
+            return "INR " + amount;
         }
     }
 }
