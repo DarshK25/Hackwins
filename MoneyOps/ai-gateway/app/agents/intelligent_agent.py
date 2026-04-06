@@ -1,6 +1,6 @@
 """
-Intelligent Agent — unified ReAct reasoning loop for MoneyOps.
-Single entry point for voice and text; calls backend tools via Groq.
+Intelligent Agent — unified reasoning agent for MoneyOps.
+Handles voice and text queries with memory, business context, and tool execution.
 """
 
 import os
@@ -11,6 +11,7 @@ import requests
 from typing import Any, Optional
 from app.adapters.backend_adapter import get_backend_adapter
 from app.utils.logger import get_logger
+from app.utils.tts_sanitizer import sanitize_for_tts
 
 logger = get_logger(__name__)
 
@@ -25,8 +26,6 @@ class IntelligentAgent:
     def __init__(self):
         self.backend = get_backend_adapter()
 
-    # ── Tool Registry ─────────────────────────────────────────────────────────
-
     @property
     def tools(self) -> dict:
         return {
@@ -37,8 +36,17 @@ class IntelligentAgent:
             "send_invoice": self._tool_send_invoice,
             "send_invoice_followup": self._tool_send_invoice_followup,
             "get_clients": self._tool_get_clients,
+            "get_client_details": self._tool_get_client_details,
             "get_verification_status": self._tool_get_verification_status,
             "record_transaction": self._tool_record_transaction,
+            "get_transactions": self._tool_get_transactions,
+            "get_invoice_details": self._tool_get_invoice_details,
+            "get_business_context": self._tool_get_business_context,
+            "search_market": self._tool_search_market,
+            "check_compliance": self._tool_check_compliance,
+            "recall": self._tool_recall,
+            "remember": self._tool_remember,
+            "draft_followup_email": self._tool_draft_followup_email,
         }
 
     @property
@@ -73,6 +81,15 @@ class IntelligentAgent:
                 },
             },
             {
+                "name": "get_invoice_details",
+                "description": "Full details of a specific invoice",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"invoice_id": {"type": "string"}},
+                    "required": ["invoice_id"],
+                },
+            },
+            {
                 "name": "get_daily_briefing",
                 "description": "Daily briefing: overdue, agenda, metrics",
                 "parameters": {"type": "object", "properties": {}, "required": []},
@@ -97,8 +114,17 @@ class IntelligentAgent:
             },
             {
                 "name": "get_clients",
-                "description": "All clients with basic info",
+                "description": "List all clients",
                 "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+            {
+                "name": "get_client_details",
+                "description": "Full details of a specific client including payment history",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"client_id": {"type": "string"}},
+                    "required": ["client_id"],
+                },
             },
             {
                 "name": "get_verification_status",
@@ -114,15 +140,92 @@ class IntelligentAgent:
                         "type": {"type": "string", "enum": ["INCOME", "EXPENSE"]},
                         "amount": {"type": "number"},
                         "description": {"type": "string"},
+                        "category": {"type": "string"},
                     },
                     "required": ["type", "amount", "description"],
+                },
+            },
+            {
+                "name": "get_transactions",
+                "description": "Get transaction history (income/expense)",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "enum": ["INCOME", "EXPENSE"]},
+                        "limit": {"type": "integer"},
+                    },
+                    "required": [],
+                },
+            },
+            {
+                "name": "get_business_context",
+                "description": "Get business info from onboarding: industry, sector, services, target market",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+            {
+                "name": "search_market",
+                "description": "Search market news and trends relevant to business",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "check_compliance",
+                "description": "Check GST/TDS deadlines and liability",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "check_type": {
+                            "type": "string",
+                            "enum": [
+                                "deadlines",
+                                "gst_liability",
+                                "tds_reconciliation",
+                            ],
+                        }
+                    },
+                    "required": ["check_type"],
+                },
+            },
+            {
+                "name": "recall",
+                "description": "Search past conversation memory for relevant context",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "remember",
+                "description": "Save important fact to long-term memory",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string"},
+                        "type": {
+                            "type": "string",
+                            "enum": ["business_fact", "user_preference", "reminder"],
+                        },
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["content", "type"],
+                },
+            },
+            {
+                "name": "draft_followup_email",
+                "description": "Draft a professional follow-up email for overdue invoice",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"invoice_id": {"type": "string"}},
+                    "required": ["invoice_id"],
                 },
             },
         ]
 
     write_tools = {"send_invoice", "send_invoice_followup", "record_transaction"}
-
-    # ── Public Entry Point ──────────────────────────────────────────────────────
 
     async def process(
         self,
@@ -131,121 +234,221 @@ class IntelligentAgent:
         user_id: Optional[str] = None,
         business_id: str = "default",
         session_id: str = "default",
+        channel: str = "voice",
     ) -> dict:
         ctx = {"org_id": org_id, "user_id": user_id, "business_id": business_id}
-        history: list[dict] = []
+        msg_lower = message.lower()
 
-        for iteration in range(MAX_ITERATIONS):
-            thought = await self._reason(message, ctx, history)
-            logger.info(
-                {
-                    "event": "agent_iteration",
-                    "iter": iteration + 1,
-                    "thought": str(thought)[:200],
-                }
+        tool_name, args = self._route_query(msg_lower)
+
+        if not tool_name:
+            response = self._generate_direct_response(message, msg_lower)
+            if channel == "voice":
+                response = sanitize_for_tts(response)
+            return self._format_response(response, None)
+
+        tool_fn = self.tools.get(tool_name)
+        if not tool_fn:
+            return self._format_response(f"I don't have a tool for that.", None)
+
+        args.setdefault("org_id", org_id)
+        if user_id:
+            args.setdefault("user_id", user_id)
+
+        try:
+            result = await tool_fn(args)
+        except Exception as e:
+            logger.error({"event": "tool_error", "tool": tool_name, "error": str(e)})
+            result = f"Error: {e}"
+
+        response = self._format_tool_result(message, result, tool_name)
+        if channel == "voice":
+            response = sanitize_for_tts(response)
+        return self._format_response(response, None)
+
+    def _route_query(self, msg: str) -> tuple[Optional[str], dict]:
+        """Route query to appropriate tool based on keywords."""
+        args = {}
+
+        if any(
+            k in msg for k in ["revenue", "profit", "expenses", "financial metrics"]
+        ):
+            return "get_financial_metrics", args
+        if any(k in msg for k in ["overdue", "unpaid", "past due"]):
+            return "get_overdue_invoices", args
+        if any(k in msg for k in ["invoice", "invoices"]):
+            if "all" in msg or "list" in msg:
+                return "get_all_invoices", args
+            return "get_all_invoices", args
+        if any(k in msg for k in ["briefing", "morning", "summary", "daily"]):
+            return "get_daily_briefing", args
+        if any(k in msg for k in ["market", "trend", "competitor", "sector news"]):
+            return "search_market", {"query": msg}
+        if any(
+            k in msg
+            for k in ["remember that", "save this", "note that", "don't forget"]
+        ):
+            return "remember", {
+                "content": msg,
+                "type": "user_preference",
+                "tags": ["preference"],
+            }
+        if any(
+            k in msg
+            for k in ["what do you remember", "what did i tell you", "do you recall"]
+        ):
+            return "recall", {"query": msg}
+        if any(k in msg for k in ["client", "customers"]):
+            return "get_clients", args
+        if any(
+            k in msg
+            for k in ["business", "sector", "industry", "services", "what do i do"]
+        ):
+            return "get_business_context", args
+        if any(k in msg for k in ["transaction", "expense", "income"]):
+            return "get_transactions", args
+        if any(k in msg for k in ["verification", "tier", "trust"]):
+            return "get_verification_status", args
+        if any(k in msg for k in ["compliance", "gst", "tds", "deadline", "filing"]):
+            if "gst" in msg and "liability" in msg:
+                args["check_type"] = "gst_liability"
+            elif "tds" in msg:
+                args["check_type"] = "tds_reconciliation"
+            else:
+                args["check_type"] = "deadlines"
+            return "check_compliance", args
+
+        return None, {}
+
+    def _generate_direct_response(self, message: str, msg_lower: str) -> str:
+        """Generate direct response for greetings and simple queries."""
+        if any(k in msg_lower for k in ["hi", "hello", "hey"]):
+            return "Hello! I'm your financial assistant. Ask me about your revenue, invoices, clients, or anything about your business."
+        if any(k in msg_lower for k in ["thanks", "thank you"]):
+            return "You're welcome! Let me know if you need anything else."
+        if any(k in msg_lower for k in ["help", "what can you do"]):
+            return "I can help you with: revenue and profit, overdue invoices, client management, daily briefings, transactions, and compliance checks."
+        return "I'm not sure I understand. Try asking about your revenue, invoices, clients, or business overview."
+
+    def _format_tool_result(
+        self, original_msg: str, result: str, tool_name: str
+    ) -> str:
+        """Format tool result into a natural response."""
+        if "Error" in result or "could not" in result.lower():
+            return result
+        if tool_name == "get_financial_metrics":
+            return result
+        if tool_name == "get_overdue_invoices":
+            return result
+        if tool_name == "get_all_invoices":
+            return result
+        if tool_name == "get_daily_briefing":
+            return result
+        if tool_name == "get_clients":
+            return result
+        if tool_name == "get_business_context":
+            return result
+        if tool_name == "get_transactions":
+            return result
+        if tool_name == "get_verification_status":
+            return result
+        if tool_name == "check_compliance":
+            return result
+        if tool_name == "search_market":
+            return result
+        if tool_name == "recall":
+            return result
+        return result
+
+    async def _get_business_context_for_prompt(
+        self, org_id: str, user_id: Optional[str]
+    ) -> str:
+        try:
+            r = await self.backend.get_onboarding_status(user_id or org_id)
+            if r.success and r.data:
+                data = r.data if isinstance(r.data, dict) else {}
+                business = data.get("business", {})
+                if not business:
+                    business = data
+                name = (
+                    business.get("legalName")
+                    or business.get("businessName")
+                    or "your business"
+                )
+                industry = business.get("industry") or "general"
+                sector = business.get("targetMarket") or "B2B"
+                services = business.get("primaryActivity") or "business services"
+                gstin = business.get("gstin") or "not registered"
+                return (
+                    f"BUSINESS: {name}\n"
+                    f"Industry: {industry}\n"
+                    f"Sector: {sector}\n"
+                    f"Services: {services}\n"
+                    f"GSTIN: {gstin}"
+                )
+        except Exception as e:
+            logger.warning({"event": "business_context_load_failed", "error": str(e)})
+        return "Business information not available"
+
+    async def _get_memory_context(self, org_id: str) -> str:
+        try:
+            resp = requests.get(
+                f"http://127.0.0.1:8000/api/memory/{org_id}?limit=5",
+                headers={"X-Org-Id": org_id},
+                timeout=5,
             )
+            if resp.status_code == 200:
+                memories = resp.json()
+                if memories:
+                    lines = [
+                        f"- {m.get('content', '')}"
+                        for m in memories[:5]
+                        if m.get("content")
+                    ]
+                    return "\n\nWHAT I REMEMBER:\n" + "\n".join(lines)
+        except Exception:
+            pass
+        return ""
 
-            action = str(thought.get("action", "")).split("|")[0].strip()
-
-            if action == "respond":
-                return self._format_response(
-                    thought.get("response", ""), thought.get("ui_event")
-                )
-
-            tool_name = thought.get("tool")
-            if not tool_name:
-                return self._format_response(
-                    thought.get("response", "I'm not sure how to help with that."),
-                    thought.get("ui_event"),
-                )
-
-            tool_fn = self.tools.get(tool_name)
-            if not tool_fn:
-                history.append(
-                    {
-                        "role": "tool",
-                        "tool": tool_name,
-                        "content": f"Error: unknown tool '{tool_name}'",
-                    }
-                )
-                continue
-
-            args = thought.get("tool_args", {})
-            args.setdefault("org_id", org_id)
-            if user_id:
-                args.setdefault("user_id", user_id)
-
-            try:
-                result = await tool_fn(args)
-            except Exception as e:
-                logger.error(
-                    {"event": "tool_error", "tool": tool_name, "error": str(e)}
-                )
-                result = f"Tool error: {e}"
-
-            history.append(
-                {"role": "tool", "tool": tool_name, "content": str(result)[:1000]}
+    async def _reason(
+        self,
+        message: str,
+        ctx: dict,
+        history: list,
+        business_context: str,
+        memory_context: str,
+    ) -> dict:
+        history_str = (
+            "\n".join(
+                f"- {h['content'][:100]}" for h in history[-4:] if h.get("content")
             )
-
-            if iteration == 0:
-                history_str = self._format_history(history)
-                tool_result_text = history[-1]["content"]
-                response_prompt = (
-                    f"User asked: {message}\n"
-                    f"Tool result: {tool_result_text}\n"
-                    f"Respond to the user with the tool data. Be concise and factual.\n"
-                    f'{{"action": "respond", "tool": null, "tool_args": {{}}, "response": "your answer", "ui_event": null}}'
-                )
-                thought2 = await self._reason(response_prompt, ctx, [])
-                action2 = str(thought2.get("action", "")).split("|")[0].strip()
-                if action2 == "respond":
-                    return self._format_response(
-                        thought2.get("response", tool_result_text),
-                        thought2.get("ui_event"),
-                    )
-                return self._format_response(tool_result_text, None)
-
-        return self._format_response(
-            "I've gathered the information. Here's what I found: "
-            + self._summarize_history(history),
-            None,
+            if history
+            else "(empty)"
         )
 
-    # ── ReAct Reasoning ────────────────────────────────────────────────────────
-
-    async def _reason(self, message: str, ctx: dict, history: list) -> dict:
-        history_str = self._format_history(history)
         tools_str = "\n".join(
             f"- {t['name']}: {t['description']}" for t in self.tool_schemas
         )
 
-        prompt = f"""You are a financial assistant for a small business in India. Be direct and decisive.
+        prompt = f"""User: {message}
 
-User: {message}
-History: {history_str or "(empty)"}
+Always call a tool when the user asks about business data.
 
-Available tools:
-{tools_str}
+Tools: {tools_str}
 
-RULES:
-- If history has a tool result (starts with "[TOOL via"), respond with action="respond" and summarize the data for the user. DO NOT call the same tool again.
-- If NO tool result in history yet: call the right tool for the user's request.
-  - "overdue"/"unpaid"/"past due" → get_overdue_invoices
-  - "revenue"/"profit"/"expenses" → get_financial_metrics
-  - "invoices" list → get_all_invoices
-  - "briefing"/"morning"/"summary" → get_daily_briefing
-  - "clients" → get_clients
-  - "verification" tier → get_verification_status
-  - "send"/"email" invoice → send_invoice (invoice_id if provided, else ask)
-  - "remind"/"follow up" → send_invoice_followup (invoice_id if provided, else ask)
-  - "record" transaction → record_transaction (needs type, amount, description)
-- NEVER call the same tool twice in a row. If you just called a tool, RESPOND with the result.
-- If tool result is "Error" or "Could not fetch", say you couldn't get the data and why.
+Examples:
+- "revenue/profit/expenses" -> get_financial_metrics
+- "overdue/unpaid" -> get_overdue_invoices
+- "invoices" -> get_all_invoices
+- "clients/customers" -> get_clients
+- "briefing/morning/summary" -> get_daily_briefing
+- "business/sector/industry" -> get_business_context
+- "transactions/expenses/income" -> get_transactions
 
-JSON only, no markdown:
-{{"action": "tool", "tool": "tool_name", "tool_args": {{}}, "response": "", "ui_event": null}}
+JSON only:
+{{"action": "tool", "tool": "TOOL_NAME", "tool_args": {{}}}}
 OR
-{{"action": "respond", "tool": null, "tool_args": {{}}, "response": "Your answer", "ui_event": null}}
+{{"action": "respond", "response": "text"}}
 """
 
         for attempt, (key, model) in enumerate(
@@ -288,7 +491,7 @@ OR
             content = data["choices"][0]["message"]["content"]
             if not content:
                 raise ValueError(
-                    f"Groq returned empty content (finish_reason={data['choices'][0].get('finish_reason')})"
+                    f"Empty response (finish_reason={data['choices'][0].get('finish_reason')})"
                 )
             return content
 
@@ -309,11 +512,7 @@ OR
         try:
             return json.loads(content)
         except json.JSONDecodeError as e:
-            raise ValueError(
-                f"Invalid JSON from Groq: {e}. Content: {repr(content[:200])}"
-            )
-
-    # ── Tools ─────────────────────────────────────────────────────────────────
+            raise ValueError(f"Invalid JSON: {e}. Content: {repr(content[:200])}")
 
     async def _tool_get_financial_metrics(self, ctx: dict) -> str:
         r = await self.backend.get_finance_metrics(
@@ -347,7 +546,10 @@ OR
             num = inv.get("invoiceNumber", "?")
             client = inv.get("clientName", "Unknown")
             due = inv.get("dueDate", "?")
-            lines.append(f"- {num} | {client} | INR {amt:,.2f} | due {due}")
+            days_over = inv.get("daysOverdue", 0)
+            lines.append(
+                f"- {num} | {client} | INR {amt:,.2f} | due {due} | {days_over} days overdue"
+            )
         total = sum(i.get("totalAmount", 0) for i in invs)
         return f"{len(invs)} overdue invoice(s), total INR {total:,.2f}:\n" + "\n".join(
             lines
@@ -377,6 +579,25 @@ OR
             f"{k}={v}" for k, v in by_status.items()
         )
 
+    async def _tool_get_invoice_details(self, ctx: dict) -> str:
+        if not ctx.get("invoice_id"):
+            return "Error: invoice_id is required"
+        r = await self.backend._request(
+            "GET",
+            f"/api/invoices/{ctx['invoice_id']}",
+            org_id=ctx["org_id"],
+            user_id=ctx.get("user_id"),
+        )
+        if not r.success:
+            return f"Error: {r.error}"
+        inv = r.data if isinstance(r.data, dict) else {}
+        return (
+            f"Invoice {inv.get('invoiceNumber', '?')} for {inv.get('clientName', 'Unknown')}: "
+            f"INR {inv.get('totalAmount', 0):,.2f}, Status: {inv.get('status', '?')}, "
+            f"Due: {inv.get('dueDate', '?')}, "
+            f"Paid: INR {inv.get('paidAmount', 0):,.2f}"
+        )
+
     async def _tool_get_daily_briefing(self, ctx: dict) -> str:
         r_metrics = await self.backend.get_finance_metrics(
             ctx.get("business_id", "default"), ctx["org_id"], ctx.get("user_id")
@@ -395,7 +616,6 @@ OR
         )
         overdue_total = sum(i.get("totalAmount", 0) for i in overdue_invs)
         overdue_count = len(overdue_invs)
-
         metrics = r_metrics.data if (r_metrics.success and r_metrics.data) else {}
         revenue = metrics.get("revenue", 0)
         expenses = metrics.get("expenses", 0)
@@ -463,6 +683,26 @@ OR
         ]
         return f"{len(clients)} client(s):\n" + "\n".join(f"  • {l}" for l in lines)
 
+    async def _tool_get_client_details(self, ctx: dict) -> str:
+        if not ctx.get("client_id"):
+            return "Error: client_id is required"
+        r = await self.backend._request(
+            "GET",
+            f"/api/clients/{ctx['client_id']}",
+            org_id=ctx["org_id"],
+            user_id=ctx.get("user_id"),
+        )
+        if not r.success:
+            return f"Error: {r.error}"
+        client = r.data if isinstance(r.data, dict) else {}
+        return (
+            f"Client: {client.get('display_name', client.get('name', '?'))}\n"
+            f"Email: {client.get('email', 'not available')}\n"
+            f"Phone: {client.get('phone', 'not available')}\n"
+            f"Status: {client.get('status', '?')}\n"
+            f"GST: {client.get('gstNumber', 'not available')}"
+        )
+
     async def _tool_get_verification_status(self, ctx: dict) -> str:
         r = await self.backend._request(
             "GET",
@@ -489,7 +729,7 @@ OR
                 "amount": ctx["amount"],
                 "category": ctx.get("category", "General"),
                 "description": ctx["description"],
-                "currency": ctx.get("currency", "INR"),
+                "currency": "INR",
             },
             org_id=ctx["org_id"],
             user_id=ctx.get("user_id"),
@@ -498,20 +738,165 @@ OR
             return f"Failed to record transaction: {r.error}"
         return f"Transaction recorded: {ctx['type']} of INR {ctx['amount']:,.2f}"
 
-    # ── Helpers ────────────────────────────────────────────────────────────────
-
-    def _format_history(self, history: list) -> str:
-        if not history:
-            return ""
-        return "\n".join(
-            f"[{h['role'].upper()} via {h.get('tool', 'chat')}]: {h['content'][:300]}"
-            for h in history[-6:]
+    async def _tool_get_transactions(self, ctx: dict) -> str:
+        params = {"limit": ctx.get("limit", 20)}
+        if ctx.get("type"):
+            params["type"] = ctx["type"]
+        r = await self.backend._request(
+            "GET",
+            "/api/transactions",
+            params=params,
+            org_id=ctx["org_id"],
+            user_id=ctx.get("user_id"),
         )
+        if not r.success:
+            return f"Error: {r.error}"
+        txns = r.data if isinstance(r.data, list) else []
+        if not txns:
+            return "No transactions found."
+        lines = []
+        for t in txns[:10]:
+            amt = t.get("amount", 0)
+            typ = t.get("type", "?")
+            desc = t.get("description", "?")
+            date = t.get("createdAt", "?")[:10] if t.get("createdAt") else "?"
+            lines.append(f"- {typ}: INR {amt:,.2f} | {desc} | {date}")
+        return f"{len(txns)} transaction(s):\n" + "\n".join(lines)
 
-    def _summarize_history(self, history: list) -> str:
-        if not history:
-            return "No information available."
-        return " ".join(h["content"][:200] for h in history[-3:])
+    async def _tool_get_business_context(self, ctx: dict) -> str:
+        try:
+            r = await self.backend.get_onboarding_status(
+                ctx.get("user_id") or ctx["org_id"]
+            )
+            if r.success and r.data:
+                data = r.data if isinstance(r.data, dict) else {}
+                business = data.get("business", {})
+                if not business:
+                    business = data
+                return (
+                    f"Business: {business.get('legalName', business.get('businessName', 'Not set'))}\n"
+                    f"Industry: {business.get('industry', 'Not set')}\n"
+                    f"Sector: {business.get('targetMarket', 'Not set')}\n"
+                    f"Services: {business.get('primaryActivity', 'Not set')}\n"
+                    f"GSTIN: {business.get('gstin', 'Not registered')}"
+                )
+        except Exception as e:
+            logger.warning({"event": "business_context_error", "error": str(e)})
+        return "Could not load business context."
+
+    async def _tool_search_market(self, ctx: dict) -> str:
+        try:
+            from app.tools.multi_source_search import MultiSourceSearch
+
+            searcher = MultiSourceSearch()
+            results = await searcher.search(ctx.get("query", ""), max_results=5)
+            if results and isinstance(results, dict):
+                articles = results.get("articles", []) or results.get("results", [])[:3]
+                if articles:
+                    lines = [f"- {a.get('title', 'Untitled')}" for a in articles[:3]]
+                    sources = [a.get("url", "") for a in articles[:2] if a.get("url")]
+                    return (
+                        f"Market insights:\n"
+                        + "\n".join(lines)
+                        + "\n\nSources: "
+                        + ", ".join(sources[:2])
+                    )
+        except Exception as e:
+            logger.warning({"event": "market_search_failed", "error": str(e)})
+        return "Could not fetch market information."
+
+    async def _tool_check_compliance(self, ctx: dict) -> str:
+        check_type = ctx.get("check_type", "deadlines")
+        if check_type == "deadlines":
+            return (
+                "Compliance deadlines:\n"
+                "- GSTR-1: 10th of next month\n"
+                "- GSTR-3B: 20th of next month\n"
+                "- TDS deposit: 7th of next month\n"
+                "- ITR filing: July 31st (individuals) / October 31st (businesses)"
+            )
+        elif check_type == "gst_liability":
+            r = await self.backend._request(
+                "GET",
+                "/api/invoices",
+                params={"limit": 100},
+                org_id=ctx["org_id"],
+                user_id=ctx.get("user_id"),
+            )
+            if r.success and isinstance(r.data, list):
+                total = sum(i.get("totalAmount", 0) for i in r.data)
+                gst = sum(i.get("gstAmount", 0) for i in r.data)
+                return f"GST collected: approximately INR {gst:,.2f} on total invoiced INR {total:,.2f}. Net liability depends on input tax credit from expenses."
+            return "Could not calculate GST liability."
+        elif check_type == "tds_reconciliation":
+            return "TDS reconciliation: Check your Form 26AS for TDS credits from enterprise clients like Infosys, TCS, etc. These appear as credit in your ITR."
+        return "Unknown compliance check type."
+
+    async def _tool_recall(self, ctx: dict) -> str:
+        try:
+            resp = requests.get(
+                f"http://127.0.0.1:8000/api/memory/{ctx['org_id']}?query={ctx.get('query', '')}&limit=3",
+                headers={"X-Org-Id": ctx["org_id"]},
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                memories = resp.json()
+                if memories:
+                    lines = [
+                        f"- {m.get('content', '')}"
+                        for m in memories
+                        if m.get("content")
+                    ]
+                    return "What I remember: " + " | ".join(lines)
+        except Exception as e:
+            logger.warning({"event": "recall_failed", "error": str(e)})
+        return "I don't have any relevant memories stored."
+
+    async def _tool_remember(self, ctx: dict) -> str:
+        try:
+            resp = requests.post(
+                f"http://127.0.0.1:8000/api/memory/{ctx['org_id']}",
+                headers={"X-Org-Id": ctx["org_id"], "Content-Type": "application/json"},
+                json={
+                    "content": ctx["content"],
+                    "type": ctx.get("type", "business_fact"),
+                    "tags": ctx.get("tags", []),
+                },
+                timeout=5,
+            )
+            if resp.status_code in (200, 201):
+                return "I've remembered that."
+        except Exception as e:
+            logger.warning({"event": "remember_failed", "error": str(e)})
+        return "Could not save to memory."
+
+    async def _tool_draft_followup_email(self, ctx: dict) -> str:
+        if not ctx.get("invoice_id"):
+            return "Error: invoice_id is required to draft follow-up email."
+        r = await self.backend._request(
+            "GET",
+            f"/api/invoices/{ctx['invoice_id']}",
+            org_id=ctx["org_id"],
+            user_id=ctx.get("user_id"),
+        )
+        if not r.success:
+            return f"Could not get invoice details: {r.error}"
+        inv = r.data if isinstance(r.data, dict) else {}
+        client = inv.get("clientName", "Client")
+        amount = inv.get("totalAmount", 0)
+        inv_num = inv.get("invoiceNumber", "?")
+        due = inv.get("dueDate", "?")
+        days_over = inv.get("daysOverdue", 0)
+        return (
+            f"Follow-up email draft for {client}:\n\n"
+            f"Subject: Payment Reminder - Invoice {inv_num} | INR {amount:,.2f}\n\n"
+            f"Dear {client},\n\n"
+            f"This is a friendly reminder that Invoice {inv_num} for INR {amount:,.2f} "
+            f"(dated {due}) is {days_over} days overdue.\n\n"
+            f"We kindly request you to process the payment at your earliest convenience. "
+            f"If you have already made the payment, please disregard this reminder.\n\n"
+            f"Best regards"
+        )
 
     def _format_response(self, message: str, ui_event: Optional[dict]) -> dict:
         return {
