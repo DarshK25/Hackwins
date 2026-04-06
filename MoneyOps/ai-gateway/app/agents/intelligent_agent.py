@@ -33,9 +33,11 @@ class IntelligentAgent:
             "get_overdue_invoices": self._tool_get_overdue_invoices,
             "get_all_invoices": self._tool_get_all_invoices,
             "get_daily_briefing": self._tool_get_daily_briefing,
+            "create_invoice": self._tool_create_invoice,
             "send_invoice": self._tool_send_invoice,
             "send_invoice_followup": self._tool_send_invoice_followup,
             "get_clients": self._tool_get_clients,
+            "create_client": self._tool_create_client,
             "get_client_details": self._tool_get_client_details,
             "get_verification_status": self._tool_get_verification_status,
             "record_transaction": self._tool_record_transaction,
@@ -223,9 +225,41 @@ class IntelligentAgent:
                     "required": ["invoice_id"],
                 },
             },
+            {
+                "name": "create_invoice",
+                "description": "Start creating a new invoice - initiates guided invoice creation flow",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "client_id": {"type": "string"},
+                        "amount": {"type": "number"},
+                        "description": {"type": "string"},
+                    },
+                    "required": [],
+                },
+            },
+            {
+                "name": "create_client",
+                "description": "Add a new client to the organization",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "email": {"type": "string"},
+                        "phone": {"type": "string"},
+                        "gst_number": {"type": "string"},
+                    },
+                    "required": ["name"],
+                },
+            },
         ]
 
-    write_tools = {"send_invoice", "send_invoice_followup", "record_transaction"}
+    write_tools = {
+        "send_invoice",
+        "send_invoice_followup",
+        "record_transaction",
+        "create_client",
+    }
 
     async def process(
         self,
@@ -236,7 +270,13 @@ class IntelligentAgent:
         session_id: str = "default",
         channel: str = "voice",
     ) -> dict:
-        ctx = {"org_id": org_id, "user_id": user_id, "business_id": business_id}
+        ctx = {
+            "org_id": org_id,
+            "user_id": user_id,
+            "business_id": business_id,
+            "session_id": session_id,
+            "raw_text": message,
+        }
         msg_lower = message.lower()
 
         tool_name, args = self._route_query(msg_lower)
@@ -254,6 +294,8 @@ class IntelligentAgent:
         args.setdefault("org_id", org_id)
         if user_id:
             args.setdefault("user_id", user_id)
+        args.setdefault("session_id", session_id)
+        args.setdefault("raw_text", message)
 
         try:
             result = await tool_fn(args)
@@ -261,10 +303,16 @@ class IntelligentAgent:
             logger.error({"event": "tool_error", "tool": tool_name, "error": str(e)})
             result = f"Error: {e}"
 
-        response = self._format_tool_result(message, result, tool_name)
-        if channel == "voice":
+        ui_event = None
+        if isinstance(result, tuple) and len(result) == 2:
+            response_text, ui_event = result
+            response = self._format_tool_result(message, response_text, tool_name)
+        else:
+            response = self._format_tool_result(message, result, tool_name)
+
+        if channel == "voice" and isinstance(response, str):
             response = sanitize_for_tts(response)
-        return self._format_response(response, None)
+        return self._format_response(response, ui_event)
 
     def _route_query(self, msg: str) -> tuple[Optional[str], dict]:
         """Route query to appropriate tool based on keywords."""
@@ -276,6 +324,10 @@ class IntelligentAgent:
             return "get_financial_metrics", args
         if any(k in msg for k in ["overdue", "unpaid", "past due"]):
             return "get_overdue_invoices", args
+        if "create" in msg and "invoice" in msg:
+            return "create_invoice", args
+        if "create" in msg and ("client" in msg or "customer" in msg):
+            return "create_client", args
         if any(k in msg for k in ["invoice", "invoices"]):
             if "all" in msg or "list" in msg:
                 return "get_all_invoices", args
@@ -299,6 +351,8 @@ class IntelligentAgent:
         ):
             return "recall", {"query": msg}
         if any(k in msg for k in ["client", "customers"]):
+            if "create" in msg:
+                return "create_client", args
             return "get_clients", args
         if any(
             k in msg
@@ -643,6 +697,100 @@ OR
             f"Overdue: {overdue_count} invoice(s) = INR {overdue_total:,.2f}\n"
             f"Today's Agenda:\n" + "\n".join(f"  • {a}" for a in agenda)
         )
+
+    async def _tool_create_invoice(self, ctx: dict) -> tuple:
+        from app.voice_processor import VoiceContext
+        from app.agents.finance_agent import finance_agent
+
+        session_id = ctx.get("session_id", "default")
+        user_id = ctx.get("user_id")
+        org_id = ctx["org_id"]
+
+        voice_ctx = VoiceContext(
+            session_id=session_id,
+            user_id=user_id or "unknown",
+            org_uuid=org_id,
+            business_id=1,
+        )
+        voice_ctx.raw_text = ctx.get("raw_text", "")
+        voice_ctx.extracted_entities = []
+
+        result = await finance_agent.handle_invoice_create(voice_ctx)
+        return result.message, result.ui_event
+
+    async def _tool_create_client(self, ctx: dict) -> str:
+        name = ctx.get("name", "")
+        email = ctx.get("email", "")
+        phone = ctx.get("phone", "")
+        gst = ctx.get("gst_number", "")
+        raw_text = ctx.get("raw_text", "")
+
+        if not name and raw_text:
+            name = self._extract_name_from_text(raw_text)
+
+        if not name:
+            return "To create a client, please tell me the client name. You can also add email, phone, and GST number."
+
+        payload = {
+            "displayName": name,
+            "email": email if email else None,
+            "phone": phone if phone else None,
+            "gstNumber": gst if gst else None,
+            "status": "ACTIVE",
+        }
+
+        r = await self.backend.create_client(
+            org_id=ctx["org_id"],
+            user_id=ctx.get("user_id"),
+            payload=payload,
+        )
+
+        if not r.success:
+            return f"Failed to create client: {r.error}"
+
+        client = r.data if isinstance(r.data, dict) else {}
+        client_name = client.get("displayName", name)
+        return f"Client '{client_name}' has been created successfully."
+
+    def _extract_name_from_text(self, text: str) -> str:
+        text_lower = text.lower()
+        match = re.search(
+            r"named\s+([A-Za-z0-9\s]+?)(?:\s+with|\s+and|\s+email|$)",
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            return match.group(1).strip()
+        match = re.search(
+            r"client\s+(?:named\s+)?([A-Za-z0-9\s]+?)(?:\s+with|\s+and|$)",
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            return match.group(1).strip()
+        match = re.search(
+            r"create\s+(?:a\s+)?(?:new\s+)?client\s+(?:named\s+)?([A-Za-z0-9\s]+?)(?:\s+with|\s+and|$)",
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            return match.group(1).strip()
+        words = text.split()
+        if len(words) > 2:
+            name_start = -1
+            for i, w in enumerate(words):
+                if w.lower() in ["named", "client", "customer"]:
+                    name_start = i + 1
+                    break
+            if name_start > 0 and name_start < len(words):
+                name_words = []
+                for w in words[name_start:]:
+                    if w.lower() in ["with", "and", "email", "phone", "gst"]:
+                        break
+                    name_words.append(w)
+                if name_words:
+                    return " ".join(name_words).strip()
+        return ""
 
     async def _tool_send_invoice(self, ctx: dict) -> str:
         if not ctx.get("invoice_id"):

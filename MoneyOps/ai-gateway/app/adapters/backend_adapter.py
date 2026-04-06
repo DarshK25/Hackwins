@@ -247,6 +247,13 @@ class BackendHttpAdapter:
             "GET", "/api/transactions/summary", org_id=org_id, user_id=user_id
         )
 
+    async def create_client(
+        self, org_id: str, user_id: Optional[str], payload: Dict[str, Any]
+    ) -> BackendResponse:
+        return await self._request(
+            "POST", "/api/clients", data=payload, org_id=org_id, user_id=user_id
+        )
+
     def set_auth_token(self, token: str):
         self.auth_token = token
         self.client.headers["Authorization"] = f"Bearer {token}"
