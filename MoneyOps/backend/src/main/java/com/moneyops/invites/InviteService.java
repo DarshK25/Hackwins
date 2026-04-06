@@ -48,7 +48,7 @@ public class InviteService {
             invite.setToken(UUID.randomUUID().toString());
             invite.setExpiresAt(Instant.now().plus(24, ChronoUnit.HOURS));
             inviteRepository.save(invite);
-            emailService.sendInviteEmail(email, invite.getToken(), orgName, invite.getRole(), teamActionCode);
+            emailService.sendInviteEmail(email, invite.getToken(), orgName, invite.getRole());
             return invite.getToken();
         }
 
@@ -66,7 +66,7 @@ public class InviteService {
                 
         inviteRepository.save(invite);
         
-        emailService.sendInviteEmail(email, token, orgName, invite.getRole(), teamActionCode);
+        emailService.sendInviteEmail(email, token, orgName, invite.getRole());
         
         return token;
     }

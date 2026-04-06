@@ -7,6 +7,7 @@ import os
 import json
 import asyncio
 import re
+import requests
 from typing import Any, Optional
 from app.adapters.backend_adapter import get_backend_adapter
 from app.utils.logger import get_logger
@@ -17,7 +18,7 @@ GROQ_KEY_PRIMARY = os.getenv("GROQ_API_KEY", "")
 GROQ_KEY_FAST = os.getenv("GROQ_API_KEY_FAST", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_MODEL_FAST = "llama-3.1-8b-instant"
-MAX_ITERATIONS = 5
+MAX_ITERATIONS = 2
 
 
 class IntelligentAgent:
@@ -45,126 +46,76 @@ class IntelligentAgent:
         return [
             {
                 "name": "get_financial_metrics",
-                "description": "Get real-time financial metrics: revenue, expenses, profit, invoice counts by status.",
+                "description": "Revenue, expenses, profit, invoice counts",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "org_id": {"type": "string"},
-                        "user_id": {"type": "string"},
-                        "business_id": {"type": "string", "default": "default"},
-                    },
-                    "required": ["org_id"],
+                    "properties": {"business_id": {"type": "string"}},
+                    "required": [],
                 },
             },
             {
                 "name": "get_overdue_invoices",
-                "description": "Get all overdue invoices for the organization.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "org_id": {"type": "string"},
-                        "user_id": {"type": "string"},
-                    },
-                    "required": ["org_id"],
-                },
+                "description": "All overdue invoices",
+                "parameters": {"type": "object", "properties": {}, "required": []},
             },
             {
                 "name": "get_all_invoices",
-                "description": "Get all invoices, optionally filtered by status.",
+                "description": "All invoices (optional status filter)",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "org_id": {"type": "string"},
-                        "user_id": {"type": "string"},
                         "status": {
                             "type": "string",
                             "enum": ["DRAFT", "SENT", "PAID", "OVERDUE"],
-                        },
-                        "limit": {"type": "integer", "default": 20},
+                        }
                     },
-                    "required": ["org_id"],
+                    "required": [],
                 },
             },
             {
                 "name": "get_daily_briefing",
-                "description": "Get a comprehensive daily business briefing: overdue amounts, today's agenda, pending tasks, key metrics.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "org_id": {"type": "string"},
-                        "user_id": {"type": "string"},
-                    },
-                    "required": ["org_id"],
-                },
+                "description": "Daily briefing: overdue, agenda, metrics",
+                "parameters": {"type": "object", "properties": {}, "required": []},
             },
             {
                 "name": "send_invoice",
-                "description": "Send an invoice to the client via email. Marks DRAFT → SENT.",
+                "description": "Email invoice to client (marks DRAFT->SENT)",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "org_id": {"type": "string"},
-                        "user_id": {"type": "string"},
-                        "invoice_id": {
-                            "type": "string",
-                            "description": "The invoice UUID",
-                        },
-                    },
-                    "required": ["org_id", "invoice_id"],
+                    "properties": {"invoice_id": {"type": "string"}},
+                    "required": ["invoice_id"],
                 },
             },
             {
                 "name": "send_invoice_followup",
-                "description": "Send a follow-up email for an overdue invoice.",
+                "description": "Send follow-up for overdue invoice",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "org_id": {"type": "string"},
-                        "user_id": {"type": "string"},
-                        "invoice_id": {"type": "string"},
-                    },
-                    "required": ["org_id", "invoice_id"],
+                    "properties": {"invoice_id": {"type": "string"}},
+                    "required": ["invoice_id"],
                 },
             },
             {
                 "name": "get_clients",
-                "description": "Get list of all clients with their basic info.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "org_id": {"type": "string"},
-                        "user_id": {"type": "string"},
-                    },
-                    "required": ["org_id"],
-                },
+                "description": "All clients with basic info",
+                "parameters": {"type": "object", "properties": {}, "required": []},
             },
             {
                 "name": "get_verification_status",
-                "description": "Get business verification tier status (UNVERIFIED, BASIC, GST_VERIFIED).",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "org_id": {"type": "string"},
-                        "user_id": {"type": "string"},
-                    },
-                    "required": ["org_id"],
-                },
+                "description": "Verification tier (UNVERIFIED/BASIC/GST_VERIFIED)",
+                "parameters": {"type": "object", "properties": {}, "required": []},
             },
             {
                 "name": "record_transaction",
-                "description": "Record a financial transaction (income or expense).",
+                "description": "Record INCOME or EXPENSE",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "org_id": {"type": "string"},
-                        "user_id": {"type": "string"},
                         "type": {"type": "string", "enum": ["INCOME", "EXPENSE"]},
                         "amount": {"type": "number"},
-                        "category": {"type": "string"},
                         "description": {"type": "string"},
-                        "currency": {"type": "string", "default": "INR"},
                     },
-                    "required": ["org_id", "type", "amount", "description"],
+                    "required": ["type", "amount", "description"],
                 },
             },
         ]
@@ -190,11 +141,13 @@ class IntelligentAgent:
                 {
                     "event": "agent_iteration",
                     "iter": iteration + 1,
-                    "thought": thought[:200],
+                    "thought": str(thought)[:200],
                 }
             )
 
-            if thought.get("action") == "respond":
+            action = str(thought.get("action", "")).split("|")[0].strip()
+
+            if action == "respond":
                 return self._format_response(
                     thought.get("response", ""), thought.get("ui_event")
                 )
@@ -234,6 +187,24 @@ class IntelligentAgent:
                 {"role": "tool", "tool": tool_name, "content": str(result)[:1000]}
             )
 
+            if iteration == 0:
+                history_str = self._format_history(history)
+                tool_result_text = history[-1]["content"]
+                response_prompt = (
+                    f"User asked: {message}\n"
+                    f"Tool result: {tool_result_text}\n"
+                    f"Respond to the user with the tool data. Be concise and factual.\n"
+                    f'{{"action": "respond", "tool": null, "tool_args": {{}}, "response": "your answer", "ui_event": null}}'
+                )
+                thought2 = await self._reason(response_prompt, ctx, [])
+                action2 = str(thought2.get("action", "")).split("|")[0].strip()
+                if action2 == "respond":
+                    return self._format_response(
+                        thought2.get("response", tool_result_text),
+                        thought2.get("ui_event"),
+                    )
+                return self._format_response(tool_result_text, None)
+
         return self._format_response(
             "I've gathered the information. Here's what I found: "
             + self._summarize_history(history),
@@ -244,33 +215,37 @@ class IntelligentAgent:
 
     async def _reason(self, message: str, ctx: dict, history: list) -> dict:
         history_str = self._format_history(history)
-        tools_json = json.dumps(self.tool_schemas, indent=2)
+        tools_str = "\n".join(
+            f"- {t['name']}: {t['description']}" for t in self.tool_schemas
+        )
 
-        prompt = f"""You are a CFO-level financial assistant for a small business in India. Think step by step.
+        prompt = f"""You are a financial assistant for a small business in India. Be direct and decisive.
 
-CONTEXT:
-- org_id: {ctx.get("org_id")}
-- user message: {message}
+User: {message}
+History: {history_str or "(empty)"}
 
-CONVERSATION HISTORY:
-{history_str or "(empty)"}
+Available tools:
+{tools_str}
 
-AVAILABLE TOOLS:
-{tools_json}
+RULES:
+- If history has a tool result (starts with "[TOOL via"), respond with action="respond" and summarize the data for the user. DO NOT call the same tool again.
+- If NO tool result in history yet: call the right tool for the user's request.
+  - "overdue"/"unpaid"/"past due" → get_overdue_invoices
+  - "revenue"/"profit"/"expenses" → get_financial_metrics
+  - "invoices" list → get_all_invoices
+  - "briefing"/"morning"/"summary" → get_daily_briefing
+  - "clients" → get_clients
+  - "verification" tier → get_verification_status
+  - "send"/"email" invoice → send_invoice (invoice_id if provided, else ask)
+  - "remind"/"follow up" → send_invoice_followup (invoice_id if provided, else ask)
+  - "record" transaction → record_transaction (needs type, amount, description)
+- NEVER call the same tool twice in a row. If you just called a tool, RESPOND with the result.
+- If tool result is "Error" or "Could not fetch", say you couldn't get the data and why.
 
-DECISION RULES:
-- get_daily_briefing: for "morning briefing", "daily digest", "today's summary", "start of day"
-- get_financial_metrics: for revenue, profit, expenses, invoice counts
-- get_overdue_invoices: for "overdue", "unpaid", "past due", "outstanding"
-- get_all_invoices: for invoice lists, status summaries
-- get_clients: for client lists, customer info
-- send_invoice: when user says "send invoice", "email invoice", "deliver invoice" (needs invoice_id — ask if not provided)
-- send_invoice_followup: for "remind", "follow up", "chase", "nudge" on overdue invoices (needs invoice_id)
-- get_verification_status: for "verification", "verification tier", "trust level"
-- record_transaction: for recording income or expense entries
-
-Respond ONLY with valid JSON (no markdown, no explanation):
-{{"action": "tool|respond", "tool": "tool_name|null", "tool_args": {{"key": "value"}}, "response": "text if action=respond", "ui_event": null}}
+JSON only, no markdown:
+{{"action": "tool", "tool": "tool_name", "tool_args": {{}}, "response": "", "ui_event": null}}
+OR
+{{"action": "respond", "tool": null, "tool_args": {{}}, "response": "Your answer", "ui_event": null}}
 """
 
         for attempt, (key, model) in enumerate(
@@ -293,28 +268,50 @@ Respond ONLY with valid JSON (no markdown, no explanation):
         return {"action": "respond", "response": "No LLM keys configured."}
 
     async def _call_groq(self, prompt: str, api_key: str, model: str) -> dict:
-        async with asyncio.timeout(30):
-            import httpx
-
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 600,
-                        "temperature": 0.3,
-                    },
-                )
+        def _sync_call():
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 600,
+                    "temperature": 0.3,
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
             data = resp.json()
-            content = data["choices"][0]["message"]["content"].strip()
-            for prefix in ["```json", "```"]:
-                if content.startswith(prefix):
-                    content = content[len(prefix) :].strip()
-                if content.endswith(prefix.rstrip("`")):
-                    content = content[: -len(prefix.rstrip("`"))].strip()
+            content = data["choices"][0]["message"]["content"]
+            if not content:
+                raise ValueError(
+                    f"Groq returned empty content (finish_reason={data['choices'][0].get('finish_reason')})"
+                )
+            return content
+
+        try:
+            content = await asyncio.to_thread(_sync_call)
+        except requests.HTTPError as e:
+            raise ValueError(f"Groq HTTP error: {e}")
+        except ValueError:
+            raise
+
+        for prefix in ["```json", "```"]:
+            if content.startswith(prefix):
+                content = content[len(prefix) :]
+            suffix = prefix.rstrip("`")
+            if suffix and content.endswith(suffix):
+                content = content[: -len(suffix)]
+
+        try:
             return json.loads(content)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Invalid JSON from Groq: {e}. Content: {repr(content[:200])}"
+            )
 
     # ── Tools ─────────────────────────────────────────────────────────────────
 
