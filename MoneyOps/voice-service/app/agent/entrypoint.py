@@ -184,14 +184,13 @@ async def entrypoint(ctx: JobContext):
     def sanitize_for_voice(text: str) -> str:
         """Remove any internal system strings before speaking."""
         if not text:
-            return "I had trouble processing that. Please try again."
+            return "I hit a snag there. Please try again."
         
         blocked_patterns = [
             r"[A-Z_]{3,}\s+does not support",
             r"Intent not supported",
             r"execution_failed",
             r"gateway_execution",
-            r"[A-Z_]{5,}",
             r"Error \d+",
             r"500 Internal",
         ]
@@ -199,7 +198,7 @@ async def entrypoint(ctx: JobContext):
         import re
         for pattern in blocked_patterns:
             if re.search(pattern, text):
-                return "I'm having trouble with that right now. Please try again."
+                return "That response was not usable. Please try that again."
         
         return text
 
@@ -284,7 +283,7 @@ async def entrypoint(ctx: JobContext):
 
             except Exception as exc:
                 logger.error("gateway_call_failed", error=str(exc))
-                await session.say("I'm sorry, I'm having trouble connecting. One moment.")
+                await session.say("I hit a connection issue. Please try again.")
 
     async def _debounce_timer():
         """Wait for silence then trigger processing."""

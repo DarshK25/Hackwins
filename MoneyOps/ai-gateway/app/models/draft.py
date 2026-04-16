@@ -27,7 +27,9 @@ class InvoiceDraft:
     amount: Optional[float] = None
     gst_percent: Optional[float] = None
     gst_applicable: Optional[bool] = None
+    issue_date: Optional[str] = None
     due_date: Optional[str] = None
+    notes: Optional[str] = None
     team_action_code: Optional[str] = None
     confirmed: bool = False
     line_items: List[Any] = field(default_factory=list)

@@ -18,14 +18,16 @@ function StatCard({ label, value, sub, accent }) {
 
 function deriveMetrics(snapshot) {
     if (!snapshot) return { revenueGrowth: 0, marketShare: 0, opportunityScore: 0, competitiveRank: "N/A" };
+    const clientCount = snapshot?.client_count || snapshot?.totalClients || snapshot?.active_clients || snapshot?.total_clients || 0;
+    const overdueCount = snapshot?.overdue_count || snapshot?.overdueCount || 0;
     const margin = snapshot.profit_margin || 0;
     const opportunityScore = Math.min(100, Math.max(0, Math.round(
         (margin > 50 ? 80 : margin > 30 ? 65 : margin > 10 ? 50 : 35)
-        + (snapshot.total_clients > 5 ? 10 : 5)
-        + (snapshot.overdue_count === 0 ? 10 : snapshot.overdue_count < 3 ? 5 : 0)
+        + (clientCount > 5 ? 10 : 5)
+        + (overdueCount === 0 ? 10 : overdueCount < 3 ? 5 : 0)
     )));
     const revenueGrowth = margin > 60 ? 18 : margin > 40 ? 12 : margin > 20 ? 7 : 3;
-    const marketShare = snapshot.total_clients > 10 ? 18 : snapshot.total_clients > 5 ? 12 : 6;
+    const marketShare = clientCount > 10 ? 18 : clientCount > 5 ? 12 : 6;
     const competitiveRank = opportunityScore > 75 ? "#2" : opportunityScore > 55 ? "#3" : "#5";
     return { revenueGrowth, marketShare, opportunityScore, competitiveRank };
 }
@@ -223,7 +225,7 @@ export function MarketResearchDashboard({ businessId, data, onRefresh }) {
                 <StatCard
                     label="Growth Opportunity"
                     value={`${metrics.opportunityScore}/100`}
-                    sub={isLive ? `${snapshot?.total_clients || 0} active clients` : "Potential score"}
+                    sub={isLive ? `${snapshot?.client_count || snapshot?.totalClients || snapshot?.active_clients || snapshot?.total_clients || 0} active clients` : "Potential score"}
                     accent="#60A5FA"
                 />
                 <StatCard

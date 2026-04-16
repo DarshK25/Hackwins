@@ -16,6 +16,11 @@ class VoiceSession(BaseModel):
     onboarding_verified: bool = False
     dialog_pending: bool = False
     dialog_id: Optional[str] = None
+    last_tool: Optional[str] = None
+    last_business_profile: Optional[Dict[str, Any]] = None
+    last_market_query: Optional[str] = None
+    last_market_results: List[str] = Field(default_factory=list)
+    last_invoice_results: List[Dict[str, Any]] = Field(default_factory=list)
 
     def mark_active(self):
         self.last_active = time.time()
@@ -25,13 +30,30 @@ class SessionManager:
         self._sessions: Dict[str, VoiceSession] = {}
         self._ttl = 600
 
-    def get_session(self, session_id: str, user_id: str = "unknown", org_id: str = "unknown") -> VoiceSession:
+    def get_session(
+        self,
+        session_id: str,
+        user_id: str = "unknown",
+        org_id: str = "unknown",
+        business_id: Optional[int] = None,
+    ) -> VoiceSession:
         if session_id in self._sessions:
             session = self._sessions[session_id]
+            if user_id and user_id != "unknown":
+                session.user_id = user_id
+            if org_id and org_id != "unknown":
+                session.org_id = org_id
+            if business_id is not None:
+                session.business_id = business_id
             session.mark_active()
             return session
         
-        session = VoiceSession(session_id=session_id, user_id=user_id, org_id=org_id)
+        session = VoiceSession(
+            session_id=session_id,
+            user_id=user_id,
+            org_id=org_id,
+            business_id=business_id if business_id is not None else 1,
+        )
         self._sessions[session_id] = session
         return session
 

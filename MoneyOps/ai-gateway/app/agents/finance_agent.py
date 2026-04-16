@@ -1,6 +1,7 @@
 """
 Finance Agent - Handles financial operations and strategic planning.
 """
+import json
 import re
 import uuid
 from datetime import datetime, timedelta
@@ -15,6 +16,10 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 GENERIC_ITEM_WORDS = {"product", "service", "invoice", "item", "goods"}
+
+
+def _client_display_name(client: Dict[str, Any]) -> Optional[str]:
+    return client.get("display_name") or client.get("displayName") or client.get("name")
 
 
 class FinanceAgent(BaseAgent):
@@ -73,10 +78,12 @@ class FinanceAgent(BaseAgent):
             "client_name": draft.client_name,
             "client_id": draft.client_id,
             "amount": draft.amount,
+            "line_items_count": len(draft.line_items or []),
             "item_type": draft.item_type,
             "item_description": draft.item_description,
             "quantity": draft.quantity,
             "gst_percent": draft.gst_percent,
+            "issue_date": draft.issue_date,
             "due_date": draft.due_date,
             "awaiting_confirmation": draft.awaiting_confirmation,
             "awaiting_team_code": draft.awaiting_team_code,
@@ -132,7 +139,7 @@ class FinanceAgent(BaseAgent):
                     agent_type=self.get_agent_type(),
                 )
 
-            names = [client.get("name") for client in clients[:6] if client.get("name")]
+            names = [_client_display_name(client) for client in clients[:6] if _client_display_name(client)]
             if draft.client_name:
                 return AgentResponse(
                     success=True,
@@ -142,7 +149,7 @@ class FinanceAgent(BaseAgent):
                         "session_id": context.session_id,
                         "title": "Select Client",
                         "message": "Choose an existing client or continue by voice.",
-                        "clients": [{"id": client.get("id"), "name": client.get("name")} for client in clients[:10] if client.get("name")],
+                        "clients": [{"id": client.get("id"), "name": _client_display_name(client)} for client in clients[:10] if _client_display_name(client)],
                     },
                     agent_type=self.get_agent_type(),
                 )
@@ -158,8 +165,22 @@ class FinanceAgent(BaseAgent):
                     "session_id": context.session_id,
                     "title": "Select Client",
                     "message": "Choose an existing client or continue by voice.",
-                    "clients": [{"id": client.get("id"), "name": client.get("name")} for client in clients[:10] if client.get("name")],
+                    "clients": [{"id": client.get("id"), "name": _client_display_name(client)} for client in clients[:10] if _client_display_name(client)],
                 },
+                agent_type=self.get_agent_type(),
+            )
+
+        if not self._draft_has_line_items(draft) and draft.amount is None:
+            draft.last_question_asked = "invoice_form"
+            session.invoice_draft = draft
+            session_manager.save_session(session)
+            return AgentResponse(
+                success=True,
+                message=(
+                    f"I've opened a detailed invoice draft for {draft.client_name}. "
+                    "Add the issue date, due date, and line items there, or keep speaking if this is a simple one-line invoice."
+                ),
+                ui_event=self._build_invoice_form_event(draft, context),
                 agent_type=self.get_agent_type(),
             )
 
@@ -296,20 +317,11 @@ class FinanceAgent(BaseAgent):
             "gstTotal": gst_total,
             "totalAmount": total_amount,
             "dueDate": draft.due_date,
-            "issueDate": datetime.now().strftime("%Y-%m-%d"),
+            "issueDate": draft.issue_date or datetime.now().strftime("%Y-%m-%d"),
             "status": "DRAFT",
             "currency": "INR",
-            "items": [{
-                "type": draft.item_type,
-                "description": draft.item_description,
-                "quantity": None if draft.item_type == "SERVICE" else draft.quantity,
-                "rate": draft.amount,
-                "gstPercent": draft.gst_percent or 0,
-                "lineSubtotal": subtotal,
-                "lineGst": gst_total,
-                "lineTotal": total_amount,
-            }],
-            "notes": "Created via MoneyOps voice agent",
+            "items": self._build_invoice_payload_items(draft),
+            "notes": draft.notes or "Created via MoneyOps voice agent",
             "teamActionCode": draft.team_action_code,
             "source": "VOICE",
         }
@@ -347,6 +359,13 @@ class FinanceAgent(BaseAgent):
 
     async def _merge_invoice_entities_and_text(self, draft: InvoiceDraft, context, raw_text: str) -> None:
         text_lower = raw_text.lower()
+
+        if raw_text and self._looks_like_line_items_text(raw_text):
+            parsed_items = self.parse_line_items_text(raw_text)
+            if parsed_items:
+                draft.line_items = parsed_items
+                if parsed_items and draft.gst_applicable is None:
+                    draft.gst_applicable = any((item.get("gst_percent") or 0) > 0 for item in parsed_items)
 
         if "service" in text_lower and "product" not in text_lower:
             draft.item_type = "SERVICE"
@@ -395,6 +414,8 @@ class FinanceAgent(BaseAgent):
                 due_date = self._normalize_due_date(value)
                 if due_date:
                     draft.due_date = due_date
+                    if draft.issue_date is None:
+                        draft.issue_date = datetime.now().strftime("%Y-%m-%d")
             elif entity_type in ("due_days", "days", "duration") and not draft.due_date:
                 due_date = self._due_date_from_days(value)
                 if due_date:
@@ -417,6 +438,10 @@ class FinanceAgent(BaseAgent):
 
         if not draft.due_date:
             draft.due_date = self._extract_due_date_from_text(text_lower)
+        if draft.issue_date is None:
+            issue_date = self._extract_issue_date_from_text(text_lower)
+            if issue_date:
+                draft.issue_date = issue_date
 
         if draft.last_question_asked == "quantity" and draft.item_type == "PRODUCT" and draft.quantity is None:
             bare_number = self._extract_integer(raw_text)
@@ -438,7 +463,7 @@ class FinanceAgent(BaseAgent):
             client = await self._resolve_client(draft.client_name, context.org_uuid, context.user_id)
             if client:
                 draft.client_id = client.get("id")
-                draft.client_name = client.get("name")
+                draft.client_name = _client_display_name(client)
 
     async def _resolve_client(self, spoken_name: str, org_uuid: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         clients = await self.backend.get_clients(org_uuid, user_id=user_id)
@@ -450,11 +475,11 @@ class FinanceAgent(BaseAgent):
 
         spoken_norm = normalize(spoken_name)
         for client in clients:
-            if normalize(client.get("name") or "") == spoken_norm:
+            if normalize(_client_display_name(client) or "") == spoken_norm:
                 return client
 
         for client in clients:
-            client_norm = normalize(client.get("name") or "")
+            client_norm = normalize(_client_display_name(client) or "")
             if spoken_norm in client_norm or client_norm in spoken_norm:
                 return client
 
@@ -462,7 +487,7 @@ class FinanceAgent(BaseAgent):
         best_match = None
         best_score = 0
         for client in clients:
-            client_words = set((client.get("name") or "").lower().split())
+            client_words = set((_client_display_name(client) or "").lower().split())
             score = len(spoken_words & client_words)
             if score > best_score:
                 best_score = score
@@ -501,6 +526,12 @@ class FinanceAgent(BaseAgent):
         match = re.search(r"\bin\s+(\d{1,3})\s+days?\b", text_lower)
         if match:
             return self._due_date_from_days(match.group(1))
+        return None
+
+    def _extract_issue_date_from_text(self, text_lower: str) -> Optional[str]:
+        match = re.search(r"\bissue date\s+(?:is\s+)?(\d{4}-\d{2}-\d{2})\b", text_lower)
+        if match:
+            return match.group(1)
         return None
 
     def _extract_item_description(self, raw_text: str, item_type: str) -> Optional[str]:
@@ -554,6 +585,12 @@ class FinanceAgent(BaseAgent):
         return raw_text.strip().lower() in {"hello", "hi", "hey", "okay", "ok", "hmm", "huh"}
 
     def _calculate_invoice_totals(self, draft: InvoiceDraft) -> tuple[float, float, float]:
+        if self._draft_has_line_items(draft):
+            subtotal = round(sum(item.get("line_subtotal", 0.0) for item in draft.line_items), 2)
+            gst_total = round(sum(item.get("line_gst", 0.0) for item in draft.line_items), 2)
+            total_amount = round(sum(item.get("line_total", 0.0) for item in draft.line_items), 2)
+            return subtotal, gst_total, total_amount
+
         quantity = draft.quantity if draft.item_type == "PRODUCT" else 1
         subtotal = round((draft.amount or 0) * quantity, 2)
         gst_total = round(subtotal * ((draft.gst_percent or 0) / 100), 2)
@@ -561,6 +598,15 @@ class FinanceAgent(BaseAgent):
         return subtotal, gst_total, total_amount
 
     def _build_invoice_summary(self, draft: InvoiceDraft, subtotal: float, gst_total: float, total_amount: float) -> str:
+        if self._draft_has_line_items(draft):
+            item_count = len(draft.line_items)
+            issue_date = draft.issue_date or datetime.now().strftime("%Y-%m-%d")
+            return (
+                f"I have prepared an invoice for {draft.client_name} with {item_count} line items. "
+                f"The issue date is {issue_date}, the due date is {draft.due_date}, "
+                f"the subtotal is rupees {subtotal:,.0f}, GST is rupees {gst_total:,.0f}, "
+                f"and the final amount is rupees {total_amount:,.0f}."
+            )
         if draft.item_type == "SERVICE":
             item_text = f"for the service {draft.item_description}"
         else:
@@ -576,6 +622,143 @@ class FinanceAgent(BaseAgent):
 
     def _is_negative_response(self, raw_text: str) -> bool:
         return bool(re.search(r"\b(no|cancel|stop|abort|don't|dont|not now)\b", raw_text.lower()))
+
+    def _draft_has_line_items(self, draft: InvoiceDraft) -> bool:
+        return bool(draft.line_items)
+
+    def _looks_like_line_items_text(self, raw_text: str) -> bool:
+        return "|" in raw_text and any(char.isdigit() for char in raw_text)
+
+    def _build_invoice_form_event(self, draft: InvoiceDraft, context) -> Dict[str, Any]:
+        return {
+            "type": "open_input_dialog",
+            "session_id": context.session_id,
+            "dialog_id": "invoice_preview_form",
+            "title": "Detailed Invoice Draft",
+            "message": "Add dates and line items. Use one line per item. Format: TYPE | Description | Quantity | Rate | GST%. For services, leave quantity blank or use a dash.",
+            "submit_endpoint": "/api/v1/voice/dialog-response",
+            "submit_btn_label": "Update Invoice Draft",
+            "fields": [
+                {
+                    "id": "issue_date",
+                    "label": "Issue Date",
+                    "type": "date",
+                    "defaultValue": draft.issue_date or datetime.now().strftime("%Y-%m-%d"),
+                },
+                {
+                    "id": "due_date",
+                    "label": "Due Date",
+                    "type": "date",
+                    "defaultValue": draft.due_date or "",
+                },
+                {
+                    "id": "invoice_items_text",
+                    "label": "Line Items",
+                    "type": "textarea",
+                    "defaultValue": self._format_line_items_text(draft.line_items),
+                    "placeholder": "PRODUCT | AC EV Charger Supply & Installation (7.2kW) | 12 | 38500 | 18",
+                },
+                {
+                    "id": "notes",
+                    "label": "Notes",
+                    "type": "textarea",
+                    "defaultValue": draft.notes or "",
+                    "placeholder": "Optional notes for the invoice",
+                },
+            ],
+        }
+
+    def _format_line_items_text(self, line_items: List[Dict[str, Any]]) -> str:
+        if not line_items:
+            return ""
+        lines = []
+        for item in line_items:
+            quantity = item.get("quantity")
+            qty_text = "-" if quantity in (None, "", 0) else str(quantity)
+            lines.append(
+                f"{item.get('type', 'SERVICE')} | {item.get('description', '')} | {qty_text} | {item.get('rate', 0)} | {item.get('gst_percent', 18)}"
+            )
+        return "\n".join(lines)
+
+    def parse_line_items_text(self, raw_text: str) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        for line in (raw_text or "").splitlines():
+            cleaned = line.strip()
+            if not cleaned:
+                continue
+
+            parts = [part.strip() for part in cleaned.split("|")]
+            if len(parts) >= 5:
+                item_type, description, quantity_text, rate_text, gst_text = parts[:5]
+            elif len(parts) == 4:
+                description, quantity_text, rate_text, gst_text = parts
+                item_type = "PRODUCT"
+            elif len(parts) == 3:
+                description, rate_text, gst_text = parts
+                item_type = "SERVICE"
+                quantity_text = "-"
+            else:
+                continue
+
+            normalized_type = str(item_type or "SERVICE").strip().upper()
+            if normalized_type not in {"PRODUCT", "SERVICE"}:
+                normalized_type = "SERVICE" if quantity_text in {"", "-", "—"} else "PRODUCT"
+
+            quantity = None
+            if normalized_type == "PRODUCT":
+                quantity = self._extract_integer(quantity_text) or 1
+
+            rate = self._extract_amount(rate_text)
+            gst_percent = self._extract_amount(gst_text)
+            if rate is None or gst_percent is None:
+                continue
+
+            effective_quantity = quantity or 1
+            line_subtotal = round(rate * effective_quantity, 2)
+            line_gst = round(line_subtotal * (gst_percent / 100), 2)
+            line_total = round(line_subtotal + line_gst, 2)
+            items.append(
+                {
+                    "type": normalized_type,
+                    "description": description,
+                    "quantity": None if normalized_type == "SERVICE" else quantity,
+                    "rate": rate,
+                    "gst_percent": gst_percent,
+                    "line_subtotal": line_subtotal,
+                    "line_gst": line_gst,
+                    "line_total": line_total,
+                }
+            )
+
+        return items
+
+    def _build_invoice_payload_items(self, draft: InvoiceDraft) -> List[Dict[str, Any]]:
+        if self._draft_has_line_items(draft):
+            return [
+                {
+                    "type": item["type"],
+                    "description": item["description"],
+                    "quantity": item["quantity"],
+                    "rate": item["rate"],
+                    "gstPercent": item["gst_percent"],
+                    "lineSubtotal": item["line_subtotal"],
+                    "lineGst": item["line_gst"],
+                    "lineTotal": item["line_total"],
+                }
+                for item in draft.line_items
+            ]
+
+        subtotal, gst_total, total_amount = self._calculate_invoice_totals(draft)
+        return [{
+            "type": draft.item_type,
+            "description": draft.item_description,
+            "quantity": None if draft.item_type == "SERVICE" else draft.quantity,
+            "rate": draft.amount,
+            "gstPercent": draft.gst_percent or 0,
+            "lineSubtotal": subtotal,
+            "lineGst": gst_total,
+            "lineTotal": total_amount,
+        }]
 
     async def _handle_business_health_score(self, params, context=None):
         org_uuid = context.get("org_uuid") or context.get("org_id")

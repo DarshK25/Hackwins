@@ -1,7 +1,17 @@
 import { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Save, User, Building, Bell, Shield } from "lucide-react";
+import {
+    Save,
+    User,
+    Building,
+    Bell,
+    Shield,
+    Circle,
+    CheckCircle2,
+    Clock3,
+    Upload,
+} from "lucide-react";
 import { useUser } from "@clerk/clerk-react";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 

@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useUser } from "@clerk/clerk-react";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 
 const CATEGORIES = [
     { value: "hardware", label: "Hardware / Parts", color: "#3B82F6" },
@@ -56,8 +57,11 @@ const MONTHS = [
 export default function TransactionsPage() {
     const { getToken } = useAuth();
     const { user } = useUser();
+    const { userId: internalUserId, orgId: internalOrgId } = useOnboardingStatus();
     
     const [transactions, setTransactions] = useState([]);
+    const [invoices, setInvoices] = useState([]);
+    const [orgName, setOrgName] = useState("MoneyOps Workspace");
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
     const [filterCategory, setFilterCategory] = useState("all");
@@ -79,74 +83,85 @@ export default function TransactionsPage() {
     });
 
     useEffect(() => {
-        if (user?.id) {
+        if (internalUserId && internalOrgId) {
             fetchTransactions();
-            fetchAiInsight();
         }
-    }, [user?.id, selectedMonth]);
+    }, [internalUserId, internalOrgId, selectedMonth]);
 
     const fetchTransactions = async () => {
         try {
             setLoading(true);
             const token = await getToken();
-            const res = await fetch("/api/transactions", {
-                headers: {
-                    "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
-                }
-            });
-            if (!res.ok) throw new Error("Failed to fetch");
-            const data = await res.json();
-            const txns = Array.isArray(data) ? data : data.transactions || [];
-            
-            const filtered = txns.filter(txn => {
-                const txnMonth = txn.date?.substring(0, 7);
-                return txnMonth === selectedMonth;
+            const headers = {
+                "Authorization": `Bearer ${token}`,
+                "X-User-Id": internalUserId,
+                "X-Org-Id": internalOrgId,
+            };
+
+            const [txRes, invoiceRes, orgRes] = await Promise.all([
+                fetch("/api/transactions", { headers }),
+                fetch("/api/invoices", { headers }),
+                fetch("/api/org/my", { headers }),
+            ]);
+
+            if (!txRes.ok) throw new Error("Failed to fetch transactions");
+
+            const txData = await txRes.json();
+            const txns = Array.isArray(txData) ? txData : txData.transactions || [];
+            const filtered = txns.filter((txn) => {
+                const dateValue = String(txn.transactionDate || txn.date || txn.createdAt || "");
+                return dateValue.substring(0, 7) === selectedMonth;
             });
             setTransactions(filtered);
+
+            if (invoiceRes.ok) {
+                const invoiceData = await invoiceRes.json();
+                setInvoices(Array.isArray(invoiceData) ? invoiceData : invoiceData.data || []);
+            } else {
+                setInvoices([]);
+            }
+
+            if (orgRes.ok) {
+                const orgData = await orgRes.json();
+                setOrgName(orgData?.data?.legalName || "MoneyOps Workspace");
+            }
         } catch (err) {
             console.error("Failed to fetch transactions", err);
-            setTransactions(getMockTransactions());
+            toast.error("Failed to load transactions");
+            setTransactions([]);
+            setInvoices([]);
         } finally {
             setLoading(false);
         }
     };
 
-    const getMockTransactions = () => [
-        { id: "1", amount: 210000, type: "expense", category: "hardware", description: "DC Charger hardware × 3 (BlueDart)", vendor: "Delta Electronics", date: "2026-03-05", source: "Manual", hasGst: true, gstAmount: 37800 },
-        { id: "2", amount: 145000, type: "expense", category: "salaries", description: "March salaries — 6 engineers", vendor: "—", date: "2026-03-01", source: "Manual", hasGst: false },
-        { id: "3", amount: 28000, type: "expense", category: "fuel", description: "Fuel — Pune site visits (4 vans)", vendor: "Indian Oil", date: "2026-03-12", source: "Imported", hasGst: false },
-        { id: "4", amount: 20000, type: "expense", category: "fuel", description: "Fuel — Kolhapur Marriott site", vendor: "HP Petrol", date: "2026-03-18", source: "Imported", hasGst: false },
-        { id: "5", amount: 28000, type: "expense", category: "rent", description: "Cerebrum IT Park — March rent", vendor: "Cerebrum", date: "2026-03-01", source: "Manual", hasGst: true, gstAmount: 5040 },
-        { id: "6", amount: 40000, type: "expense", category: "hardware", description: "Cable ducting & conduit (BlueDart)", vendor: "Polycab", date: "2026-03-08", source: "Manual", hasGst: true, gstAmount: 7200 },
-        { id: "7", amount: 11000, type: "expense", category: "uncategorized", description: "UPI transfer — unknown", vendor: "—", date: "2026-03-15", source: "Imported", hasGst: false },
-    ];
-
     const fetchAiInsight = async () => {
-        try {
-            const token = await getToken();
-            const res = await fetch("/api/v1/agent/chat", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`,
-                },
-                body: JSON.stringify({
-                    message: "Analyze my expenses for March 2026. What's my cost breakdown, any unusual items, and give actionable advice to reduce costs?",
-                    session_id: `expenses-${user?.id}`,
-                    org_id: "demo-org"
-                })
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setAiInsight(data.message);
-            } else {
-                setAiInsight("Hardware costs jumped 38% this month due to the BlueDart depot project. Your fuel expense is ₹48,000 — oil prices rose 6% in March. Net margin at 44% is below your 50% target. Consider reviewing hardware procurement pricing before the next large project.");
-            }
-        } catch {
-            setAiInsight("Hardware costs jumped 38% this month due to the BlueDart depot project. Your fuel expense is ₹48,000 — oil prices rose 6% in March. Net margin at 44% is below your 50% target. Consider reviewing hardware procurement pricing before the next large project.");
+        const totalExpenses = transactions
+            .filter((t) => String(t.type).toUpperCase() === "EXPENSE")
+            .reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0);
+        const totalIncome = transactions
+            .filter((t) => String(t.type).toUpperCase() === "INCOME")
+            .reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0);
+        const monthRevenue = invoices
+            .filter((inv) => String(inv.issueDate || "").startsWith(selectedMonth))
+            .reduce((sum, inv) => sum + Number(inv.totalAmount || 0), 0);
+
+        if (!transactions.length && !invoices.length) {
+            setAiInsight("No live transactions or invoices were found for this workspace yet. Record transactions or create invoices first, then this page can summarize actual performance.");
+            return;
         }
+
+        if (!transactions.length) {
+            setAiInsight(`Invoices raised in ${MONTHS.find(m => m.value === selectedMonth)?.label || selectedMonth} total ₹${monthRevenue.toLocaleString("en-IN")}, but there are no recorded transactions for the same month. That means billing exists, while operating cash movements have not been captured here yet.`);
+            return;
+        }
+
+        setAiInsight(`For ${MONTHS.find(m => m.value === selectedMonth)?.label || selectedMonth}, recorded expenses are ₹${totalExpenses.toLocaleString("en-IN")} and recorded income transactions are ₹${totalIncome.toLocaleString("en-IN")}. Invoices raised in the same month total ₹${monthRevenue.toLocaleString("en-IN")}. Use invoices for billed revenue and this page for actual money movement.`);
     };
+
+    useEffect(() => {
+        fetchAiInsight();
+    }, [transactions, invoices, selectedMonth]);
 
     const handleVoiceInput = useCallback(() => {
         if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
@@ -219,15 +234,15 @@ export default function TransactionsPage() {
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId,
                 },
                 body: JSON.stringify({
                     amount,
-                    type: type === "income" ? "credit" : "debit",
+                    type: type === "income" ? "INCOME" : "EXPENSE",
                     category,
                     description: description || transcript,
-                    date: new Date().toISOString().split("T")[0],
-                    source: "Voice"
+                    transactionDate: new Date().toISOString().split("T")[0],
                 })
             });
 
@@ -260,12 +275,14 @@ export default function TransactionsPage() {
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${token}`,
-                    "X-User-Id": user?.id
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId,
                 },
                 body: JSON.stringify({
                     ...newTransaction,
                     amount: parseFloat(newTransaction.amount),
-                    type: newTransaction.type === "income" ? "credit" : "debit"
+                    type: newTransaction.type === "income" ? "INCOME" : "EXPENSE",
+                    transactionDate: newTransaction.date,
                 }),
             });
             
@@ -293,15 +310,26 @@ export default function TransactionsPage() {
     };
 
     const stats = {
-        totalExpenses: transactions.filter(t => t.type === "expense").reduce((sum, t) => sum + Math.abs(t.amount), 0),
-        totalIncome: transactions.filter(t => t.type === "income").reduce((sum, t) => sum + Math.abs(t.amount), 0),
+        totalExpenses: transactions
+            .filter((t) => String(t.type).toUpperCase() === "EXPENSE")
+            .reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0),
+        totalIncome: transactions
+            .filter((t) => String(t.type).toUpperCase() === "INCOME")
+            .reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0),
+        grossRevenue: invoices
+            .filter((inv) => String(inv.issueDate || "").startsWith(selectedMonth))
+            .reduce((sum, inv) => sum + Number(inv.totalAmount || 0), 0),
         uncategorized: transactions.filter(t => t.category === "uncategorized" || !t.category).length,
-        netMargin: 44.1,
     };
+    const netMargin = stats.grossRevenue > 0
+        ? (((stats.grossRevenue - stats.totalExpenses) / stats.grossRevenue) * 100)
+        : 0;
 
     const categoryBreakdown = CATEGORIES.map(cat => {
-        const catTransactions = transactions.filter(t => t.category === cat.value);
-        const total = catTransactions.reduce((sum, t) => sum + Math.abs(t.amount), 0);
+        const catTransactions = transactions.filter(
+            (t) => t.category === cat.value && String(t.type).toUpperCase() === "EXPENSE"
+        );
+        const total = catTransactions.reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0);
         return { ...cat, total, count: catTransactions.length };
     }).filter(c => c.total > 0).sort((a, b) => b.total - a.total);
 
@@ -312,7 +340,7 @@ export default function TransactionsPage() {
             txn.category?.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesCategory = filterCategory === "all" || txn.category === filterCategory;
         return matchesSearch && matchesCategory;
-    }).sort((a, b) => new Date(b.date) - new Date(a.date));
+    }).sort((a, b) => new Date(b.transactionDate || b.date) - new Date(a.transactionDate || a.date));
 
     const inputStyle = {
         backgroundColor: "#1A1A1A",
@@ -330,8 +358,8 @@ export default function TransactionsPage() {
             {/* Header */}
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
-                    <h1 className="mo-h1">Expenses</h1>
-                    <p className="mo-text-secondary mt-1">VoltNest Energy Solutions · {MONTHS.find(m => m.value === selectedMonth)?.label}</p>
+                    <h1 className="mo-h1">Transactions</h1>
+                    <p className="mo-text-secondary mt-1">{orgName} · {MONTHS.find(m => m.value === selectedMonth)?.label}</p>
                 </div>
                 
                 <div className="flex items-center gap-3 flex-wrap">
@@ -350,13 +378,13 @@ export default function TransactionsPage() {
                         onClick={() => setIsVoiceOpen(true)}
                         className="mo-btn-primary flex items-center gap-2"
                     >
-                        <Mic className="h-4 w-4" /> Voice: "Add expense"
+                        <Mic className="h-4 w-4" /> Voice: "Add transaction"
                     </button>
 
                     <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
                         <DialogTrigger asChild>
                             <button className="mo-btn-primary flex items-center gap-2">
-                                <Plus className="h-4 w-4" /> + Add Expense
+                                <Plus className="h-4 w-4" /> + Add Transaction
                             </button>
                         </DialogTrigger>
                         <DialogContent className="max-h-[90vh] overflow-y-auto bg-[#111111] border-[#2A2A2A] text-white">
@@ -440,19 +468,19 @@ export default function TransactionsPage() {
             {/* Stats Cards */}
             <div className="grid gap-4 md:grid-cols-4">
                 <div className="mo-stat-card">
-                    <p className="text-sm text-[#A0A0A0] mb-1">Total Expenses ({MONTHS.find(m => m.value === selectedMonth)?.label.split(" ")[0]})</p>
+                    <p className="text-sm text-[#A0A0A0] mb-1">Total Expenses</p>
                     <div className="text-2xl font-bold text-white">₹{stats.totalExpenses.toLocaleString("en-IN")}</div>
-                    <p className="text-xs text-[#CD1C18] mt-1">↑ 14% vs Feb</p>
+                    <p className="text-xs text-[#A0A0A0] mt-1">Live transaction data</p>
                 </div>
                 <div className="mo-stat-card">
-                    <p className="text-sm text-[#A0A0A0] mb-1">Gross Revenue ({MONTHS.find(m => m.value === selectedMonth)?.label.split(" ")[0]})</p>
-                    <div className="text-2xl font-bold text-[#4CBB17]">₹8,61,400</div>
-                    <p className="text-xs text-[#A0A0A0] mt-1">BlueDart invoice raised</p>
+                    <p className="text-sm text-[#A0A0A0] mb-1">Gross Revenue</p>
+                    <div className="text-2xl font-bold text-[#4CBB17]">₹{stats.grossRevenue.toLocaleString("en-IN")}</div>
+                    <p className="text-xs text-[#A0A0A0] mt-1">From invoices raised this month</p>
                 </div>
                 <div className="mo-stat-card">
                     <p className="text-sm text-[#A0A0A0] mb-1">Net Margin</p>
-                    <div className="text-2xl font-bold text-white">{stats.netMargin}%</div>
-                    <p className="text-xs text-[#F59E0B] mt-1">Target: 50%+</p>
+                    <div className="text-2xl font-bold text-white">{netMargin.toFixed(1)}%</div>
+                    <p className="text-xs text-[#A0A0A0] mt-1">Revenue minus expenses</p>
                 </div>
                 <div className="mo-stat-card">
                     <p className="text-sm text-[#A0A0A0] mb-1">Uncategorized</p>
@@ -467,10 +495,10 @@ export default function TransactionsPage() {
                 <div className="mo-card">
                     <h3 className="font-semibold text-white mb-4">Import Statement</h3>
                     <p className="text-sm text-[#A0A0A0] mb-4">
-                        Import bank statement to auto-capture expenses
+                        Coming soon — import bank statement CSVs to auto-capture expenses
                     </p>
                     <p className="text-xs text-[#666] mb-4">
-                        Download CSV from your net banking · Upload here · AI auto-categorizes every transaction
+                        Download CSV from your net banking, upload it here, and let AI categorize each transaction
                     </p>
                     <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
                         <DialogTrigger asChild>
@@ -544,13 +572,8 @@ export default function TransactionsPage() {
                             <Lightbulb className="h-5 w-5 text-[#4CBB17]" />
                         </div>
                         <div className="flex-1">
-                            <h3 className="font-semibold text-white mb-2">AI insight</h3>
+                            <h3 className="font-semibold text-white mb-2">Operational insight</h3>
                             <p className="text-sm text-[#CCC] leading-relaxed">{aiInsight}</p>
-                            <div className="mt-3 p-3 bg-[#F59E0B10] border border-[#F59E0B30] rounded-lg">
-                                <p className="text-xs text-[#F59E0B]">
-                                    ⚠ GST note: ₹2,50,000 in hardware expenses likely carries 18% GST input credit (₹45,000). Ensure vendor invoices are uploaded to claim ITC in GSTR-3B.
-                                </p>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -559,7 +582,7 @@ export default function TransactionsPage() {
             {/* Transactions Table */}
             <div className="mo-card">
                 <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-white">All expenses — {MONTHS.find(m => m.value === selectedMonth)?.label}</h3>
+                    <h3 className="font-semibold text-white">All transactions — {MONTHS.find(m => m.value === selectedMonth)?.label}</h3>
                     <div className="flex items-center gap-3">
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#666]" />
@@ -599,8 +622,7 @@ export default function TransactionsPage() {
                                     <th className="text-left py-3 px-4 text-[#666] font-medium">Category</th>
                                     <th className="text-left py-3 px-4 text-[#666] font-medium">Vendor</th>
                                     <th className="text-right py-3 px-4 text-[#666] font-medium">Amount</th>
-                                    <th className="text-right py-3 px-4 text-[#666] font-medium">GST</th>
-                                    <th className="text-left py-3 px-4 text-[#666] font-medium">Source</th>
+                                    <th className="text-left py-3 px-4 text-[#666] font-medium">Type</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -609,7 +631,7 @@ export default function TransactionsPage() {
                                     return (
                                         <tr key={txn.id} className="border-b border-[#1A1A1A] hover:bg-[#111111] transition-colors">
                                             <td className="py-3 px-4 text-[#CCC]">
-                                                {new Date(txn.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                                                {new Date(txn.transactionDate || txn.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
                                             </td>
                                             <td className="py-3 px-4 text-white font-medium">{txn.description}</td>
                                             <td className="py-3 px-4">
@@ -620,18 +642,11 @@ export default function TransactionsPage() {
                                                     {cat.label}
                                                 </span>
                                             </td>
-                                            <td className="py-3 px-4 text-[#CCC]">{txn.vendor || "—"}</td>
+                                            <td className="py-3 px-4 text-[#CCC]">{txn.vendor || txn.referenceNumber || "—"}</td>
                                             <td className="py-3 px-4 text-right text-white font-semibold">
-                                                ₹{Math.abs(txn.amount).toLocaleString("en-IN")}
+                                                ₹{Math.abs(Number(txn.amount || 0)).toLocaleString("en-IN")}
                                             </td>
-                                            <td className="py-3 px-4 text-right text-[#666]">
-                                                {txn.hasGst ? `₹${(txn.gstAmount || 0).toLocaleString("en-IN")}` : "—"}
-                                            </td>
-                                            <td className="py-3 px-4">
-                                                <span className={`px-2 py-1 rounded text-xs ${txn.source === "Manual" ? "bg-[#4CBB1720] text-[#4CBB17]" : "bg-[#66620] text-[#666]"}`}>
-                                                    {txn.source}
-                                                </span>
-                                            </td>
+                                            <td className="py-3 px-4 text-[#CCC]">{String(txn.type || "").toUpperCase()}</td>
                                         </tr>
                                     );
                                 })}

@@ -17,6 +17,18 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def normalize_business_id(business_id: Optional[Any], default: str = "1") -> str:
+    """Convert nullable or placeholder business ids into a backend-safe numeric string."""
+    if business_id is None:
+        return default
+
+    value = str(business_id).strip()
+    if not value or value.lower() in {"default", "none", "null", "undefined"}:
+        return default
+
+    return value if value.isdigit() else default
+
+
 class OrgIsolationError(Exception):
     """Raised when an operation violates organization isolation rules."""
 
@@ -179,6 +191,16 @@ class BackendHttpAdapter:
             resp.data = data
         return resp
 
+    async def get_my_organization(self, user_id: str) -> BackendResponse:
+        resp = await self._request("GET", "/api/org/my", user_id=user_id)
+        if resp.success and resp.data:
+            resp.data = (
+                resp.data.get("data")
+                if isinstance(resp.data, dict) and "data" in resp.data
+                else resp.data
+            )
+        return resp
+
     async def create_invoice_direct(
         self, org_id: str, user_id: str, payload: Dict[str, Any]
     ) -> BackendResponse:
@@ -230,15 +252,54 @@ class BackendHttpAdapter:
         )
 
     async def get_finance_metrics(
-        self, business_id: str, org_id: str, user_id: Optional[str] = None
+        self, business_id: Optional[Any], org_id: str, user_id: Optional[str] = None
     ) -> BackendResponse:
         return await self._request(
             "GET",
             "/api/finance-intelligence/metrics",
-            params={"businessId": business_id},
+            params={"businessId": normalize_business_id(business_id)},
             org_id=org_id,
             user_id=user_id,
         )
+
+    async def send_collection_email(
+        self,
+        invoice_id: str,
+        client_email: str,
+        client_name: str,
+        invoice_number: str,
+        amount: float,
+        due_date: str,
+        org_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        tone: str = "gentle",
+    ) -> dict:
+        payload = {
+            "type": "PAYMENT_REMINDER",
+            "recipientEmail": client_email,
+            "recipientName": client_name,
+            "templateData": {
+                "invoiceId": invoice_id,
+                "invoiceNumber": invoice_number,
+                "amount": amount,
+                "dueDate": due_date,
+                "businessName": "VoltNest Energy Solutions Pvt. Ltd.",
+                "tone": tone,
+            },
+        }
+        resp = await self._request(
+            "POST",
+            "/api/notifications/email",
+            data=payload,
+            org_id=org_id,
+            user_id=user_id,
+        )
+        return {
+            "sent": bool(resp.success),
+            "recipient": client_email,
+            "status_code": resp.status_code,
+            "error": resp.error,
+        }
 
     async def get_financial_summary(
         self, org_id: str, user_id: Optional[str] = None

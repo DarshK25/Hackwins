@@ -96,20 +96,22 @@ export function SalesCRMDashboard({ businessId, onRefresh }) {
     if (Array.isArray(invoices)) {
         invoices.forEach(inv => {
             const cid = inv.clientId;
-            if (!clientInvoiceMap[cid]) clientInvoiceMap[cid] = { count: 0, revenue: 0 };
+            if (!clientInvoiceMap[cid]) clientInvoiceMap[cid] = { count: 0, revenue: 0, overdue: 0 };
             clientInvoiceMap[cid].count++;
-            if (inv.status === "PAID") {
-                clientInvoiceMap[cid].revenue += inv.totalAmount || 0;
+            clientInvoiceMap[cid].revenue += inv.totalAmount || 0;
+            if (inv.status === "OVERDUE") {
+                clientInvoiceMap[cid].overdue += (inv.totalAmount || 0) - (inv.paidAmount || 0);
             }
         });
     }
 
     const enrichedClients = clients.map(c => {
-        const data = clientInvoiceMap[c.id] || { count: 0, revenue: 0 };
+        const data = clientInvoiceMap[c.id] || { count: 0, revenue: 0, overdue: 0 };
         return {
             name: c.name || c.company || "Unknown",
             invoiceCount: data.count,
             totalRevenue: data.revenue,
+            overdueRevenue: data.overdue,
             growth: data.revenue > 0 ? Math.round(Math.random() * 20 + 1) : 0,
             trend: data.revenue > 0 ? "up" : "down",
             status: c.status,
@@ -215,7 +217,7 @@ export function SalesCRMDashboard({ businessId, onRefresh }) {
                                 </div>
                                 <div>
                                     <p className="font-semibold text-white text-sm">{client.name}</p>
-                                    <p className="text-xs text-[#A0A0A0]">{client.invoiceCount} invoices · {client.email || client.status}</p>
+                                    <p className="text-xs text-[#A0A0A0]">{client.invoiceCount} invoices · {client.overdueRevenue > 0 ? `₹${client.overdueRevenue.toLocaleString("en-IN")} overdue` : (client.email || client.status)}</p>
                                 </div>
                             </div>
                             <div className="text-right">

@@ -38,6 +38,7 @@ class VoiceProcessRequest(BaseModel):
     user_id: str
     org_id: str
     session_id: str
+    business_id: Optional[int | str] = None
     context: Dict[str, Any] = Field(default_factory=dict)
     conversation_history: List[Dict[str, Any]] = Field(default_factory=list)
 
@@ -90,28 +91,54 @@ async def process_voice(request: VoiceProcessRequest, fastapi_request: Request):
     from app.voice_processor import voice_processor, VoiceContext
 
     try:
+        resolved_business_id = (
+            request.business_id
+            or request.context.get("business_id")
+            or request.context.get("businessId")
+            or 1
+        )
         context = VoiceContext(
             session_id=request.session_id,
             user_id=request.user_id,
             org_uuid=request.org_id,
+            business_id=resolved_business_id,
             clerk_org_id=request.org_id,
             raw_text=request.text,
         )
+        from app.adapters.backend_adapter import normalize_business_id
+        from app.state.session_manager import session_manager
+
+        session = session_manager.get_session(
+            request.session_id,
+            request.user_id,
+            request.org_id,
+            business_id=int(normalize_business_id(resolved_business_id)),
+        )
+        session_manager.save_session(session)
 
         result = await voice_processor.process(request.text, context)
 
         message = result.get("message", "")
         if isinstance(message, list):
             message = " ".join(str(m) for m in message)
+        ui_event = result.get("ui_event")
+        stage = "EXECUTED"
+        needs_more_info = False
+        if ui_event and ui_event.get("type") in {"open_client_picker", "open_input_dialog", "progress"}:
+            stage = "COLLECTING"
+            needs_more_info = True
+        if ui_event and ui_event.get("type") == "invoice_created":
+            stage = "EXECUTED"
+            needs_more_info = False
 
         return {
             "response_text": str(message) if message else "I've processed that.",
-            "intent": _classify_intent(message),
+            "intent": _classify_intent(request.text),
             "confidence": 0.9,
             "success": result.get("success", True),
-            "ui_event": result.get("ui_event"),
-            "stage": "EXECUTED",
-            "needs_more_info": False,
+            "ui_event": ui_event,
+            "stage": stage,
+            "needs_more_info": needs_more_info,
             "action_result": message if result.get("success") else None,
         }
     except Exception as e:
@@ -119,7 +146,7 @@ async def process_voice(request: VoiceProcessRequest, fastapi_request: Request):
 
         logger.error("voice_process_failed", error=str(e), exc_info=True)
         return {
-            "response_text": f"I'm having trouble with that right now: {str(e)[:100]}",
+            "response_text": "I hit a snag on that request. Please try again.",
             "success": False,
             "intent": "ERROR",
             "confidence": 0.0,
@@ -186,10 +213,18 @@ async def dialog_response(request: Request):
                     draft.gst_percent = float(v)
                 except:
                     pass
+            elif k == "issue_date":
+                draft.issue_date = v
             elif k == "gst_applicable":
                 draft.gst_applicable = str(v).lower() in ("true", "yes", "1")
             elif k == "due_date":
                 draft.due_date = v
+            elif k == "notes":
+                draft.notes = v
+            elif k == "invoice_items_text":
+                parsed_items = finance_agent.parse_line_items_text(v)
+                if parsed_items:
+                    draft.line_items = parsed_items
             elif (
                 k == "description"
                 or k == "item_description"

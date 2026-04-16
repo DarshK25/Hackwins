@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
 from app.agents.intelligent_agent import intelligent_agent
+from app.adapters.backend_adapter import normalize_business_id
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -62,7 +63,7 @@ class VoiceProcessor:
             message=text,
             org_id=org_id,
             user_id=context.user_id,
-            business_id=str(context.business_id) if context.business_id else "default",
+            business_id=normalize_business_id(context.business_id),
             session_id=context.session_id,
         )
 

@@ -1,40 +1,11 @@
-import { useEffect, useState } from "react";
-import { OrchestratorDashboard } from "@/components/OrchestratorDashboard";
-import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
-
 export default function OrchestratorPage() {
-    const [isHydrated, setIsHydrated] = useState(false);
-    const [businessId, setBusinessId] = useState(1);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        setIsHydrated(true);
-        initBusiness();
-    }, []);
-
-    async function initBusiness() {
-        try {
-            setBusinessId(1);
-        } catch (error) {
-            console.error(error);
-            toast.error("Failed to initialize");
-        } finally {
-            setLoading(false);
-        }
-    }
-
-    if (!isHydrated || loading) {
-        return (
-            <div className="flex items-center justify-center h-64">
-                <Loader2 className="h-8 w-8 animate-spin text-[#4CBB17]" />
-            </div>
-        );
-    }
-
     return (
-        <div className="flex flex-col gap-6">
-            <OrchestratorDashboard businessId={businessId} />
+        <div className="flex flex-col items-center justify-center h-full min-h-[60vh] gap-4 text-center">
+            <h1 className="text-2xl font-medium text-white">Multi-Agent Orchestrator</h1>
+            <p className="text-[#A0A0A0] max-w-md">
+                The orchestrator coordinates Finance, Sales, Market, and Compliance agents for complex multi-step tasks.
+                This surface is still in beta and is not ready for live workflows yet.
+            </p>
         </div>
     );
 }

@@ -152,10 +152,66 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                     actionable: ins.actionable,
                     action: ins.actionable ? "View Details" : null
                 })));
-            } else setInsights([
-                { id: "1", type: "suggestion", title: "Tax Optimization", message: "Consider investing in 80C instruments to save tax.", priority: "medium", actionable: true, action: "View Details" },
-                { id: "2", type: "alert", title: "High Expenses", message: "Operations expenses exceeded budget by 4.1%.", priority: "high", actionable: true, action: "Review Expenses" },
-            ]);
+            } else {
+                const revenue = Number(metricsRes.ok ? (await fetch(`/api/finance-intelligence/metrics?businessId=${businessId}`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": user?.id,
+                        "X-Org-Id": orgId
+                    }
+                }).then(r => r.ok ? r.json() : Promise.resolve({}))).revenue : 0);
+                const expenses = Number(metricsRes.ok ? (await fetch(`/api/finance-intelligence/metrics?businessId=${businessId}`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": user?.id,
+                        "X-Org-Id": orgId
+                    }
+                }).then(r => r.ok ? r.json() : Promise.resolve({}))).expenses : 0);
+                const expenseRatio = revenue > 0 ? expenses / revenue : 0;
+                const fallbackInsights = [
+                    {
+                        id: "1",
+                        type: "suggestion",
+                        title: "Tax Optimization",
+                        message: "Review GST input credits and deductible expenses before month close.",
+                        priority: "medium",
+                        actionable: true,
+                        action: "View Details"
+                    }
+                ];
+                if (revenue > 0 && expenseRatio > 0.7) {
+                    fallbackInsights.push({
+                        id: "2",
+                        type: "alert",
+                        title: "High Expense Ratio",
+                        message: `Expenses are ${Math.round(expenseRatio * 100)}% of revenue. This needs immediate review.`,
+                        priority: "high",
+                        actionable: true,
+                        action: "Review Expenses"
+                    });
+                } else if (revenue > 0 && expenseRatio > 0.5) {
+                    fallbackInsights.push({
+                        id: "2",
+                        type: "alert",
+                        title: "Expense Ratio Worth Monitoring",
+                        message: `Expenses are ${Math.round(expenseRatio * 100)}% of revenue. Margin is still positive but tightening.`,
+                        priority: "medium",
+                        actionable: true,
+                        action: "Review Expenses"
+                    });
+                } else if (revenue > 0) {
+                    fallbackInsights.push({
+                        id: "2",
+                        type: "suggestion",
+                        title: "Strong Profitability",
+                        message: `Profit margin is ${((1 - expenseRatio) * 100).toFixed(1)}%. Consider reinvesting part of that into growth.`,
+                        priority: "low",
+                        actionable: false,
+                        action: null
+                    });
+                }
+                setInsights(fallbackInsights);
+            }
 
             if (ledgerRes.ok) { 
                 const d = await ledgerRes.json(); 

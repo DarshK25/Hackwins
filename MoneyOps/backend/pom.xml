@@ -118,11 +118,10 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- Resend Email API -->
+        <!-- SMTP mail delivery for Mailpit in dev and Brevo in production -->
         <dependency>
-            <groupId>com.resend</groupId>
-            <artifactId>resend-java</artifactId>
-            <version>3.1.0</version>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
 
         <!-- PDF generation -->

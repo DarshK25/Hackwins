@@ -1,9 +1,7 @@
-// CLEANUP: removed Customer Agent, Growth Agent, Operations Agent, Strategy Agent, added Command Center, Sales & CRM — June 2025
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
   BarChart3,
-  CreditCard,
   FileText,
   Home,
   Users,
@@ -13,20 +11,13 @@ import {
   Search,
   Shield,
   GitMerge,
-  Brain,
-  Heart,
-  Rocket,
-  Cog,
-  Bell,
+  Receipt,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarRail,
 } from "@/components/ui/sidebar";
@@ -54,7 +45,6 @@ function SidebarNav({ items }) {
                 : "text-[#A0A0A0] hover:bg-[#1A1A1A] hover:text-white"
             )}
           >
-            {/* Active left border indicator */}
             {isActive && (
               <span
                 className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r bg-[#4CBB17]"
@@ -106,7 +96,6 @@ export function AppSidebar(props) {
       title: "Overview",
       icon: <Home className="h-4 w-4" />,
     },
-
     {
       href: "/invoices",
       title: "Invoices",
@@ -121,6 +110,11 @@ export function AppSidebar(props) {
       href: "/cashflow",
       title: "Cash Flow",
       icon: <BarChart3 className="h-4 w-4" />,
+    },
+    {
+      href: "/transactions",
+      title: "Transactions",
+      icon: <Receipt className="h-4 w-4" />,
     },
     {
       href: "/documents",
@@ -162,7 +156,8 @@ export function AppSidebar(props) {
       href: "/teams",
       title: "Teams",
       icon: <Users className="h-4 w-4" />,
-    },{
+    },
+    {
       href: "/settings",
       title: "Settings",
       icon: <Settings className="h-4 w-4" />,
@@ -171,15 +166,11 @@ export function AppSidebar(props) {
 
   return (
     <Sidebar collapsible="offcanvas" {...props}>
-      {/* Logo */}
       <SidebarHeader className="border-b border-[#2A2A2A] px-4 py-4">
         <div className="flex items-center gap-3">
-          {/* MoneyOps logo mark */}
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#4CBB17] flex-shrink-0 overflow-hidden">
             <svg viewBox="0 0 32 32" width="22" height="22" fill="none" xmlns="http://www.w3.org/2000/svg">
-              {/* Lightning bolt / zigzag path */}
               <path d="M10 22 L14 14 L18 18 L22 10" stroke="#000" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-              {/* Arrow tip pointing up-right */}
               <path d="M19 10 L22 10 L22 13" stroke="#000" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
@@ -193,7 +184,6 @@ export function AppSidebar(props) {
       <SidebarContent className="flex-1 bg-[#111111]">
         <ScrollArea className="flex-1 px-3 py-4">
           <div className="flex flex-col gap-6">
-            {/* Finance */}
             <div>
               <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-[#A0A0A0]">
                 Finance
@@ -201,7 +191,6 @@ export function AppSidebar(props) {
               <SidebarNav items={mainNavItems} />
             </div>
 
-            {/* Agents */}
             <div>
               <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-[#A0A0A0]">
                 AI Agents
@@ -209,7 +198,6 @@ export function AppSidebar(props) {
               <SidebarNav items={agentNavItems} />
             </div>
 
-            {/* Utilities */}
             <div>
               <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-[#A0A0A0]">
                 Workspace
@@ -221,13 +209,7 @@ export function AppSidebar(props) {
       </SidebarContent>
 
       <SidebarFooter className="border-t border-[#2A2A2A] px-4 py-3 bg-[#111111]">
-        <div className="flex items-center gap-2">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4CBB17] opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#4CBB17]" />
-          </span>
-          <span className="text-xs text-[#A0A0A0]">All systems operational</span>
-        </div>
+        <span className="text-xs text-[#A0A0A0]">Workspace navigation</span>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

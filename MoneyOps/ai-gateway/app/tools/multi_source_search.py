@@ -4,11 +4,11 @@ Providers: Tavily, DuckDuckGo, SerpAPI, NewsAPI
 Gracefully degrades when API keys are missing
 """
 
-import os
 import asyncio
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 from app.utils.logger import get_logger
+from app.config import settings
 
 logger = get_logger(__name__)
 
@@ -35,7 +35,7 @@ class MultiSourceSearch:
     def _initialize_providers(self):
         self.providers = {}
 
-        tavily_key = os.getenv("TAVILY_API_KEY")
+        tavily_key = settings.TAVILY_API_KEY
         if tavily_key:
             try:
                 from tavily import TavilyClient
@@ -49,7 +49,7 @@ class MultiSourceSearch:
             except Exception as e:
                 logger.warning({"event": "tavily_init_failed", "error": str(e)})
 
-        newsapi_key = os.getenv("NEWS_API_KEY")
+        newsapi_key = settings.NEWS_API_KEY
         if newsapi_key:
             try:
                 from newsapi import NewsApiClient
@@ -63,7 +63,7 @@ class MultiSourceSearch:
             except Exception as e:
                 logger.warning({"event": "newsapi_init_failed", "error": str(e)})
 
-        serpapi_key = os.getenv("SERPAPI_KEY")
+        serpapi_key = settings.SERPAPI_KEY
         if serpapi_key:
             self.providers["serpapi"] = {
                 "api_key": serpapi_key,
@@ -81,12 +81,20 @@ class MultiSourceSearch:
         )
 
     async def search(
-        self, query: str, max_results_per_source: int = 5, include_answer: bool = True
+        self,
+        query: str,
+        max_results_per_source: int = 5,
+        include_answer: bool = True,
+        **kwargs,
     ) -> Dict[str, Any]:
         """
         Search across all available providers and aggregate results.
         Returns deduplicated, ranked results.
         """
+        legacy_max_results = kwargs.pop("max_results", None)
+        if legacy_max_results is not None:
+            max_results_per_source = legacy_max_results
+
         tasks = []
 
         if "tavily" in self.providers:

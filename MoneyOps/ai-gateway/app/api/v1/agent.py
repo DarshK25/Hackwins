@@ -23,7 +23,7 @@ class AgentRequest(BaseModel):
     )
     org_id: str = Field(..., description="Organization ID")
     user_id: Optional[str] = Field(None, description="User ID")
-    business_id: Optional[str] = Field("default", description="Business ID")
+    business_id: Optional[str] = Field("1", description="Business ID")
 
 
 class AgentResponseModel(BaseModel):

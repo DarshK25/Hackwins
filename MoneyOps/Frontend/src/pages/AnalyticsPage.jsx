@@ -186,7 +186,7 @@ export default function AnalyticsPage() {
             {/* ── Header ──────────────────────────────────────────────────────── */}
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
-                    <h1 className="mo-h1">Analytics</h1>
+                    <h1 className="mo-h1">Overview</h1>
                     <p className="mo-text-secondary mt-1">Performance metrics for {orgName}</p>
                 </div>
                 <div className="flex gap-2">

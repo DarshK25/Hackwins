@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str
     GROQ_API_KEY_FAST: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
+    TAVILY_API_KEY: Optional[str] = None
+    NEWS_API_KEY: Optional[str] = None
+    SERPAPI_KEY: Optional[str] = None
 
     # LLM Models
     GROQ_MODEL: str = "llama-3.1-8b-instant"

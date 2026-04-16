@@ -143,6 +143,18 @@ class EnhancedFinanceAgent(BaseAgent):
             ]
         )
 
+    @staticmethod
+    def _ctx_get(context, key: str, default=None):
+        value = getattr(context, key, None)
+        if value is not None:
+            return value
+        if hasattr(context, "get"):
+            try:
+                return context.get(key, default)
+            except TypeError:
+                return context.get(key) or default
+        return default
+
     async def _fetch_financial_data(
         self, org_id: str, user_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -341,8 +353,10 @@ Keep it 4-5 sentences for voice."""
         return await groq_analyze(prompt)
 
     async def handle_balance_check(self, context) -> AgentResponse:
-        org_id = getattr(context, "org_uuid", None) or context.get("org_id", "")
-        user_id = getattr(context, "user_id", None) or context.get("user_id")
+        org_id = self._ctx_get(context, "org_uuid") or self._ctx_get(
+            context, "org_id", ""
+        )
+        user_id = self._ctx_get(context, "user_id")
 
         summary = await self._generate_financial_summary(org_id, user_id)
 
@@ -359,8 +373,10 @@ Keep it 4-5 sentences for voice."""
         )
 
     async def handle_invoice_query(self, context) -> AgentResponse:
-        org_id = getattr(context, "org_uuid", None) or context.get("org_id", "")
-        user_id = getattr(context, "user_id", None) or context.get("user_id")
+        org_id = self._ctx_get(context, "org_uuid") or self._ctx_get(
+            context, "org_id", ""
+        )
+        user_id = self._ctx_get(context, "user_id")
 
         report = await self._generate_invoice_report(org_id, user_id)
 
@@ -369,8 +385,10 @@ Keep it 4-5 sentences for voice."""
         )
 
     async def handle_payment_analysis(self, context) -> AgentResponse:
-        org_id = getattr(context, "org_uuid", None) or context.get("org_id", "")
-        user_id = getattr(context, "user_id", None) or context.get("user_id")
+        org_id = self._ctx_get(context, "org_uuid") or self._ctx_get(
+            context, "org_id", ""
+        )
+        user_id = self._ctx_get(context, "user_id")
 
         analysis = await self._analyze_payment_patterns(org_id, user_id)
 
@@ -379,8 +397,10 @@ Keep it 4-5 sentences for voice."""
         )
 
     async def handle_cash_flow_forecast(self, context) -> AgentResponse:
-        org_id = getattr(context, "org_uuid", None) or context.get("org_id", "")
-        user_id = getattr(context, "user_id", None) or context.get("user_id")
+        org_id = self._ctx_get(context, "org_uuid") or self._ctx_get(
+            context, "org_id", ""
+        )
+        user_id = self._ctx_get(context, "user_id")
 
         forecast = await self._predict_cash_flow(org_id, user_id)
 
@@ -389,8 +409,10 @@ Keep it 4-5 sentences for voice."""
         )
 
     async def handle_health_check(self, context) -> AgentResponse:
-        org_id = getattr(context, "org_uuid", None) or context.get("org_id", "")
-        user_id = getattr(context, "user_id", None) or context.get("user_id")
+        org_id = self._ctx_get(context, "org_uuid") or self._ctx_get(
+            context, "org_id", ""
+        )
+        user_id = self._ctx_get(context, "user_id")
 
         data = await self._fetch_financial_data(org_id, user_id)
         m = data["metrics"]

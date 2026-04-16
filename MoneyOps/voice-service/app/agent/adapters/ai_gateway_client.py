@@ -93,7 +93,7 @@ class AIGatewayClient:
 
     def _error_fallback(self) -> Dict[str, Any]:
         return {
-            "response_text": "I'm having trouble right now. Please try again.",
+            "response_text": "Sorry, I hit a hiccup just now. Please try that again.",
             "intent": "ERROR",
             "confidence": 0.0,
         }
