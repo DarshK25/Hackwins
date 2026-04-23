@@ -53,13 +53,18 @@ function dispatchUIEvent(event, navigate) {
   
   // Custom deep-link handler for invoice creation
   if (type === "invoice_created") {
+    window.dispatchEvent(new CustomEvent("voice:open_input_dialog", { detail: null }));
+    window.dispatchEvent(new CustomEvent("voice:open_client_picker", { detail: null }));
+    if (event.path) {
+      navigate(event.path);
+    }
     toast.success(
       <div className="flex flex-col gap-1">
         <span className="font-semibold text-sm">Invoice Created ✓</span>
         <span className="text-xs text-white/70">{event.invoice_number} · {event.client_name}</span>
         <span className="text-xs font-semibold">₹{Number(event.total).toLocaleString('en-IN')}</span>
         <button
-          onClick={() => navigate(`/invoices/${event.invoice_id}`)}
+          onClick={() => navigate(event.path || `/invoices/${event.invoice_id}`)}
           className="mt-1.5 py-1 px-2.5 rounded bg-white/10 hover:bg-white/20 text-[10px] font-medium transition-colors text-left w-fit"
         >
           View Invoice →
@@ -105,6 +110,31 @@ function dispatchUIEvent(event, navigate) {
 
   if (type === "confirmation") {
     window.dispatchEvent(new CustomEvent("voice:confirmation", { detail: event }));
+  }
+
+  if (type === "navigate" && event.path) {
+    navigate(event.path);
+  }
+
+  if (type === "open_invoice_form") {
+    try {
+      sessionStorage.setItem("voice_invoice_draft", JSON.stringify(event.draft || {}));
+    } catch {}
+    if (event.path) navigate(event.path);
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("voice:invoice-draft-updated", { detail: event }));
+    }, 150);
+  }
+
+  if (type === "open_client_form") {
+    try {
+      sessionStorage.setItem("voice_client_draft", JSON.stringify(event.draft || {}));
+    } catch {}
+    if (event.path) navigate(event.path);
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("voice:open-client-form", { detail: event }));
+      window.dispatchEvent(new CustomEvent("voice:client-draft-updated", { detail: event }));
+    }, 150);
   }
 
   if (type === "open_input_dialog") {

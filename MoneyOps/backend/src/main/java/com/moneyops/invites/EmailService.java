@@ -24,6 +24,9 @@ public class EmailService {
     @Value("${app.mail.from-name:MoneyOps}")
     private String fromName;
 
+    @Value("${app.mail.override-to:}")
+    private String overrideToEmail;
+
     public void sendInviteEmail(String toEmail, String token, String orgName, String role) {
         String inviteLink = frontendUrl + "/invite/" + token;
         String safeOrgName = orgName != null ? orgName : "MoneyOps";
@@ -76,18 +79,51 @@ public class EmailService {
 
     private void sendHtmlEmail(String toEmail, String subject, String htmlContent) {
         try {
+            String resolvedRecipient = resolveRecipient(toEmail);
+            String resolvedHtml = decorateHtmlForOverride(toEmail, resolvedRecipient, htmlContent);
             MimeMessage mimeMessage = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, "UTF-8");
             helper.setFrom(fromEmail, fromName);
-            helper.setTo(toEmail);
+            helper.setTo(resolvedRecipient);
             helper.setSubject(subject);
-            helper.setText(htmlContent, true);
+            helper.setText(resolvedHtml, true);
             mailSender.send(mimeMessage);
-            log.info("SMTP email sent to {} with subject {}", toEmail, subject);
+            log.info("SMTP email sent to {} with subject {}", resolvedRecipient, subject);
         } catch (Exception e) {
             log.error("SMTP email send failed for {}", toEmail, e);
             throw new RuntimeException("Failed to send email to " + toEmail + ": " + e.getMessage(), e);
         }
+    }
+
+    private String resolveRecipient(String intendedRecipient) {
+        String override = overrideToEmail != null ? overrideToEmail.trim() : "";
+        if (!override.isBlank()) {
+            log.warn("Email override active. Intended recipient {} redirected to {}", intendedRecipient, override);
+            return override;
+        }
+        return intendedRecipient;
+    }
+
+    private String decorateHtmlForOverride(String intendedRecipient, String actualRecipient, String htmlContent) {
+        if (actualRecipient.equalsIgnoreCase(intendedRecipient)) {
+            return htmlContent;
+        }
+        String banner = "<div style='font-family: sans-serif; max-width: 600px; margin: 0 auto 16px; padding: 12px 16px; border: 1px solid #f59e0b; border-radius: 10px; background: #fff7ed; color: #9a3412;'>"
+                + "<strong>Sandbox delivery override active.</strong><br/>"
+                + "Original recipient: " + escapeHtml(intendedRecipient) + "<br/>"
+                + "Delivered to test inbox: " + escapeHtml(actualRecipient)
+                + "</div>";
+        return banner + htmlContent;
+    }
+
+    private String escapeHtml(String value) {
+        if (value == null) return "";
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     private String formatInr(String amount) {

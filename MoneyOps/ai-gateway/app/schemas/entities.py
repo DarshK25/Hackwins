@@ -1,11 +1,10 @@
-"""
-Entity schemas, enums and helper normalizers used by EntityExtractor
-"""
+"""Entity schemas, enums and helper normalizers used by EntityExtractor."""
 from enum import Enum
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from decimal import Decimal
 import re
+from datetime import date, timedelta
 
 
 class EntityType(str, Enum):
@@ -113,20 +112,73 @@ def normalize_amount(text: str) -> Decimal:
 
 
 def normalize_time_period(text: str) -> str:
-    """Return a canonical time period string for simple phrases. Not exhaustive."""
+    """Return a canonical time period string for common voice phrases."""
     if not text:
         return ""
     s = text.lower().strip()
+    if "today" == s or "today" in s:
+        return TimePeriod.TODAY.value
+    if "last 7 days" in s or "past 7 days" in s:
+        return TimePeriod.LAST_7_DAYS.value
+    if "last week" in s or "previous week" in s:
+        return "last_week"
     if "last month" in s or "previous month" in s:
         return TimePeriod.LAST_MONTH.value
+    if "this month" in s or "current month" in s:
+        return "this_month"
     if "last quarter" in s or "previous quarter" in s:
         return TimePeriod.LAST_QUARTER.value
+    if "this quarter" in s or "current quarter" in s:
+        return "this_quarter"
     if "last year" in s or "previous year" in s:
         return TimePeriod.LAST_YEAR.value
-    if "today" in s or "today" == s:
-        return TimePeriod.TODAY.value
+    if "this year" in s or "current year" in s or s == "ytd" or "year to date" in s:
+        return "this_year"
     # return original as fallback
     return s
+
+
+def resolve_time_period_range(label: str) -> Dict[str, Optional[str]]:
+    """Resolve canonical labels into concrete date ranges when possible."""
+    today = date.today()
+    normalized = normalize_time_period(label)
+
+    if normalized == TimePeriod.TODAY.value:
+        return {"label": normalized, "start": today.isoformat(), "end": today.isoformat()}
+    if normalized == TimePeriod.LAST_7_DAYS.value:
+        return {"label": normalized, "start": (today - timedelta(days=6)).isoformat(), "end": today.isoformat()}
+    if normalized == "last_week":
+        start = today - timedelta(days=today.weekday() + 7)
+        end = start + timedelta(days=6)
+        return {"label": normalized, "start": start.isoformat(), "end": end.isoformat()}
+    if normalized == "this_month":
+        start = today.replace(day=1)
+        return {"label": normalized, "start": start.isoformat(), "end": today.isoformat()}
+    if normalized == TimePeriod.LAST_MONTH.value:
+        this_month_start = today.replace(day=1)
+        end = this_month_start - timedelta(days=1)
+        start = end.replace(day=1)
+        return {"label": normalized, "start": start.isoformat(), "end": end.isoformat()}
+    if normalized == "this_quarter":
+        quarter_start_month = ((today.month - 1) // 3) * 3 + 1
+        start = today.replace(month=quarter_start_month, day=1)
+        return {"label": normalized, "start": start.isoformat(), "end": today.isoformat()}
+    if normalized == TimePeriod.LAST_QUARTER.value:
+        quarter_start_month = ((today.month - 1) // 3) * 3 + 1
+        this_quarter_start = today.replace(month=quarter_start_month, day=1)
+        end = this_quarter_start - timedelta(days=1)
+        last_quarter_start_month = ((end.month - 1) // 3) * 3 + 1
+        start = end.replace(month=last_quarter_start_month, day=1)
+        return {"label": normalized, "start": start.isoformat(), "end": end.isoformat()}
+    if normalized == "this_year":
+        start = today.replace(month=1, day=1)
+        return {"label": normalized, "start": start.isoformat(), "end": today.isoformat()}
+    if normalized == TimePeriod.LAST_YEAR.value:
+        start = today.replace(year=today.year - 1, month=1, day=1)
+        end = today.replace(year=today.year - 1, month=12, day=31)
+        return {"label": normalized, "start": start.isoformat(), "end": end.isoformat()}
+
+    return {"label": normalized, "start": None, "end": None}
 
 
 def normalize_metric(text: str) -> str:
@@ -137,10 +189,13 @@ def normalize_metric(text: str) -> str:
 
 # Basic entity extraction regex patterns
 ENTITY_PATTERNS: Dict[EntityType, List[str]] = {
-    EntityType.AMOUNT: [r"(?:₹|Rs\.?|INR)?\s*\d{1,3}(?:[,\d]{0,})?(?:\.\d+)?\s*(?:k|K|m|M|l|L)?"],
-    EntityType.PHONE: [r"\b\+?\d[\d\-\s]{7,}\b"],
-    EntityType.EMAIL: [r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"],
-    EntityType.GST_NUMBER: [r"\b[0-9A-Z]{15}\b"],
+    EntityType.AMOUNT: [
+        r"(?:₹|Rs\.?|INR)\s*[\d,]+(?:\.\d+)?",
+        r"\b[\d,]+(?:\.\d+)?\s*(?:lakh|crore|thousand)\b",
+    ],
+    EntityType.PHONE: [r"\b(?:\+91[\s-]?)?[6-9]\d{9}\b"],
+    EntityType.EMAIL: [r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b"],
+    EntityType.GST_NUMBER: [r"\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b"],
     EntityType.PERCENTAGE: [r"\b\d{1,3}(?:\.\d+)?%\b"],
     # Additional types are left for LLM-based extraction
 }

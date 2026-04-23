@@ -21,6 +21,12 @@ public interface TransactionRepository extends MongoRepository<Transaction, Stri
     
     List<Transaction> findByOrgIdAndInvoiceIdAndDeletedAtIsNull(String orgId, String invoiceId);
 
+    Optional<Transaction> findByOrgIdAndInvoiceIdAndIdempotencyKeyAndDeletedAtIsNull(
+            String orgId,
+            String invoiceId,
+            String idempotencyKey
+    );
+
     List<Transaction> findByOrgIdAndTypeAndDeletedAtIsNull(String orgId, TransactionType type);
 
     List<Transaction> findByOrgIdAndTransactionDateBetweenAndDeletedAtIsNull(String orgId, LocalDate startDate, LocalDate endDate);

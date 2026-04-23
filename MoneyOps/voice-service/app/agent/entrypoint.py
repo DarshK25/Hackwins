@@ -19,8 +19,10 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load shared .env before any app imports
-load_dotenv(dotenv_path=Path(__file__).resolve().parents[4] / ".env", override=True)
+# Load voice-service-local .env before any app imports. Fall back to monorepo root.
+_service_env = Path(__file__).resolve().parents[2] / ".env"
+_repo_env = Path(__file__).resolve().parents[3] / ".env"
+load_dotenv(dotenv_path=_service_env if _service_env.exists() else _repo_env, override=True)
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -75,7 +77,11 @@ def premature_confirmation_guard(response_text: str, stage: str) -> str:
     has actually confirmed creation (Bug 8).
     """
     if stage == "EXECUTED":
-        return response_text  # Safe — backend confirmed execution
+        return response_text
+    if stage in {"COLLECTING", "CONFIRMING"}:
+        return response_text
+    if stage == "FAILED":
+        return "I hit a snag there. Could you try again?"
 
     text_lower = response_text.lower()
     for phrase in FORBIDDEN_PREMATURE_PHRASES:
@@ -86,11 +92,7 @@ def premature_confirmation_guard(response_text: str, stage: str) -> str:
                 stage=stage,
                 response_preview=str(response_text)[:100]
             )
-            # Return the original text from gateway (usually the clarifying question)
-            # rather than blocking — the gateway question is safe to speak.
-            # The forbidden phrase check is a safety net; the stage field is the
-            # primary guard (voice service uses stage, not response_text keywords).
-            return response_text
+            return "I am still working on that. One moment."
     return response_text
 
 
@@ -150,26 +152,27 @@ async def entrypoint(ctx: JobContext):
     long_term_buffer: list[str] = []
     flush_task: Optional[asyncio.Task] = None
     
-    INCOMPLETE_UTTERANCE_PATTERNS = [
-        r"^(amount|price|cost|total|the|for|is|and|but|so|rupees|percent|dollars|of|to)\b.{0,30}$",
-        r".*\b(is|are|of|to|for|with)$" # Ends with a connector
-    ]
-
     def _is_incomplete_utterance(text: str) -> bool:
-        """Detect if this is a fragment, not a complete thought."""
+        """Detect obvious fragments and otherwise trust the silence timer."""
         t = text.lower().strip()
-        if not t: return True
-        
-        # Exclude common short but complete thoughts (Bug 12)
-        complete_short_words = {"yes", "no", "ok", "okay", "correct", "wrong", "sure", "cancel", "stop", "confirmed"}
+        if not t:
+            return True
+
+        complete_short_words = {
+            "yes", "no", "ok", "okay", "correct", "wrong", "sure",
+            "cancel", "stop", "confirmed", "proceed", "done",
+        }
         if t in complete_short_words:
             return False
-            
-        if len(t.split()) <= 1: return True
-        
-        import re
-        for p in INCOMPLETE_UTTERANCE_PATTERNS:
-            if re.match(p, t): return True
+
+        words = t.split()
+        if len(words) <= 1:
+            return True
+
+        trailing_connectors = {"and", "or", "but", "for", "to", "of", "with"}
+        if len(words) <= 3 and words[-1] in trailing_connectors:
+            return True
+
         return False
 
     async def _flush_long_term_buffer():
@@ -185,21 +188,26 @@ async def entrypoint(ctx: JobContext):
         """Remove any internal system strings before speaking."""
         if not text:
             return "I hit a snag there. Please try again."
-        
-        blocked_patterns = [
-            r"[A-Z_]{3,}\s+does not support",
-            r"Intent not supported",
-            r"execution_failed",
-            r"gateway_execution",
-            r"Error \d+",
-            r"500 Internal",
+
+        technical_leak_patterns = [
+            r"\b[A-Z][a-zA-Z]+Error\b",
+            r"\bTraceback\b",
+            r"\b[a-z_]{4,}\.[a-z_]{3,}\(",
+            r"\bexecution_failed\b",
+            r"\bgateway_execution\b",
+            r"\bnot implemented\b",
+            r"\bnone\b.*\battribute\b",
+            r"\bhttpstatuserror\b",
+            r"\bkeyerror\b",
+            r"\battributeerror\b",
         ]
-        
+
         import re
-        for pattern in blocked_patterns:
-            if re.search(pattern, text):
-                return "That response was not usable. Please try that again."
-        
+        for pattern in technical_leak_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                logger.warning("technical_voice_sanitizer_blocked", pattern=pattern, preview=text[:160])
+                return "I hit a snag there. Could you try again?"
+
         return text
 
     async def _process_and_say(text: str) -> None:
@@ -221,33 +229,39 @@ async def entrypoint(ctx: JobContext):
                 dest_identities = list(ctx.room.remote_participants.keys())
                 
                 if ui_event:
-                    logger.info("publishing_ui_event_to_room", type=ui_event.get("type"), user_count=len(dest_identities))
-                    await ctx.room.local_participant.publish_data(
-                        json.dumps({
-                            "type": "moneyops_ui_event",
-                            "payload": ui_event
-                        }), 
-                        topic="ui_events",
-                        destination_identities=dest_identities
-                    )
+                    try:
+                        logger.info("publishing_ui_event_to_room", type=ui_event.get("type"), user_count=len(dest_identities))
+                        await ctx.room.local_participant.publish_data(
+                            json.dumps({
+                                "type": "moneyops_ui_event",
+                                "payload": ui_event
+                            }),
+                            topic="ui_events",
+                            destination_identities=dest_identities
+                        )
+                    except Exception as exc:
+                        logger.warning("ui_event_publish_failed", error=str(exc))
 
                 # Update conversation status/transcript
-                await ctx.room.local_participant.publish_data(
-                    json.dumps({
-                        "type": "conversation_update",
-                        "user_text": text,
-                        "response_text": response.get("response_text"),
-                        "intent": response.get("intent"),
-                        "action_result": response.get("action_result"),
-                        "needs_more_info": response.get("needs_more_info", False),
-                        "stage": response.get("stage", "COLLECTING"),
-                        "ui_event": ui_event,
-                        "dev_event": response.get("dev_event"),
-                        "stt_confidence": response.get("stt_confidence", 1.0) # Gateway could also verify
-                    }), 
-                    topic="gateway_results",
-                    destination_identities=dest_identities
-                )
+                try:
+                    await ctx.room.local_participant.publish_data(
+                        json.dumps({
+                            "type": "conversation_update",
+                            "user_text": text,
+                            "response_text": response.get("response_text"),
+                            "intent": response.get("intent"),
+                            "action_result": response.get("action_result"),
+                            "needs_more_info": response.get("needs_more_info", False),
+                            "stage": response.get("stage", "COLLECTING"),
+                            "ui_event": ui_event,
+                            "dev_event": response.get("dev_event"),
+                            "stt_confidence": response.get("stt_confidence", 1.0)
+                        }),
+                        topic="gateway_results",
+                        destination_identities=dest_identities
+                    )
+                except Exception as exc:
+                    logger.warning("gateway_results_publish_failed", error=str(exc))
 
                 response_text = response.get("response_text", "I hit a snag. Please repeat.")
                 intent = response.get("intent", "UNKNOWN")
@@ -260,11 +274,18 @@ async def entrypoint(ctx: JobContext):
 
                 # Bug 8: Apply premature confirmation guard
                 response_text = premature_confirmation_guard(response_text, stage)
+                logger.info(
+                    "gateway_response_ready_for_voice",
+                    stage=stage,
+                    intent=intent,
+                    success=response.get("success"),
+                    response_text=response_text[:200],
+                )
 
                 # Bug 12: Update persistent history for success, EVEN collection stages.
                 # Failed execution turns are NOT written (prevents LLM poisoning).
                 if response.get("success", False) and intent != "ERROR":
-                    conversation_history.append({"role": "user", "content": text, "intent": intent})
+                    conversation_history.append({"role": "user", "content": text})
                     conversation_history.append({"role": "assistant", "content": response_text})
                     if len(conversation_history) > 20:
                         conversation_history[:] = conversation_history[-20:]
@@ -273,6 +294,10 @@ async def entrypoint(ctx: JobContext):
                     logger.warning("gateway_execution_failed_history_not_updated", intent=intent)
 
                 safe_response_text = sanitize_for_voice(response_text)
+                logger.info(
+                    "speaking_voice_response",
+                    response_text=safe_response_text[:200],
+                )
                 await session.say(safe_response_text, allow_interruptions=True)
                 
                 # Check for follow-ups that arrived while we were processing
@@ -457,17 +482,37 @@ def _extract_user_context(ctx: JobContext) -> dict:
 
 
 def _create_tts():
-    """Try Cartesia first (better voice quality), fall back to Groq Orpheus."""
-    if HAS_CARTESIA and settings.CARTESIA_API_KEY:
-        try:
-            tts = _cartesia_plugin.TTS(api_key=settings.CARTESIA_API_KEY)
-            logger.info("tts_provider", provider="cartesia")
-            return tts
-        except Exception as e:
-            logger.warning("cartesia_init_failed", error=str(e))
+    """Prefer a working provider. Auto mode should choose the most reliable configured TTS."""
+    provider = (settings.TTS_PROVIDER or "auto").strip().lower()
 
-    # Groq Orpheus — requires accepting terms at console.groq.com/playground
+    can_use_cartesia = HAS_CARTESIA and bool(settings.CARTESIA_API_KEY)
+    if provider in {"cartesia", "auto"} and can_use_cartesia:
+        if can_use_cartesia:
+            try:
+                tts = _cartesia_plugin.TTS(api_key=settings.CARTESIA_API_KEY)
+                logger.info("tts_provider", provider="cartesia")
+                return tts
+            except Exception as e:
+                logger.warning("cartesia_init_failed", error=str(e))
+        if provider == "cartesia":
+            logger.warning(
+                "cartesia_not_available",
+                has_plugin=HAS_CARTESIA,
+                has_api_key=bool(settings.CARTESIA_API_KEY),
+            )
+
+    if provider == "cartesia":
+        logger.warning(
+            "tts_falling_back_to_groq",
+            reason="cartesia was explicitly requested but could not be initialized",
+        )
+
     logger.info("tts_provider", provider="groq-orpheus")
+    logger.warning(
+        "groq_tts_terms_may_be_required",
+        model="canopylabs/orpheus-v1-english",
+        acceptance_url="https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english",
+    )
     return groq.TTS(model="canopylabs/orpheus-v1-english", voice="autumn")
 
 

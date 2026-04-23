@@ -39,11 +39,18 @@ def parse_indian_amount(text: str) -> Optional[float]:
     if not text:
         return None
 
-    # Reject date-like fragments BEFORE any processing (Bug 2 edge case)
     text_lower = text.lower()
-    token_words = set(re.findall(r'[a-z]+', text_lower))
-    if token_words & _DATE_INDICATORS:
-        logger.debug("amount_parse_rejected_date_fragment", text=text[:80])
+
+    amount_match = re.search(
+        r"((?:₹|rs\.?|inr)\s*[\d,]+(?:\.\d+)?|[\d,]+(?:\.\d+)?\s*(?:lakh|crore|thousand)|(?:[a-z]+\s+){0,4}(?:lakh|crore|thousand)(?:\s+rupees?)?)",
+        text_lower,
+        re.IGNORECASE,
+    )
+    candidate_text = amount_match.group(0) if amount_match else text_lower
+
+    candidate_words = set(re.findall(r"[a-z]+", candidate_text))
+    if candidate_words & _DATE_INDICATORS:
+        logger.debug("amount_parse_rejected_date_fragment", text=candidate_text[:80])
         return None
 
     # Clean the text: lower case, remove currency symbols and commas

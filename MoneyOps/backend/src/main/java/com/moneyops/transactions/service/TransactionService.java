@@ -30,6 +30,14 @@ public class TransactionService {
     private final TransactionMapper transactionMapper;
     private final TransactionValidator transactionValidator;
 
+    public TransactionRepository getTransactionRepository() {
+        return transactionRepository;
+    }
+
+    public TransactionMapper getTransactionMapper() {
+        return transactionMapper;
+    }
+
     public List<TransactionDto> getAllTransactions(String orgId) {
         if (orgId == null || orgId.isBlank()) throw new com.moneyops.shared.exceptions.UnauthorizedException("Missing organization context");
         return transactionRepository.findAllByOrgIdAndDeletedAtIsNull(orgId).stream()

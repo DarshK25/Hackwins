@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
     Dialog,
     DialogContent,
@@ -51,6 +51,22 @@ const INITIAL_FORM = {
     source: "MANUAL",
 };
 
+const CLIENT_FORM_PLACEHOLDERS = {
+    name: "Client contact name",
+    email: "name@company.com",
+    phone: "Contact phone number",
+    company: "Client company name",
+    notes: "Optional notes",
+    teamActionCode: "Enter team security code",
+};
+
+const CLIENT_PREVIEW_EMPTY_STATE = {
+    name: "Not added yet",
+    email: "Not added yet",
+    phone: "Not added yet",
+    company: "Not added yet",
+};
+
 export default function ClientsPage() {
     const { getToken } = useAuth();
     const { user } = useUser();
@@ -62,6 +78,8 @@ export default function ClientsPage() {
     const [saving, setSaving] = useState(false);
     const [formData, setFormData] = useState(INITIAL_FORM);
     const [selectedClient, setSelectedClient] = useState(null);
+    const [voiceDraftActive, setVoiceDraftActive] = useState(false);
+    const touchedFieldsRef = useRef({});
 
     useEffect(() => {
         if (internalUserId && internalOrgId) {
@@ -77,14 +95,67 @@ export default function ClientsPage() {
         }));
     }, [internalOrgId]);
 
-    // LISTEN FOR VOICE ACTIONS (Bug 3 Refresh)
+    const markTouched = (field) => {
+        touchedFieldsRef.current[field] = Date.now();
+    };
+
+    const canApplyVoice = (field) => {
+        const lastTouched = touchedFieldsRef.current[field] || 0;
+        return Date.now() - lastTouched > 2500;
+    };
+
+    const applyVoiceClientDraft = (eventDetail) => {
+        const draft = eventDetail?.draft || {};
+        if (!draft || typeof draft !== "object") return;
+        setVoiceDraftActive(true);
+        setDialogOpen(true);
+        setFormData((prev) => {
+            const next = { ...prev };
+            const mapping = {
+                name: "name",
+                email: "email",
+                phone: "phoneNumber",
+                phoneNumber: "phoneNumber",
+                company: "company",
+                company_name: "company",
+                city: "notes",
+                team_code: "teamActionCode",
+            };
+            Object.entries(mapping).forEach(([source, target]) => {
+                const value = draft[source];
+                if (value && canApplyVoice(target)) {
+                    next[target] = value;
+                }
+            });
+            if (draft.gstin && canApplyVoice("notes")) {
+                next.notes = prev.notes?.includes("GSTIN") ? prev.notes : `${prev.notes ? `${prev.notes}\n` : ""}GSTIN: ${draft.gstin}`;
+            }
+            return next;
+        });
+    };
+
     useEffect(() => {
         const handleVoiceAction = () => {
             console.log("Refetching clients due to voice action");
             fetchClients();
         };
+        const storedDraft = sessionStorage.getItem("voice_client_draft");
+        if (storedDraft) {
+            try {
+                applyVoiceClientDraft({ draft: JSON.parse(storedDraft) });
+            } catch {}
+            sessionStorage.removeItem("voice_client_draft");
+        }
+        const handleVoiceOpenForm = (event) => applyVoiceClientDraft(event.detail);
+        const handleVoiceDraft = (event) => applyVoiceClientDraft(event.detail);
         window.addEventListener("voice:client-created", handleVoiceAction);
-        return () => window.removeEventListener("voice:client-created", handleVoiceAction);
+        window.addEventListener("voice:open-client-form", handleVoiceOpenForm);
+        window.addEventListener("voice:client-draft-updated", handleVoiceDraft);
+        return () => {
+            window.removeEventListener("voice:client-created", handleVoiceAction);
+            window.removeEventListener("voice:open-client-form", handleVoiceOpenForm);
+            window.removeEventListener("voice:client-draft-updated", handleVoiceDraft);
+        };
     }, [internalUserId, internalOrgId]);
 
     const fetchClients = async () => {
@@ -217,77 +288,105 @@ export default function ClientsPage() {
                                 <Plus className="h-4 w-4" /> New Client
                             </button>
                         </DialogTrigger>
-                        <DialogContent className="bg-[#1A1A1A] border-[#2A2A2A] text-white">
-                            <DialogHeader>
+                        <DialogContent className="bg-[#1A1A1A] border-[#2A2A2A] text-white p-0 overflow-hidden sm:max-w-[720px]">
+                            <DialogHeader className="border-b border-[#2A2A2A] px-6 py-5">
                                 <DialogTitle className="text-white">Add New Client</DialogTitle>
                                 <DialogDescription className="text-[#A0A0A0]">
                                     Enter details for your new client.
                                 </DialogDescription>
                             </DialogHeader>
-                            <div className="grid gap-4 py-4">
-                                <div className="grid gap-2">
-                                    <Label htmlFor="name" className="text-white">Name</Label>
-                                    <input
-                                        id="name"
-                                        className="mo-input px-3 py-2"
-                                        value={formData.name}
-                                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                        placeholder="Full Name"
-                                    />
-                                </div>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="email" className="text-white">Email</Label>
-                                    <input
-                                        id="email"
-                                        className="mo-input px-3 py-2"
-                                        value={formData.email}
-                                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                                        placeholder="Email Address"
-                                    />
-                                </div>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="phone" className="text-white">Phone</Label>
-                                    <input
-                                        id="phone"
-                                        className="mo-input px-3 py-2"
-                                        value={formData.phoneNumber}
-                                        onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-                                        placeholder="Phone Number"
-                                    />
-                                </div>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="company" className="text-white">Company</Label>
-                                    <input
-                                        id="company"
-                                        className="mo-input px-3 py-2"
-                                        value={formData.company}
-                                        onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                                        placeholder="Company Name"
-                                    />
-                                </div>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="notes" className="text-white">Notes</Label>
-                                    <Textarea
-                                        id="notes"
-                                        className="mo-input"
-                                        value={formData.notes}
-                                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                                        placeholder="Internal Notes"
-                                    />
-                                </div>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="teamActionCode" className="text-white">Team Security Code</Label>
-                                    <input
-                                        id="teamActionCode"
-                                        type="password"
-                                        className="mo-input px-3 py-2"
-                                        value={formData.teamActionCode}
-                                        onChange={(e) => setFormData({ ...formData, teamActionCode: e.target.value })}
-                                        placeholder="Enter team security code"
-                                    />
+                            <div className="max-h-[calc(88vh-150px)] overflow-y-auto px-6 py-5">
+                                <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_260px]">
+                                    <div className="grid gap-4">
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="name" className="text-white">Contact Name</Label>
+                                            <input
+                                                id="name"
+                                                className="mo-input px-3 py-2"
+                                                value={formData.name}
+                                                onChange={(e) => { markTouched("name"); setFormData({ ...formData, name: e.target.value }); }}
+                                                placeholder={CLIENT_FORM_PLACEHOLDERS.name}
+                                            />
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="email" className="text-white">Email</Label>
+                                            <input
+                                                id="email"
+                                                className="mo-input px-3 py-2"
+                                                value={formData.email}
+                                                onChange={(e) => { markTouched("email"); setFormData({ ...formData, email: e.target.value }); }}
+                                                placeholder={CLIENT_FORM_PLACEHOLDERS.email}
+                                            />
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="phone" className="text-white">Phone</Label>
+                                            <input
+                                                id="phone"
+                                                className="mo-input px-3 py-2"
+                                                value={formData.phoneNumber}
+                                                onChange={(e) => { markTouched("phoneNumber"); setFormData({ ...formData, phoneNumber: e.target.value }); }}
+                                                placeholder={CLIENT_FORM_PLACEHOLDERS.phone}
+                                            />
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="company" className="text-white">Company</Label>
+                                            <input
+                                                id="company"
+                                                className="mo-input px-3 py-2"
+                                                value={formData.company}
+                                                onChange={(e) => { markTouched("company"); setFormData({ ...formData, company: e.target.value }); }}
+                                                placeholder={CLIENT_FORM_PLACEHOLDERS.company}
+                                            />
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="notes" className="text-white">Notes</Label>
+                                            <Textarea
+                                                id="notes"
+                                                className="mo-input min-h-[96px]"
+                                                value={formData.notes}
+                                                onChange={(e) => { markTouched("notes"); setFormData({ ...formData, notes: e.target.value }); }}
+                                                placeholder={CLIENT_FORM_PLACEHOLDERS.notes}
+                                            />
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="teamActionCode" className="text-white">Team Security Code</Label>
+                                            <input
+                                                id="teamActionCode"
+                                                type="password"
+                                                className="mo-input px-3 py-2"
+                                                value={formData.teamActionCode}
+                                                onChange={(e) => { markTouched("teamActionCode"); setFormData({ ...formData, teamActionCode: e.target.value }); }}
+                                                placeholder={CLIENT_FORM_PLACEHOLDERS.teamActionCode}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl border border-[#2A2A2A] bg-[#111111] p-4 h-fit lg:sticky lg:top-0">
+                                        <div className="flex items-center justify-between gap-3 mb-3">
+                                            <p className="text-sm font-semibold text-white">Live Client Preview</p>
+                                            {voiceDraftActive && <span className="text-[11px] font-medium text-[#4CBB17] whitespace-nowrap">Voice Sync Active</span>}
+                                        </div>
+                                        <div className="space-y-3 text-sm">
+                                            <div className="min-w-0">
+                                                <div className="text-[#A0A0A0] mb-1">Contact Name</div>
+                                                <div className="text-white break-words">{formData.name || CLIENT_PREVIEW_EMPTY_STATE.name}</div>
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="text-[#A0A0A0] mb-1">Email</div>
+                                                <div className="text-white break-all">{formData.email || CLIENT_PREVIEW_EMPTY_STATE.email}</div>
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="text-[#A0A0A0] mb-1">Phone</div>
+                                                <div className="text-white break-words">{formData.phoneNumber || CLIENT_PREVIEW_EMPTY_STATE.phone}</div>
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="text-[#A0A0A0] mb-1">Company</div>
+                                                <div className="text-white break-words">{formData.company || CLIENT_PREVIEW_EMPTY_STATE.company}</div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <DialogFooter>
+                            <DialogFooter className="border-t border-[#2A2A2A] px-6 py-4 sm:justify-between">
                                 <button className="mo-btn-secondary" onClick={() => setDialogOpen(false)}>Cancel</button>
                                 <button className="mo-btn-primary flex items-center gap-2" onClick={handleCreateClient} disabled={saving}>
                                     {saving && <Loader2 className="h-4 w-4 animate-spin" />}

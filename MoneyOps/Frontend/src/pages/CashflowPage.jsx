@@ -19,6 +19,12 @@ function toIsoDate(value) {
     return String(value || "").slice(0, 10);
 }
 
+function toMonthKey(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function daysUntil(value) {
     if (!value) return null;
     const target = new Date(value);
@@ -80,6 +86,7 @@ export default function CashflowPage() {
         const transactions = cashFlowData.transactions || [];
         const metrics = cashFlowData.metrics || {};
         const now = new Date();
+        const todayIso = now.toISOString().slice(0, 10);
 
         const openInvoices = invoices
             .filter((invoice) => !["PAID", "CANCELLED"].includes(String(invoice.status || "").toUpperCase()))
@@ -97,8 +104,14 @@ export default function CashflowPage() {
             })
             .sort((a, b) => new Date(a.dueDate || now).getTime() - new Date(b.dueDate || now).getTime());
 
-        const expenseTransactions = transactions
+        const historicalExpenseTransactions = transactions
             .filter((txn) => String(txn.type || "").toUpperCase() === "EXPENSE")
+            .filter((txn) => {
+                const rawDate = txn.transactionDate || txn.date || txn.createdAt;
+                if (!rawDate) return false;
+                const parsed = new Date(rawDate);
+                return !Number.isNaN(parsed.getTime());
+            })
             .map((txn) => ({
                 id: txn.id,
                 description: txn.description || txn.vendorName || "Expense",
@@ -106,11 +119,29 @@ export default function CashflowPage() {
                 dueDate: toIsoDate(txn.transactionDate || txn.date || txn.createdAt),
                 priority: "medium",
             }))
-            .sort((a, b) => new Date(b.dueDate || now).getTime() - new Date(a.dueDate || now).getTime())
+            .sort((a, b) => new Date(b.dueDate || now).getTime() - new Date(a.dueDate || now).getTime());
+
+        const futureDatedExpenses = historicalExpenseTransactions
+            .filter((txn) => (txn.dueDate || "") >= todayIso)
             .slice(0, 5);
 
+        const recentExpenseTransactions = historicalExpenseTransactions.slice(0, 5);
+        const upcomingExpenseTransactions = futureDatedExpenses.length > 0
+            ? futureDatedExpenses
+            : recentExpenseTransactions;
+
         const inflowCandidates = openInvoices.slice(0, 5);
-        const monthlyExpenses = Number(metrics.expenses || 0);
+        const expenseMonths = historicalExpenseTransactions.reduce((acc, txn) => {
+            const key = toMonthKey(txn.dueDate);
+            if (!key) return acc;
+            acc[key] = (acc[key] || 0) + txn.amount;
+            return acc;
+        }, {});
+        const monthlyExpenseTotals = Object.values(expenseMonths);
+        const averageMonthlyExpense = monthlyExpenseTotals.length > 0
+            ? monthlyExpenseTotals.reduce((sum, amount) => sum + amount, 0) / monthlyExpenseTotals.length
+            : Number(metrics.expenses || 0);
+        const dailyExpenseRunRate = averageMonthlyExpense > 0 ? averageMonthlyExpense / 30 : 0;
 
         const derivedForecast = FORECAST_WINDOWS.map((days) => {
             const inflow = openInvoices
@@ -119,7 +150,13 @@ export default function CashflowPage() {
                     return delta !== null && delta <= days;
                 })
                 .reduce((sum, invoice) => sum + invoice.amount, 0);
-            const outflow = Math.round((monthlyExpenses / 30) * days);
+            const scheduledOutflow = upcomingExpenseTransactions
+                .filter((txn) => {
+                    const delta = daysUntil(txn.dueDate);
+                    return delta !== null && delta >= 0 && delta <= days;
+                })
+                .reduce((sum, txn) => sum + txn.amount, 0);
+            const outflow = Math.round(Math.max(scheduledOutflow, dailyExpenseRunRate * days));
             return {
                 period: `Next ${days} days`,
                 inflow,
@@ -133,7 +170,7 @@ export default function CashflowPage() {
         const overdueAmount = Number(metrics.overdueAmount || 0);
         const overdueCount = Number(metrics.overdueCount || 0);
         const revenue = Number(metrics.revenue || 0);
-        const expenseRatio = revenue > 0 ? monthlyExpenses / revenue : 0;
+        const expenseRatio = revenue > 0 ? averageMonthlyExpense / revenue : 0;
 
         if (overdueCount > 0) {
             derivedInsights.push({
@@ -173,7 +210,7 @@ export default function CashflowPage() {
 
         return {
             forecastData: derivedForecast,
-            upcomingPayments: expenseTransactions,
+            upcomingPayments: upcomingExpenseTransactions,
             expectedIncome: inflowCandidates,
             insights: derivedInsights,
         };

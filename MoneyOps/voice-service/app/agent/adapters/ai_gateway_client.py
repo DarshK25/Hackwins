@@ -86,14 +86,14 @@ class AIGatewayClient:
 
     def _timeout_fallback(self, text: str) -> Dict[str, Any]:
         return {
-            "response_text": "Processing your request. Please hold on.",
+            "response_text": "That request is taking longer than expected. Please repeat it once.",
             "intent": "TIMEOUT",
             "confidence": 0.0,
         }
 
     def _error_fallback(self) -> Dict[str, Any]:
         return {
-            "response_text": "Sorry, I hit a hiccup just now. Please try that again.",
+            "response_text": "I hit a connection issue just now. Please say that again.",
             "intent": "ERROR",
             "confidence": 0.0,
         }

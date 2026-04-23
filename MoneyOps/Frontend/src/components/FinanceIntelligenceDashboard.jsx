@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Loader2, RefreshCw, Download, TrendingUp, TrendingDown, DollarSign, FileText, Target, Activity, CheckCircle, AlertTriangle } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import { Loader2, RefreshCw, Download, TrendingUp, TrendingDown, DollarSign, FileText, Target, Activity, CheckCircle, AlertTriangle, Plus, X, Edit2 } from "lucide-react";
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
     PieChart as RePieChart, Pie, Cell,
@@ -48,10 +48,14 @@ const CustomTooltip = ({ active, payload, label }) => {
     );
 };
 
-export function FinanceIntelligenceDashboard({ businessId }) {
+export function FinanceIntelligenceDashboard({ businessId: initialBusinessId }) {
     const { getToken } = useAuth();
     const { user } = useUser();
     const { orgId } = useOnboardingStatus();
+    
+    // Default businessId to 1 if not provided, same as Orchestrator
+    const businessId = initialBusinessId || "1";
+    
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState("insights");
@@ -59,6 +63,15 @@ export function FinanceIntelligenceDashboard({ businessId }) {
     const [budgets, setBudgets] = useState([]);
     const [insights, setInsights] = useState([]);
     const [ledgerEntries, setLedgerEntries] = useState([]);
+    const [showBudgetModal, setShowBudgetModal] = useState(false);
+    const [editingBudget, setEditingBudget] = useState(null);
+    const [budgetForm, setBudgetForm] = useState({ category: "", amount: "", notes: "" });
+    
+    const expenseCategories = ["Marketing", "Operations", "Software", "Travel", "Payroll", "Hardware", "Utilities", "Rent", "Professional Services", "Other"];
+
+    const hasRealBudgets = useMemo(() => {
+        return (budgets || []).some((b) => Number(b.budgeted || 0) > 0);
+    }, [budgets]);
 
     useEffect(() => {
         if (businessId && user?.id) {
@@ -130,8 +143,10 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                 const items = d.items || [];
                 setBudgets(items.map(b => ({
                     ...b,
-                    variancePercent: b.budgeted > 0 ? (b.variance / b.budgeted) * 100 : (b.actual > 0 ? 100 : 0),
-                    status: b.actual > b.budgeted ? "over" : "under"
+                    variancePercent: Number(b.budgeted) > 0 ? (b.variance / b.budgeted) * 100 : null,
+                    status: String(b.status || "").toLowerCase() === "no_budget"
+                        ? "no-budget"
+                        : (Number(b.actual) > Number(b.budgeted) ? "over" : "under")
                 })));
             }
             else setBudgets([
@@ -153,22 +168,7 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                     action: ins.actionable ? "View Details" : null
                 })));
             } else {
-                const revenue = Number(metricsRes.ok ? (await fetch(`/api/finance-intelligence/metrics?businessId=${businessId}`, {
-                    headers: {
-                        "Authorization": `Bearer ${token}`,
-                        "X-User-Id": user?.id,
-                        "X-Org-Id": orgId
-                    }
-                }).then(r => r.ok ? r.json() : Promise.resolve({}))).revenue : 0);
-                const expenses = Number(metricsRes.ok ? (await fetch(`/api/finance-intelligence/metrics?businessId=${businessId}`, {
-                    headers: {
-                        "Authorization": `Bearer ${token}`,
-                        "X-User-Id": user?.id,
-                        "X-Org-Id": orgId
-                    }
-                }).then(r => r.ok ? r.json() : Promise.resolve({}))).expenses : 0);
-                const expenseRatio = revenue > 0 ? expenses / revenue : 0;
-                const fallbackInsights = [
+                setInsights([
                     {
                         id: "1",
                         type: "suggestion",
@@ -178,39 +178,7 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                         actionable: true,
                         action: "View Details"
                     }
-                ];
-                if (revenue > 0 && expenseRatio > 0.7) {
-                    fallbackInsights.push({
-                        id: "2",
-                        type: "alert",
-                        title: "High Expense Ratio",
-                        message: `Expenses are ${Math.round(expenseRatio * 100)}% of revenue. This needs immediate review.`,
-                        priority: "high",
-                        actionable: true,
-                        action: "Review Expenses"
-                    });
-                } else if (revenue > 0 && expenseRatio > 0.5) {
-                    fallbackInsights.push({
-                        id: "2",
-                        type: "alert",
-                        title: "Expense Ratio Worth Monitoring",
-                        message: `Expenses are ${Math.round(expenseRatio * 100)}% of revenue. Margin is still positive but tightening.`,
-                        priority: "medium",
-                        actionable: true,
-                        action: "Review Expenses"
-                    });
-                } else if (revenue > 0) {
-                    fallbackInsights.push({
-                        id: "2",
-                        type: "suggestion",
-                        title: "Strong Profitability",
-                        message: `Profit margin is ${((1 - expenseRatio) * 100).toFixed(1)}%. Consider reinvesting part of that into growth.`,
-                        priority: "low",
-                        actionable: false,
-                        action: null
-                    });
-                }
-                setInsights(fallbackInsights);
+                ]);
             }
 
             if (ledgerRes.ok) { 
@@ -237,6 +205,70 @@ export function FinanceIntelligenceDashboard({ businessId }) {
         }
     }
 
+    async function saveBudget() {
+        if (!budgetForm.category || !budgetForm.amount) return;
+        
+        const now = new Date();
+        const payload = {
+            orgId,
+            year: now.getFullYear(),
+            month: now.getMonth() + 1,
+            category: budgetForm.category,
+            amount: parseFloat(budgetForm.amount),
+            notes: budgetForm.notes
+        };
+
+        try {
+            const token = await getToken();
+            const res = await fetch("/api/budgets", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id,
+                    "X-Org-Id": orgId
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (res.ok) {
+                setShowBudgetModal(false);
+                setEditingBudget(null);
+                setBudgetForm({ category: "", amount: "", notes: "" });
+                fetchFinanceData();
+            }
+        } catch (error) {
+            console.error("Failed to save budget:", error);
+        }
+    }
+
+    async function deleteBudget(category) {
+        const now = new Date();
+        try {
+            const token = await getToken();
+            const res = await fetch(`/api/budgets?orgId=${orgId}&year=${now.getFullYear()}&month=${now.getMonth() + 1}&category=${encodeURIComponent(category)}`, {
+                method: "DELETE",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": user?.id,
+                    "X-Org-Id": orgId
+                }
+            });
+
+            if (res.ok) {
+                fetchFinanceData();
+            }
+        } catch (error) {
+            console.error("Failed to delete budget:", error);
+        }
+    }
+
+    function openEditBudget(budget) {
+        setEditingBudget(budget.category);
+        setBudgetForm({ category: budget.category, amount: String(budget.budgeted), notes: "" });
+        setShowBudgetModal(true);
+    }
+
     if (loading) {
         return (
             <div className="flex justify-center items-center h-64">
@@ -252,7 +284,9 @@ export function FinanceIntelligenceDashboard({ businessId }) {
         { id: "ledger", label: "Ledger" },
     ];
 
-    const healthScore = metrics?.healthScore || 0;
+    const currentMetrics = metrics || { healthScore: 85, healthRating: "Healthy", totalRevenue: 0, netCashflow: 0, gstPayable: 0, tdsPayable: 0, grossProfit: 0, netProfit: 0, grossMargin: 0, netMargin: 0 };
+    const healthScore = currentMetrics.healthScore;
+    const healthRating = currentMetrics.healthRating;
     const healthColor = healthScore >= 80 ? "#4CBB17" : healthScore >= 60 ? "#FFB300" : "#CD1C18";
 
     return (
@@ -280,7 +314,7 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                         <p className="text-xs text-[#A0A0A0] font-medium uppercase tracking-wide mb-2">Financial Health Score</p>
                         <p className="text-5xl font-bold" style={{ color: healthColor }}>{healthScore}<span className="text-2xl text-[#A0A0A0] ml-1">/100</span></p>
                         <span className={`inline-block mt-2 text-xs px-2.5 py-1 rounded-full border font-medium`} style={{ color: healthColor, borderColor: `${healthColor}40`, backgroundColor: `${healthColor}15` }}>
-                            {metrics?.healthRating || "Loading..."}
+                            {healthRating}
                         </span>
                     </div>
                     <Activity className="h-8 w-8 text-[#2A2A2A]" />
@@ -292,10 +326,10 @@ export function FinanceIntelligenceDashboard({ businessId }) {
 
             {/* Key Metrics */}
             <div className="grid gap-4 md:grid-cols-4">
-                <StatCard label="Total Revenue" value={`₹${(metrics?.totalRevenue || 0).toLocaleString()}`} sub="Last 90 days" icon={DollarSign} iconColor="#A0A0A0" />
-                <StatCard label="Net Cashflow" value={`₹${(metrics?.netCashflow || 0).toLocaleString()}`} sub="Current position" accent={(metrics?.netCashflow || 0) >= 0 ? "#4CBB17" : "#CD1C18"} icon={(metrics?.netCashflow || 0) >= 0 ? TrendingUp : TrendingDown} iconColor={(metrics?.netCashflow || 0) >= 0 ? "#4CBB17" : "#CD1C18"} />
-                <StatCard label="GST Payable" value={`₹${(metrics?.gstPayable || 0).toLocaleString()}`} sub="This month" icon={FileText} iconColor="#A0A0A0" />
-                <StatCard label="Net Profit Margin" value={`${(metrics?.netMargin || 0).toFixed(1)}%`} sub="Industry: 15–20%" icon={Target} iconColor="#A0A0A0" />
+                <StatCard label="Total Revenue" value={`₹${(currentMetrics.totalRevenue || 0).toLocaleString()}`} sub="Last 90 days" icon={DollarSign} iconColor="#A0A0A0" />
+                <StatCard label="Net Cashflow" value={`₹${(currentMetrics.netCashflow || 0).toLocaleString()}`} sub="Current position" accent={(currentMetrics.netCashflow || 0) >= 0 ? "#4CBB17" : "#CD1C18"} icon={(currentMetrics.netCashflow || 0) >= 0 ? TrendingUp : TrendingDown} iconColor={(currentMetrics.netCashflow || 0) >= 0 ? "#4CBB17" : "#CD1C18"} />
+                <StatCard label="GST Payable" value={`₹${(currentMetrics.gstPayable || 0).toLocaleString()}`} sub="This month" icon={FileText} iconColor="#A0A0A0" />
+                <StatCard label="Net Profit Margin" value={`${(currentMetrics.netMargin || 0).toFixed(1)}%`} sub="Industry: 15–20%" icon={Target} iconColor="#A0A0A0" />
             </div>
 
             {/* Tabs */}
@@ -348,33 +382,78 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                     {/* Budget Analysis */}
                     {activeTab === "budget" && (
                         <div className="flex flex-col gap-5">
-                            <p className="text-xs text-[#A0A0A0]">Monthly expense tracking & variance analysis</p>
-                            {budgets.map(budget => (
-                                <div key={budget.category}>
-                                    <div className="flex items-center justify-between mb-1.5">
-                                        <span className="font-medium text-white text-sm">{budget.category}</span>
-                                        <span className="text-sm font-semibold" style={{ color: BUDGET_STATUS_COLOR[budget.status] || "#A0A0A0" }}>
-                                            {budget.variancePercent > 0 ? "+" : ""}{budget.variancePercent.toFixed(1)}%
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex-1 h-2 rounded-full bg-[#2A2A2A]">
-                                            <div className="h-full rounded-full transition-all" style={{ width: `${Math.min((budget.actual / budget.budgeted) * 100, 100)}%`, backgroundColor: BUDGET_STATUS_COLOR[budget.status] || "#A0A0A0" }} />
+                            <div className="flex items-center justify-between">
+                                <p className="text-xs text-[#A0A0A0]">Monthly expense tracking & variance analysis</p>
+                                <button 
+                                    onClick={() => { setEditingBudget(null); setBudgetForm({ category: "", amount: "", notes: "" }); setShowBudgetModal(true); }}
+                                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[#4CBB17] text-white hover:bg-[#4CBB17]/90 transition-colors"
+                                >
+                                    <Plus className="h-3.5 w-3.5" /> Add Budget
+                                </button>
+                            </div>
+                            {!hasRealBudgets && budgets.length > 0 && (
+                                <div className="rounded-xl border border-[#FFB30040] bg-[#FFB30010] p-4">
+                                    <div className="flex items-start gap-3">
+                                        <AlertTriangle className="h-4 w-4 text-[#FFB300] mt-0.5 flex-shrink-0" />
+                                        <div>
+                                            <p className="text-sm font-semibold text-white">No budgets are configured yet</p>
+                                            <p className="text-sm text-[#A0A0A0] mt-1">
+                                                Click "Add Budget" above to set monthly caps for each category.
+                                            </p>
                                         </div>
-                                        <span className="text-xs text-[#A0A0A0] whitespace-nowrap">₹{budget.actual.toLocaleString()} / ₹{budget.budgeted.toLocaleString()}</span>
                                     </div>
+                                </div>
+                            )}
+                            {budgets.map(budget => (
+                                <div key={budget.category} className="flex items-center gap-2">
+                                    <div className="flex-1">
+                                        <div className="flex items-center justify-between mb-1.5">
+                                            <span className="font-medium text-white text-sm">{budget.category}</span>
+                                            <span className="text-sm font-semibold" style={{ color: budget.status === "no-budget" ? "#FFB300" : (BUDGET_STATUS_COLOR[budget.status] || "#A0A0A0") }}>
+                                                {budget.status === "no-budget"
+                                                    ? "No budget set"
+                                                    : `${budget.variancePercent > 0 ? "+" : ""}${budget.variancePercent?.toFixed(1) || 0}%`}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex-1 h-2 rounded-full bg-[#2A2A2A]">
+                                                <div
+                                                    className="h-full rounded-full transition-all"
+                                                    style={{
+                                                        width: `${budget.status === "no-budget" ? 100 : Math.min((budget.actual / Math.max(budget.budgeted, 1)) * 100, 100)}%`,
+                                                        backgroundColor: budget.status === "no-budget" ? "#FFB300" : (BUDGET_STATUS_COLOR[budget.status] || "#A0A0A0")
+                                                    }}
+                                                />
+                                            </div>
+                                            <span className="text-xs text-[#A0A0A0] whitespace-nowrap">
+                                                {budget.status === "no-budget"
+                                                    ? `₹${Number(budget.actual || 0).toLocaleString()} actual`
+                                                    : `₹${Number(budget.actual || 0).toLocaleString()} / ₹${Number(budget.budgeted || 0).toLocaleString()}`}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    {budget.status !== "no-budget" && (
+                                        <div className="flex items-center gap-1">
+                                            <button onClick={() => openEditBudget(budget)} className="p-1.5 rounded-lg hover:bg-[#2A2A2A] text-[#A0A0A0] hover:text-white transition-colors">
+                                                <Edit2 className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button onClick={() => deleteBudget(budget.category)} className="p-1.5 rounded-lg hover:bg-[#CD1C1820] text-[#A0A0A0] hover:text-[#CD1C18] transition-colors">
+                                                <X className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                             {budgets.length > 0 && (
                                 <div className="grid gap-4 md:grid-cols-2 mt-2">
                                     <InteractiveTrendCard
-                                        title="Budgeted"
-                                        subtitle="By category"
-                                        totalValue={budgets.reduce((s, b) => s + b.budgeted, 0)}
-                                        newValue={Math.max(...budgets.map(b => b.budgeted))}
-                                        totalValueLabel="Total Budget"
-                                        newValueLabel="Highest"
-                                        chartData={budgets.map(b => ({ month: b.category.slice(0, 3), value: b.budgeted }))}
+                                        title={hasRealBudgets ? "Budgeted" : "Budget Status"}
+                                        subtitle={hasRealBudgets ? "By category" : "No budgets configured"}
+                                        totalValue={budgets.reduce((s, b) => s + Number(b.budgeted || 0), 0)}
+                                        newValue={Math.max(...budgets.map(b => Number(b.budgeted || 0)), 0)}
+                                        totalValueLabel={hasRealBudgets ? "Total Budget" : "Total Budget"}
+                                        newValueLabel={hasRealBudgets ? "Highest" : "Highest"}
+                                        chartData={budgets.map(b => ({ month: b.category.slice(0, 3), value: hasRealBudgets ? Number(b.budgeted || 0) : 0 }))}
                                         defaultBarColor="#2A2A2A"
                                         barColor="#60A5FA"
                                         adjacentBarColor="#60A5FA60"
@@ -384,11 +463,11 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                                     <InteractiveTrendCard
                                         title="Actual Spend"
                                         subtitle="By category"
-                                        totalValue={budgets.reduce((s, b) => s + b.actual, 0)}
-                                        newValue={Math.max(...budgets.map(b => b.actual))}
+                                        totalValue={budgets.reduce((s, b) => s + Number(b.actual || 0), 0)}
+                                        newValue={Math.max(...budgets.map(b => Number(b.actual || 0)), 0)}
                                         totalValueLabel="Total Actual"
                                         newValueLabel="Highest"
-                                        chartData={budgets.map(b => ({ month: b.category.slice(0, 3), value: b.actual }))}
+                                        chartData={budgets.map(b => ({ month: b.category.slice(0, 3), value: Number(b.actual || 0) }))}
                                         defaultBarColor="#2A2A2A"
                                         barColor="#4CBB17"
                                         adjacentBarColor="#4CBB1760"
@@ -409,19 +488,19 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                                     <div className="flex flex-col gap-3 text-sm">
                                         <div className="flex justify-between py-2 border-b border-[#2A2A2A]">
                                             <span className="text-[#A0A0A0]">Gross Profit</span>
-                                            <span className="font-bold text-[#4CBB17]">₹{(metrics?.grossProfit || 0).toLocaleString()}</span>
+                                            <span className="font-bold text-[#4CBB17]">₹{(currentMetrics.grossProfit || 0).toLocaleString()}</span>
                                         </div>
                                         <div className="flex justify-between py-2 border-b border-[#2A2A2A]">
                                             <span className="text-[#A0A0A0]">Gross Margin</span>
-                                            <span className="font-semibold text-white">{(metrics?.grossMargin || 0).toFixed(1)}%</span>
+                                            <span className="font-semibold text-white">{(currentMetrics.grossMargin || 0).toFixed(1)}%</span>
                                         </div>
                                         <div className="flex justify-between py-2 border-b border-[#2A2A2A]">
                                             <span className="text-[#A0A0A0]">Net Profit</span>
-                                            <span className="font-bold text-[#60A5FA]">₹{(metrics?.netProfit || 0).toLocaleString()}</span>
+                                            <span className="font-bold text-[#60A5FA]">₹{(currentMetrics.netProfit || 0).toLocaleString()}</span>
                                         </div>
                                         <div className="flex justify-between py-2">
                                             <span className="text-[#A0A0A0]">Net Margin</span>
-                                            <span className="font-semibold text-white">{(metrics?.netMargin || 0).toFixed(1)}%</span>
+                                            <span className="font-semibold text-white">{(currentMetrics.netMargin || 0).toFixed(1)}%</span>
                                         </div>
                                     </div>
                                 </div>
@@ -429,7 +508,7 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                                     <h3 className="font-semibold text-white mb-4">Profit Breakdown</h3>
                                     <ResponsiveContainer width="100%" height={200}>
                                         <RePieChart>
-                                            <Pie data={[{ name: "Gross Profit", value: metrics?.grossProfit || 0 }, { name: "Expenses", value: (metrics?.grossProfit || 0) - (metrics?.netProfit || 0) }]}
+                                            <Pie data={[{ name: "Gross Profit", value: currentMetrics.grossProfit || 0 }, { name: "Expenses", value: (currentMetrics.grossProfit || 0) - (currentMetrics.netProfit || 0) }]}
                                                 cx="50%" cy="50%" labelLine={false} outerRadius={80} dataKey="value">
                                                 {[0, 1].map((_, index) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index]} />)}
                                             </Pie>
@@ -438,19 +517,18 @@ export function FinanceIntelligenceDashboard({ businessId }) {
                                     </ResponsiveContainer>
                                 </div>
                             </div>
-                            {/* InteractiveTrendCard: margin comparison */}
                             <InteractiveTrendCard
                                 title="Margin Analysis"
                                 subtitle="Gross vs Net breakdown"
-                                totalValue={metrics?.grossProfit || 0}
-                                newValue={metrics?.netProfit || 0}
+                                totalValue={currentMetrics.grossProfit || 0}
+                                newValue={currentMetrics.netProfit || 0}
                                 totalValueLabel="Gross Profit"
                                 newValueLabel="Net Profit"
                                 chartData={[
-                                    { month: "Rev", value: metrics?.totalRevenue || 0 },
-                                    { month: "Gross", value: metrics?.grossProfit || 0 },
-                                    { month: "Net", value: metrics?.netProfit || 0 },
-                                    { month: "Cash", value: metrics?.netCashflow || 0 },
+                                    { month: "Rev", value: currentMetrics.totalRevenue || 0 },
+                                    { month: "Gross", value: currentMetrics.grossProfit || 0 },
+                                    { month: "Net", value: currentMetrics.netProfit || 0 },
+                                    { month: "Cash", value: currentMetrics.netCashflow || 0 },
                                 ]}
                                 defaultBarColor="#2A2A2A"
                                 barColor="#4CBB17"
@@ -500,6 +578,73 @@ export function FinanceIntelligenceDashboard({ businessId }) {
 
                 </div>
             </div>
+
+            {/* Budget Modal */}
+            {showBudgetModal && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+                    <div className="rounded-2xl w-full max-w-md" style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}>
+                        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: "#2A2A2A" }}>
+                            <h3 className="text-lg font-semibold text-white">
+                                {editingBudget ? "Edit Budget" : "Add Budget"}
+                            </h3>
+                            <button onClick={() => setShowBudgetModal(false)} className="p-1.5 rounded-lg hover:bg-[#2A2A2A] text-[#A0A0A0]">
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            <div>
+                                <label className="block text-sm text-[#A0A0A0] mb-1.5">Category</label>
+                                <select
+                                    value={budgetForm.category}
+                                    onChange={(e) => setBudgetForm({ ...budgetForm, category: e.target.value })}
+                                    className="w-full px-3 py-2.5 rounded-lg bg-[#2A2A2A] border border-[#3A3A3A] text-white focus:outline-none focus:border-[#4CBB17]"
+                                    disabled={!!editingBudget}
+                                >
+                                    <option value="">Select category</option>
+                                    {expenseCategories.map(cat => (
+                                        <option key={cat} value={cat}>{cat}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm text-[#A0A0A0] mb-1.5">Monthly Budget (₹)</label>
+                                <input
+                                    type="number"
+                                    value={budgetForm.amount}
+                                    onChange={(e) => setBudgetForm({ ...budgetForm, amount: e.target.value })}
+                                    placeholder="Enter amount"
+                                    className="w-full px-3 py-2.5 rounded-lg bg-[#2A2A2A] border border-[#3A3A3A] text-white focus:outline-none focus:border-[#4CBB17]"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm text-[#A0A0A0] mb-1.5">Notes (optional)</label>
+                                <textarea
+                                    value={budgetForm.notes}
+                                    onChange={(e) => setBudgetForm({ ...budgetForm, notes: e.target.value })}
+                                    placeholder="Add notes..."
+                                    rows={2}
+                                    className="w-full px-3 py-2.5 rounded-lg bg-[#2A2A2A] border border-[#3A3A3A] text-white focus:outline-none focus:border-[#4CBB17] resize-none"
+                                />
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3 p-5 border-t" style={{ borderColor: "#2A2A2A" }}>
+                            <button
+                                onClick={() => setShowBudgetModal(false)}
+                                className="flex-1 px-4 py-2.5 rounded-lg border border-[#3A3A3A] text-[#A0A0A0] hover:bg-[#2A2A2A] transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={saveBudget}
+                                disabled={!budgetForm.category || !budgetForm.amount}
+                                className="flex-1 px-4 py-2.5 rounded-lg bg-[#4CBB17] text-white hover:bg-[#4CBB17]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {editingBudget ? "Update" : "Save"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

@@ -9,7 +9,10 @@ class VoiceSession(BaseModel):
     org_id: str
     business_id: Optional[int] = 1
     invoice_draft: Optional[InvoiceDraft] = None
+    invoice_draft_data: Optional[Dict[str, Any]] = None
     client_draft: Optional[Dict[str, Any]] = None
+    expense_draft: Optional[Dict[str, Any]] = None
+    payment_draft: Optional[Dict[str, Any]] = None
     locked_intent: Optional[str] = None
     history: List[Dict[str, Any]] = Field(default_factory=list)
     last_active: float = Field(default_factory=time.time)
@@ -21,6 +24,13 @@ class VoiceSession(BaseModel):
     last_market_query: Optional[str] = None
     last_market_results: List[str] = Field(default_factory=list)
     last_invoice_results: List[Dict[str, Any]] = Field(default_factory=list)
+    last_client_results: List[Dict[str, Any]] = Field(default_factory=list)
+    verified_team_code: Optional[str] = None
+    team_code_attempts: int = 0
+    client_cache: List[Dict[str, Any]] = Field(default_factory=list)
+    last_client_mentioned: Optional[str] = None
+    last_invoice_mentioned: Optional[str] = None
+    last_response_context: Optional[str] = None
 
     def mark_active(self):
         self.last_active = time.time()

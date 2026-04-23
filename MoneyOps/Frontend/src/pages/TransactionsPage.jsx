@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
     Select,
     SelectContent,
@@ -14,25 +14,14 @@ import {
     DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-    CreditCard,
     Search,
-    Filter,
-    Download,
     Loader2,
-    TrendingUp,
-    TrendingDown,
     Plus,
     Upload,
-    Trash2,
-    PieChart,
     Lightbulb,
-    Mic,
-    X,
-    AlertCircle,
-    CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth, useUser } from "@clerk/clerk-react";
+import { useAuth } from "@clerk/clerk-react";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 
 const CATEGORIES = [
@@ -47,16 +36,54 @@ const CATEGORIES = [
     { value: "uncategorized", label: "Uncategorized", color: "#6B7280" },
 ];
 
-const MONTHS = [
-    { value: "2026-03", label: "March 2026" },
-    { value: "2026-02", label: "February 2026" },
-    { value: "2026-01", label: "January 2026" },
-    { value: "2026-04", label: "April 2026" },
-];
+const ALL_MONTHS_VALUE = "all";
+
+function toMonthKey(value) {
+    if (!value) return "";
+    if (Array.isArray(value) && value.length >= 2) {
+        return `${value[0]}-${String(value[1]).padStart(2, "0")}`;
+    }
+    const str = String(value);
+    const match = str.match(/^(\d{4})[-,](\d{1,2})/);
+    if (match) {
+        return `${match[1]}-${match[2].padStart(2, "0")}`;
+    }
+    return str.slice(0, 7);
+}
+
+function toDisplayDate(value) {
+    if (!value) return null;
+    if (Array.isArray(value) && value.length >= 3) {
+        return new Date(Number(value[0]), Number(value[1]) - 1, Number(value[2]));
+    }
+    return new Date(value);
+}
+
+function buildTransactionIdempotencyKey(payload) {
+    const amount = Number(payload.amount || 0).toFixed(2);
+    const date = payload.transactionDate || payload.date || "";
+    const type = String(payload.type || "").toUpperCase();
+    const description = String(payload.description || "").trim().toLowerCase();
+    const vendor = String(payload.vendor || "").trim().toLowerCase();
+    return `txn:${type}:${date}:${amount}:${description}:${vendor}`;
+}
+
+function getTransactionCategoryDisplay(txn) {
+    const type = String(txn.type || "").toUpperCase();
+    if (type === "INCOME") {
+        return {
+            label: "Payment Received",
+            color: "#4CBB17",
+        };
+    }
+
+    const normalizedCategory = String(txn.category || "").toLowerCase();
+    const matched = CATEGORIES.find((category) => category.value === normalizedCategory);
+    return matched || CATEGORIES[CATEGORIES.length - 1];
+}
 
 export default function TransactionsPage() {
     const { getToken } = useAuth();
-    const { user } = useUser();
     const { userId: internalUserId, orgId: internalOrgId } = useOnboardingStatus();
     
     const [transactions, setTransactions] = useState([]);
@@ -66,12 +93,10 @@ export default function TransactionsPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const [filterCategory, setFilterCategory] = useState("all");
     const [isAddOpen, setIsAddOpen] = useState(false);
-    const [isVoiceOpen, setIsVoiceOpen] = useState(false);
     const [isUploadOpen, setIsUploadOpen] = useState(false);
-    const [selectedMonth, setSelectedMonth] = useState("2026-03");
+    const [selectedMonth, setSelectedMonth] = useState(ALL_MONTHS_VALUE);
     const [aiInsight, setAiInsight] = useState(null);
-    const [isListening, setIsListening] = useState(false);
-    const [voiceTranscript, setVoiceTranscript] = useState("");
+    const [isSavingTransaction, setIsSavingTransaction] = useState(false);
     
     const [newTransaction, setNewTransaction] = useState({
         amount: "",
@@ -86,7 +111,7 @@ export default function TransactionsPage() {
         if (internalUserId && internalOrgId) {
             fetchTransactions();
         }
-    }, [internalUserId, internalOrgId, selectedMonth]);
+    }, [internalUserId, internalOrgId]);
 
     const fetchTransactions = async () => {
         try {
@@ -108,11 +133,7 @@ export default function TransactionsPage() {
 
             const txData = await txRes.json();
             const txns = Array.isArray(txData) ? txData : txData.transactions || [];
-            const filtered = txns.filter((txn) => {
-                const dateValue = String(txn.transactionDate || txn.date || txn.createdAt || "");
-                return dateValue.substring(0, 7) === selectedMonth;
-            });
-            setTransactions(filtered);
+            setTransactions(txns);
 
             if (invoiceRes.ok) {
                 const invoiceData = await invoiceRes.json();
@@ -136,140 +157,90 @@ export default function TransactionsPage() {
     };
 
     const fetchAiInsight = async () => {
-        const totalExpenses = transactions
+        const totalExpenses = visibleTransactions
             .filter((t) => String(t.type).toUpperCase() === "EXPENSE")
             .reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0);
-        const totalIncome = transactions
+        const totalIncome = visibleTransactions
             .filter((t) => String(t.type).toUpperCase() === "INCOME")
             .reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0);
-        const monthRevenue = invoices
-            .filter((inv) => String(inv.issueDate || "").startsWith(selectedMonth))
+        const scopedRevenue = invoices
+            .filter((inv) => selectedMonth === ALL_MONTHS_VALUE || String(inv.issueDate || "").startsWith(selectedMonth))
             .reduce((sum, inv) => sum + Number(inv.totalAmount || 0), 0);
+        const selectedMonthLabel = selectedMonth === ALL_MONTHS_VALUE
+            ? "all recorded periods"
+            : monthOptions.find((m) => m.value === selectedMonth)?.label || selectedMonth;
 
         if (!transactions.length && !invoices.length) {
             setAiInsight("No live transactions or invoices were found for this workspace yet. Record transactions or create invoices first, then this page can summarize actual performance.");
             return;
         }
 
-        if (!transactions.length) {
-            setAiInsight(`Invoices raised in ${MONTHS.find(m => m.value === selectedMonth)?.label || selectedMonth} total ₹${monthRevenue.toLocaleString("en-IN")}, but there are no recorded transactions for the same month. That means billing exists, while operating cash movements have not been captured here yet.`);
+        if (!visibleTransactions.length) {
+            setAiInsight(`Invoices raised in ${selectedMonthLabel} total ₹${scopedRevenue.toLocaleString("en-IN")}, but there are no recorded transactions in that period. That means billing exists, while operating cash movements have not been captured here yet.`);
             return;
         }
 
-        setAiInsight(`For ${MONTHS.find(m => m.value === selectedMonth)?.label || selectedMonth}, recorded expenses are ₹${totalExpenses.toLocaleString("en-IN")} and recorded income transactions are ₹${totalIncome.toLocaleString("en-IN")}. Invoices raised in the same month total ₹${monthRevenue.toLocaleString("en-IN")}. Use invoices for billed revenue and this page for actual money movement.`);
+        setAiInsight(`For ${selectedMonthLabel}, recorded expenses are ₹${totalExpenses.toLocaleString("en-IN")} and recorded income transactions are ₹${totalIncome.toLocaleString("en-IN")}. Invoices raised in the same period total ₹${scopedRevenue.toLocaleString("en-IN")}. Use invoices for billed revenue and this page for actual money movement.`);
     };
 
     useEffect(() => {
         fetchAiInsight();
     }, [transactions, invoices, selectedMonth]);
 
-    const handleVoiceInput = useCallback(() => {
-        if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
-            toast.error("Voice input not supported in this browser");
-            return;
-        }
+    const monthOptions = useMemo(() => {
+        const keys = new Set();
 
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        const recognition = new SpeechRecognition();
-        
-        recognition.continuous = false;
-        recognition.interimResults = true;
-        recognition.lang = "en-IN";
+        transactions.forEach((txn) => {
+            const key = toMonthKey(txn.transactionDate || txn.date || txn.createdAt);
+            if (key) keys.add(key);
+        });
 
-        recognition.onstart = () => setIsListening(true);
-        recognition.onend = () => setIsListening(false);
-        recognition.onerror = () => {
-            setIsListening(false);
-            toast.error("Voice recognition error");
-        };
+        invoices.forEach((invoice) => {
+            const key = toMonthKey(invoice.issueDate);
+            if (key) keys.add(key);
+        });
 
-        recognition.onresult = (event) => {
-            const transcript = Array.from(event.results)
-                .map(result => result[0].transcript)
-                .join("");
-            setVoiceTranscript(transcript);
-            
-            if (event.results[0].isFinal) {
-                processVoiceCommand(transcript);
-            }
-        };
-
-        recognition.start();
-    }, [user]);
-
-    const processVoiceCommand = async (transcript) => {
-        const lower = transcript.toLowerCase();
-        
-        let type = "expense";
-        let amount = null;
-        let category = "";
-        let description = transcript;
-
-        const expenseMatch = transcript.match(/₹?([\d,]+)|rs\.?\s*([\d,]+)/i);
-        if (expenseMatch) {
-            amount = parseFloat((expenseMatch[1] || expenseMatch[2]).replace(/,/g, ""));
-        }
-
-        if (lower.includes("salary") || lower.includes("salaries")) {
-            category = "salaries";
-            description = "Salaries payment";
-        } else if (lower.includes("fuel") || lower.includes("petrol") || lower.includes("diesel")) {
-            category = "fuel";
-        } else if (lower.includes("hardware") || lower.includes("equipment")) {
-            category = "hardware";
-        } else if (lower.includes("rent") || lower.includes("office")) {
-            category = "rent";
-        } else if (lower.includes("software") || lower.includes("tool")) {
-            category = "software";
-        }
-
-        if (lower.includes("income") || lower.includes("received") || lower.includes("payment received")) {
-            type = "income";
-        }
-
-        if (amount) {
-            const token = await getToken();
-            const res = await fetch("/api/transactions", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`,
-                    "X-User-Id": internalUserId,
-                    "X-Org-Id": internalOrgId,
-                },
-                body: JSON.stringify({
-                    amount,
-                    type: type === "income" ? "INCOME" : "EXPENSE",
-                    category,
-                    description: description || transcript,
-                    transactionDate: new Date().toISOString().split("T")[0],
-                })
+        const derived = Array.from(keys)
+            .filter(Boolean)
+            .sort((a, b) => b.localeCompare(a))
+            .map((value) => {
+                const parsed = new Date(`${value}-01T00:00:00`);
+                return {
+                    value,
+                    label: Number.isNaN(parsed.getTime())
+                        ? value
+                        : parsed.toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
+                };
             });
 
-            if (res.ok) {
-                toast.success(`Voice recorded: ${type === "income" ? "Income" : "Expense"} of ₹${amount.toLocaleString("en-IN")}`);
-                fetchTransactions();
-            } else {
-                toast.success(`Voice recorded: ${type} of ₹${amount?.toLocaleString("en-IN") || "unknown amount"}`);
-            }
-        } else {
-            toast.info("Voice received. Please enter the amount manually.");
-            setIsAddOpen(true);
-            setNewTransaction(prev => ({ ...prev, description: transcript }));
-        }
-        
-        setIsVoiceOpen(false);
-        setVoiceTranscript("");
-    };
+        return [{ value: ALL_MONTHS_VALUE, label: "All time" }, ...derived];
+    }, [transactions, invoices]);
+
+    const visibleTransactions = useMemo(() => (
+        transactions.filter((txn) => (
+            selectedMonth === ALL_MONTHS_VALUE
+            || toMonthKey(txn.transactionDate || txn.date || txn.createdAt) === selectedMonth
+        ))
+    ), [transactions, selectedMonth]);
 
     const handleAddTransaction = async () => {
         if (!newTransaction.amount || !newTransaction.description) {
             toast.error("Please fill in amount and description");
             return;
         }
+        if (isSavingTransaction) {
+            return;
+        }
         
         try {
+            setIsSavingTransaction(true);
             const token = await getToken();
+            const payload = {
+                ...newTransaction,
+                amount: parseFloat(newTransaction.amount),
+                type: newTransaction.type === "income" ? "INCOME" : "EXPENSE",
+                transactionDate: newTransaction.date,
+            };
             const res = await fetch("/api/transactions", {
                 method: "POST",
                 headers: {
@@ -279,17 +250,15 @@ export default function TransactionsPage() {
                     "X-Org-Id": internalOrgId,
                 },
                 body: JSON.stringify({
-                    ...newTransaction,
-                    amount: parseFloat(newTransaction.amount),
-                    type: newTransaction.type === "income" ? "INCOME" : "EXPENSE",
-                    transactionDate: newTransaction.date,
+                    ...payload,
+                    idempotencyKey: buildTransactionIdempotencyKey(payload),
                 }),
             });
             
             if (res.ok) {
                 toast.success("Transaction added successfully");
             } else {
-                toast.success("Transaction recorded (demo mode)");
+                throw new Error("Failed to add transaction");
             }
             
             setIsAddOpen(false);
@@ -303,37 +272,40 @@ export default function TransactionsPage() {
             });
             fetchTransactions();
         } catch {
-            toast.success("Transaction recorded (demo mode)");
-            setIsAddOpen(false);
-            fetchTransactions();
+            toast.error("Could not save transaction");
+        } finally {
+            setIsSavingTransaction(false);
         }
     };
 
     const stats = {
-        totalExpenses: transactions
+        totalExpenses: visibleTransactions
             .filter((t) => String(t.type).toUpperCase() === "EXPENSE")
             .reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0),
-        totalIncome: transactions
+        totalIncome: visibleTransactions
             .filter((t) => String(t.type).toUpperCase() === "INCOME")
             .reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0),
         grossRevenue: invoices
-            .filter((inv) => String(inv.issueDate || "").startsWith(selectedMonth))
+            .filter((inv) => selectedMonth === ALL_MONTHS_VALUE || String(inv.issueDate || "").startsWith(selectedMonth))
             .reduce((sum, inv) => sum + Number(inv.totalAmount || 0), 0),
-        uncategorized: transactions.filter(t => t.category === "uncategorized" || !t.category).length,
+        uncategorized: visibleTransactions.filter((t) => (
+            String(t.type).toUpperCase() === "EXPENSE"
+            && (String(t.category || "").toLowerCase() === "uncategorized" || !t.category)
+        )).length,
     };
     const netMargin = stats.grossRevenue > 0
         ? (((stats.grossRevenue - stats.totalExpenses) / stats.grossRevenue) * 100)
         : 0;
 
     const categoryBreakdown = CATEGORIES.map(cat => {
-        const catTransactions = transactions.filter(
+        const catTransactions = visibleTransactions.filter(
             (t) => t.category === cat.value && String(t.type).toUpperCase() === "EXPENSE"
         );
         const total = catTransactions.reduce((sum, t) => sum + Math.abs(Number(t.amount || 0)), 0);
         return { ...cat, total, count: catTransactions.length };
     }).filter(c => c.total > 0).sort((a, b) => b.total - a.total);
 
-    const filteredTransactions = transactions.filter(txn => {
+    const filteredTransactions = visibleTransactions.filter(txn => {
         const matchesSearch = !searchQuery ||
             txn.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
             txn.vendor?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -359,7 +331,7 @@ export default function TransactionsPage() {
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
                     <h1 className="mo-h1">Transactions</h1>
-                    <p className="mo-text-secondary mt-1">{orgName} · {MONTHS.find(m => m.value === selectedMonth)?.label}</p>
+                    <p className="mo-text-secondary mt-1">{orgName} · {monthOptions.find(m => m.value === selectedMonth)?.label || "All time"}</p>
                 </div>
                 
                 <div className="flex items-center gap-3 flex-wrap">
@@ -368,18 +340,11 @@ export default function TransactionsPage() {
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
-                            {MONTHS.map(m => (
+                            {monthOptions.map(m => (
                                 <SelectItem key={m.value} value={m.value} className="text-white">{m.label}</SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
-
-                    <button
-                        onClick={() => setIsVoiceOpen(true)}
-                        className="mo-btn-primary flex items-center gap-2"
-                    >
-                        <Mic className="h-4 w-4" /> Voice: "Add transaction"
-                    </button>
 
                     <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
                         <DialogTrigger asChild>
@@ -456,8 +421,12 @@ export default function TransactionsPage() {
                                         style={{ ...inputStyle, colorScheme: "dark" }}
                                     />
                                 </div>
-                                <button onClick={handleAddTransaction} className="mo-btn-primary w-full">
-                                    Save Transaction
+                                <button
+                                    onClick={handleAddTransaction}
+                                    className="mo-btn-primary w-full disabled:opacity-50"
+                                    disabled={isSavingTransaction}
+                                >
+                                    {isSavingTransaction ? "Saving..." : "Save Transaction"}
                                 </button>
                             </div>
                         </DialogContent>
@@ -533,7 +502,7 @@ export default function TransactionsPage() {
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
-                                {MONTHS.map(m => (
+                                {monthOptions.map(m => (
                                     <SelectItem key={m.value} value={m.value} className="text-white text-xs">{m.label}</SelectItem>
                                 ))}
                             </SelectContent>
@@ -582,7 +551,7 @@ export default function TransactionsPage() {
             {/* Transactions Table */}
             <div className="mo-card">
                 <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-white">All transactions — {MONTHS.find(m => m.value === selectedMonth)?.label}</h3>
+                    <h3 className="font-semibold text-white">All transactions — {monthOptions.find(m => m.value === selectedMonth)?.label || "All time"}</h3>
                     <div className="flex items-center gap-3">
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#666]" />
@@ -601,6 +570,16 @@ export default function TransactionsPage() {
                                 <SelectItem value="all" className="text-white">All Categories</SelectItem>
                                 {CATEGORIES.map(cat => (
                                     <SelectItem key={cat.value} value={cat.value} className="text-white">{cat.label}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                            <SelectTrigger className="bg-[#1A1A1A] border-[#2A2A2A] text-white w-[160px]">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
+                                {monthOptions.map(m => (
+                                    <SelectItem key={m.value} value={m.value} className="text-white">{m.label}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
@@ -627,22 +606,25 @@ export default function TransactionsPage() {
                             </thead>
                             <tbody>
                                 {filteredTransactions.map(txn => {
-                                    const cat = CATEGORIES.find(c => c.value === txn.category) || CATEGORIES[8];
+                                    const categoryDisplay = getTransactionCategoryDisplay(txn);
+                                    const displayDate = toDisplayDate(txn.transactionDate || txn.date || txn.createdAt);
                                     return (
                                         <tr key={txn.id} className="border-b border-[#1A1A1A] hover:bg-[#111111] transition-colors">
                                             <td className="py-3 px-4 text-[#CCC]">
-                                                {new Date(txn.transactionDate || txn.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                                                {displayDate && !Number.isNaN(displayDate.getTime())
+                                                    ? displayDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
+                                                    : "—"}
                                             </td>
-                                            <td className="py-3 px-4 text-white font-medium">{txn.description}</td>
+                                            <td className="py-3 px-4 text-white font-medium">{txn.description || "Recorded transaction"}</td>
                                             <td className="py-3 px-4">
                                                 <span
                                                     className="px-2 py-1 rounded text-xs font-medium"
-                                                    style={{ backgroundColor: `${cat.color}20`, color: cat.color }}
+                                                    style={{ backgroundColor: `${categoryDisplay.color}20`, color: categoryDisplay.color }}
                                                 >
-                                                    {cat.label}
+                                                    {categoryDisplay.label}
                                                 </span>
                                             </td>
-                                            <td className="py-3 px-4 text-[#CCC]">{txn.vendor || txn.referenceNumber || "—"}</td>
+                                            <td className="py-3 px-4 text-[#CCC]">{txn.vendor || txn.vendorName || txn.clientName || txn.referenceNumber || "—"}</td>
                                             <td className="py-3 px-4 text-right text-white font-semibold">
                                                 ₹{Math.abs(Number(txn.amount || 0)).toLocaleString("en-IN")}
                                             </td>
@@ -654,56 +636,13 @@ export default function TransactionsPage() {
                         </table>
                         {filteredTransactions.length === 0 && (
                             <div className="text-center py-12 text-[#666]">
-                                No transactions found for this period
+                                No transactions found for this filter
                             </div>
                         )}
                     </div>
                 )}
             </div>
 
-            {/* Voice Modal */}
-            <Dialog open={isVoiceOpen} onOpenChange={setIsVoiceOpen}>
-                <DialogContent className="bg-[#111111] border-[#2A2A2A] text-white max-w-md">
-                    <DialogHeader>
-                        <DialogTitle className="text-white flex items-center gap-2">
-                            <Mic className="h-5 w-5 text-[#4CBB17]" /> Voice Input
-                        </DialogTitle>
-                    </DialogHeader>
-                    <div className="py-8 text-center">
-                        <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-6 ${isListening ? "bg-[#CD1C1820] animate-pulse" : "bg-[#1A1A1A]"}`}>
-                            <Mic className={`h-10 w-10 ${isListening ? "text-[#CD1C18]" : "text-[#4CBB17]"}`} />
-                        </div>
-                        {isListening ? (
-                            <p className="text-[#CCC]">Listening... Say something like "Add 5000 rupees for fuel"</p>
-                        ) : voiceTranscript ? (
-                            <div>
-                                <p className="text-[#CCC] mb-4">"{voiceTranscript}"</p>
-                                <p className="text-sm text-[#666]">Processing...</p>
-                            </div>
-                        ) : (
-                            <>
-                                <p className="text-[#CCC] mb-6">
-                                    Tap the mic and say your expense. For example:
-                                </p>
-                                <div className="text-sm text-[#666] space-y-2">
-                                    <p>"Add 5000 rupees for fuel"</p>
-                                    <p>"Record 15000 salary payment"</p>
-                                    <p>"Add 20000 for hardware purchase"</p>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                    <div className="flex gap-3">
-                        <button onClick={() => setIsVoiceOpen(false)} className="flex-1 mo-btn-secondary">
-                            Cancel
-                        </button>
-                        <button onClick={handleVoiceInput} className="flex-1 mo-btn-primary flex items-center justify-center gap-2">
-                            {isListening ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mic className="h-4 w-4" />}
-                            {isListening ? "Listening..." : "Start Recording"}
-                        </button>
-                    </div>
-                </DialogContent>
-            </Dialog>
         </div>
     );
 }

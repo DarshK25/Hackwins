@@ -33,9 +33,10 @@ function StatCard({ label, value, sub, icon: Icon, iconColor }) {
     );
 }
 
-export function OrchestratorDashboard({ businessId }) {
+export function OrchestratorDashboard({ businessId = 1 }) {
     const { getToken } = useAuth();
     const { user } = useUser();
+    const resolvedBusinessId = businessId || 1;
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState("activities");
     const [activities, setActivities] = useState([]);
@@ -48,24 +49,24 @@ export function OrchestratorDashboard({ businessId }) {
     ]);
 
     useEffect(() => {
-        if (businessId && user?.id) {
+        if (resolvedBusinessId && user?.id) {
             fetchOrchestratorData();
             const interval = setInterval(fetchOrchestratorData, 10000);
             return () => clearInterval(interval);
         }
-    }, [businessId, user?.id]);
+    }, [resolvedBusinessId, user?.id]);
 
     async function fetchOrchestratorData() {
         try {
             const token = await getToken();
             const [activitiesRes, conversationsRes] = await Promise.all([
-                fetch(`/api/orchestrator/activities?businessId=${businessId}`, {
+                fetch(`/api/orchestrator/activities?businessId=${resolvedBusinessId}`, {
                     headers: {
                         "Authorization": `Bearer ${token}`,
                         "X-User-Id": user?.id
                     }
                 }),
-                fetch(`/api/orchestrator/conversations?businessId=${businessId}`, {
+                fetch(`/api/orchestrator/conversations?businessId=${resolvedBusinessId}`, {
                     headers: {
                         "Authorization": `Bearer ${token}`,
                         "X-User-Id": user?.id

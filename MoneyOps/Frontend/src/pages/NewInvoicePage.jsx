@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
     Select,
@@ -56,7 +56,9 @@ export default function NewInvoicePage() {
     const [clientDialogOpen, setClientDialogOpen] = useState(false);
     const [savingClient, setSavingClient] = useState(false);
     const [teamActionCode, setTeamActionCode] = useState("");
+    const [voiceDraftActive, setVoiceDraftActive] = useState(false);
     const [newClientData, setNewClientData] = useState(BLANK_CLIENT);
+    const touchedFieldsRef = useRef({});
     const [formData, setFormData] = useState({
         clientId: "",
         customerName: "",
@@ -71,6 +73,53 @@ export default function NewInvoicePage() {
         }
     }, [internalUserId, internalOrgId]);
 
+    const markTouched = (field) => {
+        touchedFieldsRef.current[field] = Date.now();
+    };
+
+    const canApplyVoice = (field) => {
+        const lastTouched = touchedFieldsRef.current[field] || 0;
+        return Date.now() - lastTouched > 2500;
+    };
+
+    const applyVoiceInvoiceDraft = (eventDetail) => {
+        const draft = eventDetail?.draft || {};
+        if (!draft || typeof draft !== "object") return;
+        setVoiceDraftActive(true);
+
+        setFormData((prev) => {
+            const next = { ...prev };
+            const clientName = draft.client_name || draft.customerName;
+            if (clientName && canApplyVoice("customerName")) {
+                next.customerName = clientName;
+                const matchedClient = clients.find((client) => (client.name || "").toLowerCase() === clientName.toLowerCase());
+                if (matchedClient && canApplyVoice("clientId")) {
+                    next.clientId = matchedClient.id;
+                }
+            }
+            if ((draft.issue_date || draft.date) && canApplyVoice("date")) {
+                next.date = draft.issue_date || draft.date;
+            }
+            if (draft.due_date && canApplyVoice("dueDate")) {
+                next.dueDate = draft.due_date;
+            }
+            if (Array.isArray(draft.line_items) && draft.line_items.length && canApplyVoice("items")) {
+                next.items = draft.line_items.map((item) => ({
+                    description: item.description || "",
+                    quantity: Number(item.quantity || 1),
+                    rate: Number(item.unit_price || item.rate || 0),
+                    gstPercent: Number(item.gst_percent || item.gstPercent || 18),
+                    isService: !item.quantity || Number(item.quantity) <= 1,
+                }));
+            }
+            return next;
+        });
+
+        if (draft.team_code && canApplyVoice("teamActionCode")) {
+            setTeamActionCode(draft.team_code);
+        }
+    };
+
     useEffect(() => {
         if (!internalOrgId) return;
         setTeamActionCode(getRememberedTeamSecurityCode(internalOrgId));
@@ -79,6 +128,33 @@ export default function NewInvoicePage() {
             teamActionCode: getRememberedTeamSecurityCode(internalOrgId),
         }));
     }, [internalOrgId]);
+
+    useEffect(() => {
+        const storedDraft = sessionStorage.getItem("voice_invoice_draft");
+        if (storedDraft) {
+            try {
+                applyVoiceInvoiceDraft({ draft: JSON.parse(storedDraft) });
+            } catch {}
+            sessionStorage.removeItem("voice_invoice_draft");
+        }
+
+        const handleVoiceDraft = (event) => applyVoiceInvoiceDraft(event.detail);
+        const handleVoiceClientCreated = () => fetchClients();
+        window.addEventListener("voice:invoice-draft-updated", handleVoiceDraft);
+        window.addEventListener("voice:client-created", handleVoiceClientCreated);
+        return () => {
+            window.removeEventListener("voice:invoice-draft-updated", handleVoiceDraft);
+            window.removeEventListener("voice:client-created", handleVoiceClientCreated);
+        };
+    }, [clients]);
+
+    useEffect(() => {
+        if (!formData.customerName || formData.clientId || !clients.length) return;
+        const matchedClient = clients.find((client) => (client.name || "").toLowerCase() === formData.customerName.toLowerCase());
+        if (matchedClient) {
+            setFormData((prev) => ({ ...prev, clientId: matchedClient.id }));
+        }
+    }, [clients, formData.customerName, formData.clientId]);
 
     const fetchClients = async () => {
         try {
@@ -127,6 +203,7 @@ export default function NewInvoicePage() {
     };
 
     const handleItemChange = (index, field, value) => {
+        markTouched("items");
         const newItems = [...formData.items];
         newItems[index] = { ...newItems[index], [field]: value };
         setFormData((prev) => ({ ...prev, items: newItems }));
@@ -152,6 +229,14 @@ export default function NewInvoicePage() {
             rate: item.rate,
             gstPercent: item.gstPercent || 0
         }));
+
+    const previewSummary = previewData || {
+        subtotal: parseFloat(liveCalculation.subtotal || "0"),
+        cgst: parseFloat(liveCalculation.gstTotal || "0") / 2,
+        sgst: parseFloat(liveCalculation.gstTotal || "0") / 2,
+        total: parseFloat(liveCalculation.total || "0"),
+        riskFlags: [],
+    };
 
     const handlePreview = async () => {
         if (!formData.clientId) { toast.error("Please select or create a client first"); return; }
@@ -247,7 +332,11 @@ export default function NewInvoicePage() {
                                 <DarkInput
                                     id="new-inv-customer"
                                     value={formData.customerName}
-                                    onChange={(e) => setFormData((prev) => ({ ...prev, customerName: e.target.value, clientId: "" }))}
+                                    onChange={(e) => {
+                                        markTouched("customerName");
+                                        markTouched("clientId");
+                                        setFormData((prev) => ({ ...prev, customerName: e.target.value, clientId: "" }));
+                                    }}
                                     placeholder="Enter name or select an existing client below"
                                 />
                             </div>
@@ -257,6 +346,8 @@ export default function NewInvoicePage() {
                                     <Select
                                         value={formData.clientId}
                                         onValueChange={(value) => {
+                                            markTouched("clientId");
+                                            markTouched("customerName");
                                             const c = clients.find((cl) => cl.id === value);
                                             setFormData((prev) => ({ ...prev, clientId: value, customerName: c?.name || "" }));
                                         }}
@@ -285,11 +376,11 @@ export default function NewInvoicePage() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label htmlFor="new-inv-date" className="text-sm font-medium text-[#A0A0A0] block mb-1.5">Invoice Date</label>
-                                    <DarkInput id="new-inv-date" type="date" value={formData.date} onChange={(e) => setFormData((prev) => ({ ...prev, date: e.target.value }))} />
+                                    <DarkInput id="new-inv-date" type="date" value={formData.date} onChange={(e) => { markTouched("date"); setFormData((prev) => ({ ...prev, date: e.target.value })); }} />
                                 </div>
                                 <div>
                                     <label htmlFor="new-inv-duedate" className="text-sm font-medium text-[#A0A0A0] block mb-1.5">Due Date</label>
-                                    <DarkInput id="new-inv-duedate" type="date" value={formData.dueDate} onChange={(e) => setFormData((prev) => ({ ...prev, dueDate: e.target.value }))} />
+                                    <DarkInput id="new-inv-duedate" type="date" value={formData.dueDate} onChange={(e) => { markTouched("dueDate"); setFormData((prev) => ({ ...prev, dueDate: e.target.value })); }} />
                                 </div>
                             </div>
                         </div>
@@ -301,7 +392,10 @@ export default function NewInvoicePage() {
                             <h2 className="mo-h2">Items</h2>
                             <button
                                 className="mo-btn-secondary flex items-center gap-1.5 text-sm"
-                                onClick={() => setFormData((prev) => ({ ...prev, items: [...prev.items, { ...BLANK_ITEM }] }))}
+                                onClick={() => {
+                                    markTouched("items");
+                                    setFormData((prev) => ({ ...prev, items: [...prev.items, { ...BLANK_ITEM }] }));
+                                }}
                             >
                                 <Plus className="h-3.5 w-3.5" /> Add Item
                             </button>
@@ -345,7 +439,10 @@ export default function NewInvoicePage() {
                                         </div>
                                         <button
                                             className="p-2 rounded-lg text-[#A0A0A0] hover:text-[#CD1C18] hover:bg-[#CD1C1820] transition-all mb-0.5"
-                                            onClick={() => setFormData((prev) => ({ ...prev, items: prev.items.filter((_, i) => i !== index) }))}
+                                            onClick={() => {
+                                                markTouched("items");
+                                                setFormData((prev) => ({ ...prev, items: prev.items.filter((_, i) => i !== index) }));
+                                            }}
                                         >
                                             <Trash className="h-4 w-4" />
                                         </button>
@@ -364,7 +461,7 @@ export default function NewInvoicePage() {
                         className="mo-btn-secondary w-full flex items-center justify-center gap-2"
                     >
                         {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                        Preview Invoice
+                        Refresh Backend Risk Check
                     </button>
                 </div>
 
@@ -372,7 +469,10 @@ export default function NewInvoicePage() {
                 <div className="flex flex-col gap-5">
                     {/* Live Calculation */}
                     <div className="mo-card border-[#4CBB1740]">
-                        <h2 className="mo-h2 mb-4">Live Calculation</h2>
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="mo-h2">Live Calculation</h2>
+                            {voiceDraftActive && <span className="text-[11px] font-medium text-[#4CBB17]">Voice Sync Active</span>}
+                        </div>
                         <div className="flex flex-col gap-2 text-sm">
                             <div className="flex justify-between">
                                 <span className="text-[#A0A0A0]">Subtotal</span>
@@ -389,46 +489,45 @@ export default function NewInvoicePage() {
                         </div>
                     </div>
 
-                    {/* Preview */}
-                    {previewData ? (
-                        <div className="mo-card">
-                            <h2 className="mo-h2 mb-4">Preview Summary</h2>
-                            <div className="flex flex-col gap-2 text-sm mb-4">
-                                <div className="flex justify-between"><span className="text-[#A0A0A0]">Subtotal</span><span>₹{previewData.subtotal?.toFixed(2)}</span></div>
-                                <div className="flex justify-between"><span className="text-[#A0A0A0]">CGST</span><span>₹{previewData.cgst?.toFixed(2)}</span></div>
-                                <div className="flex justify-between"><span className="text-[#A0A0A0]">SGST</span><span>₹{previewData.sgst?.toFixed(2)}</span></div>
-                                <div className="flex justify-between font-bold text-lg border-t border-[#2A2A2A] pt-3 mt-1">
-                                    <span className="text-white">Total</span>
-                                    <span className="text-[#4CBB17]">₹{previewData.total?.toFixed(2)}</span>
-                                </div>
-                            </div>
-                            {previewData.riskFlags?.length > 0 && (
-                                <div className="p-4 bg-[#FFB30015] border border-[#FFB30040] rounded-xl mb-4">
-                                    <p className="font-semibold text-[#FFB300] mb-2 text-sm">⚠ Attention Needed</p>
-                                    <ul className="space-y-1 text-sm text-[#A0A0A0]">
-                                        {previewData.riskFlags.map((flag, i) => <li key={i}>• {flag}</li>)}
-                                    </ul>
-                                </div>
-                            )}
-                            <div className="space-y-2 mb-4">
-                                <label className="text-sm font-medium text-[#A0A0A0] block">Team Security Code *</label>
-                                <DarkInput
-                                    type="password"
-                                    value={teamActionCode}
-                                    onChange={(e) => setTeamActionCode(e.target.value)}
-                                    placeholder="Enter team security code"
-                                />
-                            </div>
-                            <button onClick={handleCreate} disabled={loading} className="mo-btn-primary w-full flex items-center justify-center gap-2">
-                                {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                                Confirm & Create Invoice
-                            </button>
+                    <div className="mo-card">
+                        <div className="flex items-center justify-between mb-4 gap-4">
+                            <h2 className="mo-h2">Live Preview</h2>
+                            <span className="text-xs text-[#A0A0A0]">Voice patches update the draft without blocking manual edits</span>
                         </div>
-                    ) : (
-                        <div className="flex items-center justify-center h-40 rounded-xl border-2 border-dashed border-[#2A2A2A] text-sm text-[#A0A0A0]">
-                            Fill details and click Preview to see summary
+                        <div className="flex flex-col gap-2 text-sm mb-4">
+                            <div className="flex justify-between"><span className="text-[#A0A0A0]">Client</span><span>{formData.customerName || "Waiting for client"}</span></div>
+                            <div className="flex justify-between"><span className="text-[#A0A0A0]">Issue Date</span><span>{formData.date || "—"}</span></div>
+                            <div className="flex justify-between"><span className="text-[#A0A0A0]">Due Date</span><span>{formData.dueDate || "—"}</span></div>
+                            <div className="flex justify-between"><span className="text-[#A0A0A0]">Subtotal</span><span>₹{previewSummary.subtotal?.toFixed(2)}</span></div>
+                            <div className="flex justify-between"><span className="text-[#A0A0A0]">CGST</span><span>₹{previewSummary.cgst?.toFixed(2)}</span></div>
+                            <div className="flex justify-between"><span className="text-[#A0A0A0]">SGST</span><span>₹{previewSummary.sgst?.toFixed(2)}</span></div>
+                            <div className="flex justify-between font-bold text-lg border-t border-[#2A2A2A] pt-3 mt-1">
+                                <span className="text-white">Total</span>
+                                <span className="text-[#4CBB17]">₹{previewSummary.total?.toFixed(2)}</span>
+                            </div>
                         </div>
-                    )}
+                        {previewSummary.riskFlags?.length > 0 && (
+                            <div className="p-4 bg-[#FFB30015] border border-[#FFB30040] rounded-xl mb-4">
+                                <p className="font-semibold text-[#FFB300] mb-2 text-sm">Attention Needed</p>
+                                <ul className="space-y-1 text-sm text-[#A0A0A0]">
+                                    {previewSummary.riskFlags.map((flag, i) => <li key={i}>• {flag}</li>)}
+                                </ul>
+                            </div>
+                        )}
+                        <div className="space-y-2 mb-4">
+                            <label className="text-sm font-medium text-[#A0A0A0] block">Team Security Code *</label>
+                            <DarkInput
+                                type="password"
+                                value={teamActionCode}
+                                onChange={(e) => { markTouched("teamActionCode"); setTeamActionCode(e.target.value); }}
+                                placeholder="Enter team security code"
+                            />
+                        </div>
+                        <button onClick={handleCreate} disabled={loading} className="mo-btn-primary w-full flex items-center justify-center gap-2">
+                            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+                            Confirm & Create Invoice
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -453,7 +552,10 @@ export default function NewInvoicePage() {
                                     id={id}
                                     type={type || "text"}
                                     value={newClientData[field]}
-                                    onChange={(e) => setNewClientData((p) => ({ ...p, [field]: field === "gstin" ? e.target.value.toUpperCase() : e.target.value }))}
+                                    onChange={(e) => {
+                                        markTouched(`newClient.${field}`);
+                                        setNewClientData((p) => ({ ...p, [field]: field === "gstin" ? e.target.value.toUpperCase() : e.target.value }));
+                                    }}
                                     placeholder={placeholder}
                                     maxLength={field === "gstin" ? 15 : undefined}
                                 />
@@ -464,7 +566,10 @@ export default function NewInvoicePage() {
                             <textarea
                                 id="nc-address"
                                 value={newClientData.address}
-                                onChange={(e) => setNewClientData((p) => ({ ...p, address: e.target.value }))}
+                                onChange={(e) => {
+                                    markTouched("newClient.address");
+                                    setNewClientData((p) => ({ ...p, address: e.target.value }));
+                                }}
                                 placeholder="123 Main St, City, State"
                                 rows={2}
                                 style={{ ...inputStyle, resize: "vertical" }}

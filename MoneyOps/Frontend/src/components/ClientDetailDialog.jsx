@@ -8,6 +8,35 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '@clerk/clerk-react';
 
+function normalizeClientEmail(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const compact = raw.replace(/\s+/g, '').replace(/,+/g, '.');
+  const [local, domain] = compact.split('@');
+  if (!domain) return compact;
+  return `${local}@${domain.replace(/\.+/g, '.')}`;
+}
+
+function normalizeClientPhone(value) {
+  return String(value || '').replace(/\D/g, '').slice(-10);
+}
+
+function buildClientUpdatePayload(formData) {
+  return {
+    name: String(formData?.name || '').trim(),
+    email: normalizeClientEmail(formData?.email),
+    phoneNumber: normalizeClientPhone(formData?.phoneNumber || formData?.phone),
+    company: String(formData?.company || '').trim(),
+    notes: String(formData?.notes || '').trim(),
+    gstin: String(formData?.gstin || '').trim().toUpperCase(),
+    status: String(formData?.status || 'ACTIVE').trim().toUpperCase(),
+    currency: formData?.currency || null,
+    paymentTerms: typeof formData?.paymentTerms === 'number' ? formData.paymentTerms : null,
+    billingAddress: formData?.billingAddress || null,
+    shippingAddress: formData?.shippingAddress || null,
+  };
+}
+
 export default function ClientDetailDialog({ client, onClose, onUpdate, onDelete, internalUserId, internalOrgId }) {
   const { getToken } = useAuth();
   const [invoices, setInvoices] = useState([]);
@@ -45,6 +74,21 @@ export default function ClientDetailDialog({ client, onClose, onUpdate, onDelete
   };
 
   const handleSave = async () => {
+    const payload = buildClientUpdatePayload(formData);
+
+    if (!payload.name) {
+      toast.error('Client name is required');
+      return;
+    }
+    if (payload.email && !/^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+$/.test(payload.email)) {
+      toast.error('Please enter a valid email address');
+      return;
+    }
+    if (payload.phoneNumber && payload.phoneNumber.length !== 10) {
+      toast.error('Phone number must be 10 digits');
+      return;
+    }
+
     setIsSaving(true);
     try {
       const token = await getToken();
@@ -57,11 +101,13 @@ export default function ClientDetailDialog({ client, onClose, onUpdate, onDelete
           'X-User-Id': internalUserId,
           'X-Org-Id': internalOrgId
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error("Update failed");
-      const updated = await res.json();
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.message || data?.error || "Update failed");
+      const updated = data;
       onUpdate(updated);
+      setFormData(updated);
       setIsEditMode(false);
       toast.success("Client updated successfully");
     } catch (err) {

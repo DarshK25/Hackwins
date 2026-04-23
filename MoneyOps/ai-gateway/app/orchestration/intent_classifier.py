@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 import time
 import re
+import hashlib
 
 from app.llm.groq_client import groq_client
 from app.schemas.intents import (
@@ -32,9 +33,9 @@ class IntentClassifier:
 
     def __init__(self):
         self.groq = groq_client
-        
-        # Pattern-based quick classification (for common cases)
+
         self.intent_patterns = self._build_intent_patterns()
+        self._cache: Dict[str, IntentClassification] = {}
 
     def _build_intent_patterns(self) -> Dict[Intent, List[str]]:
         """Build regex patterns for fast intent classification"""
@@ -80,6 +81,17 @@ class IntentClassifier:
                 r"list.*clients?",
                 r"who.*clients?",
                 r"find.*client",
+            ],
+            Intent.GENERAL_QUERY: [
+                r"what.*(business|company).*do(es)?",
+                r"tell.*(about|my).*business",
+                r"know.*(about|my).*business",
+                r"(what|tell).*(business|company).*(do|about)",
+            ],
+            Intent.ANALYTICS_QUERY: [
+                r"(total|current|monthly).*revenue",
+                r"revenue.*(total|current|now|this month)",
+                r"(current|today|now).*(revenue|income|sales)",
             ],
 
             # Strategic intents
@@ -147,7 +159,6 @@ class IntentClassifier:
             Intent.CANCELLATION: [
                 r"^(no|nope|nah|cancel|stop|abort|nevermind)[\.\!]*$",
                 r"don't.*do.*that",
-                r"wrong",
             ],
         }
 
@@ -162,18 +173,28 @@ class IntentClassifier:
         """Classify user intent with agent routing information"""
         start_time = time.time()
 
-        # Step 1: Try pattern-based classification (fast)
+        cache_key = self._cache_key(user_input)
+        if not locked_intent and cache_key in self._cache:
+            cached = self._cache[cache_key]
+            cached.processing_time_ms = int((time.time() - start_time) * 1000)
+            return cached
+
         pattern_result = self._pattern_classify(user_input)
         logger.info("pattern_classification_result", input=user_input, result=pattern_result)
 
-        # Step 2: If high confidence pattern match, use it
         if pattern_result and pattern_result["confidence"] >= 0.85:
             intent = pattern_result["intent"]
-            requirements = get_intent_requirements(intent)
-            category = get_intent_category(intent)
-            logger.info("using_pattern_match", intent=intent.value, confidence=pattern_result["confidence"])
+            # Check if intent exists in requirements before calling
+            try:
+                requirements = get_intent_requirements(intent)
+                category = get_intent_category(intent)
+            except:
+                logger.warning(f"Intent {intent.value} missing from requirements - falling back to LLM")
+                pattern_result = None
+            else:
+                logger.info("using_pattern_match", intent=intent.value, confidence=pattern_result["confidence"])
 
-            return IntentClassification(
+            result = IntentClassification(
                 intent=intent,
                 confidence=pattern_result["confidence"],
                 reasoning=f"Pattern match: {pattern_result['pattern']}",
@@ -185,9 +206,16 @@ class IntentClassifier:
                 processing_time_ms=int((time.time() - start_time) * 1000),
                 model_name="pattern_matching",
             )
+            if not locked_intent:
+                self._cache[cache_key] = result.model_copy(deep=True)
+            return result
 
-        # Step 3: Use LLM for complex classification
         llm_result = await self._llm_classify(user_input, conversation_history, business_context, locked_intent, collected_entities)
+        if llm_result.confidence >= 0.8 and not locked_intent:
+            self._cache[cache_key] = llm_result.model_copy(deep=True)
+            if len(self._cache) > 500:
+                oldest_key = next(iter(self._cache))
+                self._cache.pop(oldest_key, None)
 
         # attach processing time if not already set
         try:
@@ -198,21 +226,27 @@ class IntentClassifier:
 
         return llm_result
 
+    def _cache_key(self, user_input: str) -> str:
+        normalized = re.sub(r"[^\w\s]", " ", (user_input or "").lower())
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return hashlib.md5(normalized.encode("utf-8")).hexdigest()
+
     def _pattern_classify(self, user_input: str) -> Optional[Dict[str, Any]]:
         """Fast pattern-based classification; returns dict or None"""
         user_input_lower = (user_input or "").lower().strip()
 
+        fast_intents = {Intent.GREETING, Intent.HELP, Intent.CONFIRMATION, Intent.CANCELLATION}
+
         for intent, patterns in self.intent_patterns.items():
+            if intent not in fast_intents:
+                continue
             for pattern in patterns:
                 try:
-                    # For common conversational intents, try fullmatch first for precision
-                    if intent in (Intent.CONFIRMATION, Intent.CANCELLATION, Intent.GREETING):
+                    if intent in (Intent.CONFIRMATION, Intent.CANCELLATION, Intent.GREETING, Intent.HELP):
                         if re.fullmatch(pattern, user_input_lower, re.IGNORECASE):
                             return {"intent": intent, "confidence": 0.95, "pattern": pattern}
-                    
-                    # For all intents (including fallback for the above), try search
+
                     if re.search(pattern, user_input_lower, re.IGNORECASE):
-                        # Higher confidence for longer, more specific patterns
                         confidence = 0.95 if len(pattern) > 20 else 0.9 if len(pattern) > 15 else 0.85
                         return {"intent": intent, "confidence": confidence, "pattern": pattern}
                 except Exception:

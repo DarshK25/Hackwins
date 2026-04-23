@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     # LLM Providers
     GROQ_API_KEY: str
     GROQ_API_KEY_FAST: Optional[str] = None
+    GROQ_API_KEY_FALLBACK_1: Optional[str] = None
+    GROQ_API_KEY_FALLBACK_2: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
     TAVILY_API_KEY: Optional[str] = None
     NEWS_API_KEY: Optional[str] = None
@@ -44,12 +46,16 @@ class Settings(BaseSettings):
     # LLM Models
     GROQ_MODEL: str = "llama-3.1-8b-instant"
     GROQ_MODEL_COMPLEX: str = "llama-3.1-8b-instant"  # For complex tasks
+    GROQ_VOICE_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_VOICE_FINAL_MODEL: str = "llama-3.3-70b-versatile"
 
     # LLM Settings
     LLM_TEMPERATURE: float = 0.3
     LLM_MAX_TOKENS: int = 2000
     LLM_TIMEOUT: int = 30
     LLM_MAX_RETRIES: int = 3
+    GROQ_VOICE_HISTORY_MESSAGES: int = 8
+    GROQ_VOICE_TOOL_ROUNDS: int = 3
 
     # Backend Services
     BACKEND_BASE_URL: str = "http://127.0.0.1:8002"

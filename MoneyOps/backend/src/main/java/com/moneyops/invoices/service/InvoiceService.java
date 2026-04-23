@@ -677,6 +677,14 @@ public class InvoiceService {
     public com.moneyops.transactions.dto.TransactionDto recordPayment(String id, com.moneyops.transactions.dto.TransactionDto paymentDto, String orgId, String userId) {
         Invoice invoice = invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));
+
+        if (paymentDto.getIdempotencyKey() != null && !paymentDto.getIdempotencyKey().isBlank()) {
+            var existingPayment = transactionService.getTransactionRepository()
+                    .findByOrgIdAndInvoiceIdAndIdempotencyKeyAndDeletedAtIsNull(orgId, id, paymentDto.getIdempotencyKey());
+            if (existingPayment.isPresent()) {
+                return transactionService.getTransactionMapper().toDto(existingPayment.get());
+            }
+        }
         
         paymentDto.setInvoiceId(id);
         paymentDto.setClientId(invoice.getClientId());
@@ -694,8 +702,15 @@ public class InvoiceService {
 
         // ✨ Denormalized sync
         BigDecimal paid = invoice.getAmountPaid() != null ? invoice.getAmountPaid() : BigDecimal.ZERO;
-        invoice.setAmountPaid(paid.add(paymentDto.getAmount()));
-        invoice.setBalanceDue(invoice.getTotalAmount().subtract(invoice.getAmountPaid()));
+        BigDecimal incoming = paymentDto.getAmount() != null ? paymentDto.getAmount() : BigDecimal.ZERO;
+        BigDecimal totalAmount = invoice.getTotalAmount() != null ? invoice.getTotalAmount() : BigDecimal.ZERO;
+        BigDecimal nextPaid = paid.add(incoming);
+        if (nextPaid.compareTo(totalAmount) > 0) {
+            nextPaid = totalAmount;
+        }
+
+        invoice.setAmountPaid(nextPaid);
+        invoice.setBalanceDue(totalAmount.subtract(nextPaid).max(BigDecimal.ZERO));
         
         if (invoice.getBalanceDue().compareTo(BigDecimal.ZERO) <= 0) {
             invoice.setStatus(InvoiceStatus.PAID);

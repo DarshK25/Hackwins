@@ -1,6 +1,6 @@
 spring:
   config:
-    import: optional:file:../.env[.properties]
+    import: optional:file:.env[.properties],optional:file:../.env[.properties],optional:file:../../.env[.properties]
   security:
     oauth2:
       client:
@@ -64,5 +64,6 @@ logging:
 
 app:
   mail:
-    from-address: ${EMAIL_FROM_ADDRESS:no-reply@moneyops.local}
+    from-address: ${EMAIL_FROM_ADDRESS:onboarding@resend.dev}
     from-name: ${EMAIL_FROM_NAME:MoneyOps}
+    override-to: ${EMAIL_OVERRIDE_TO:}

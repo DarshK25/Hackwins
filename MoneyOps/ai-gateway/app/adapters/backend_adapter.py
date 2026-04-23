@@ -8,6 +8,7 @@ import httpx
 import re
 import datetime
 import time
+from urllib.parse import urlsplit, parse_qsl
 from pydantic import BaseModel, Field, field_validator
 from rapidfuzz import process, fuzz
 
@@ -315,6 +316,68 @@ class BackendHttpAdapter:
             "POST", "/api/clients", data=payload, org_id=org_id, user_id=user_id
         )
 
+    async def get(
+        self,
+        endpoint: str,
+        org_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        headers: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """Generic GET helper used by the unified moneyops agent."""
+        parsed = urlsplit(endpoint)
+        params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        resp = await self._request(
+            "GET",
+            parsed.path or endpoint,
+            params=params or None,
+            headers=headers,
+            org_id=org_id,
+            user_id=user_id,
+        )
+        if not resp.success:
+            raise RuntimeError(resp.error or f"GET {endpoint} failed")
+        return resp.data
+
+    async def post(
+        self,
+        endpoint: str,
+        payload: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, Any]] = None,
+        org_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Any:
+        """Generic POST helper used by the unified moneyops agent."""
+        resp = await self._request(
+            "POST",
+            endpoint,
+            data=payload,
+            headers=headers,
+            org_id=org_id,
+            user_id=user_id,
+        )
+        if not resp.success:
+            raise RuntimeError(resp.error or f"POST {endpoint} failed")
+        return resp.data
+
+    async def delete(
+        self,
+        endpoint: str,
+        headers: Optional[Dict[str, Any]] = None,
+        org_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Any:
+        """Generic DELETE helper used by the unified moneyops agent."""
+        resp = await self._request(
+            "DELETE",
+            endpoint,
+            headers=headers,
+            org_id=org_id,
+            user_id=user_id,
+        )
+        if not resp.success:
+            raise RuntimeError(resp.error or f"DELETE {endpoint} failed")
+        return resp.data
+
     def set_auth_token(self, token: str):
         self.auth_token = token
         self.client.headers["Authorization"] = f"Bearer {token}"
@@ -324,6 +387,7 @@ _backend_adapter_instance: Optional[BackendHttpAdapter] = None
 
 
 def get_backend_adapter(auth_token: Optional[str] = None) -> BackendHttpAdapter:
+    """Return a shared backend adapter instance for the voice and agent paths."""
     global _backend_adapter_instance
     if auth_token:
         return BackendHttpAdapter(auth_token=auth_token)

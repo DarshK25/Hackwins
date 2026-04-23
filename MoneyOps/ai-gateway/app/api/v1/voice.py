@@ -1,23 +1,18 @@
 """
 Voice API endpoint.
-Processes voice input: Intent classification -> Entity extraction -> Agent routing.
-Supports multi-turn conversation: tracks missing entities and asks follow-up questions.
+Processes voice input via moneyops_agent — no classify, no route, no entity extraction.
 """
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Dict, Any, List, Optional, Literal
+from pydantic import BaseModel, Field
+from typing import Dict, Any, List, Optional
 import uuid
-import time
-import re
-import datetime
-from enum import Enum
 
-from app.orchestration.intent_classifier import IntentClassifier
-from app.orchestration.entity_extractor import EntityExtractor
+from app.voice_processor import voice_processor, VoiceContext
 from app.utils.logger import get_logger
 from app.config import settings
-from app.adapters.backend_adapter import get_backend_adapter
+from app.adapters.backend_adapter import normalize_business_id
+from app.state.session_manager import session_manager
 
 try:
     from livekit.api.access_token import AccessToken, VideoGrants
@@ -29,18 +24,21 @@ except ImportError:
 router = APIRouter()
 logger = get_logger(__name__)
 
-intent_classifier = IntentClassifier()
-entity_extractor = EntityExtractor()
-
 
 class VoiceProcessRequest(BaseModel):
     text: str
     user_id: str
     org_id: str
     session_id: str
-    business_id: Optional[int | str] = None
+    business_id: Optional[str] = None
     context: Dict[str, Any] = Field(default_factory=dict)
     conversation_history: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class VoiceDialogResponseRequest(BaseModel):
+    session_id: str
+    dialog_id: str
+    fields: Dict[str, Any] = Field(default_factory=dict)
 
 
 @router.get("/voice/token")
@@ -63,11 +61,7 @@ async def get_voice_token(
             AccessToken(settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
             .with_identity(user_id)
             .with_metadata(
-                re.sub(
-                    r"\s+",
-                    "",
-                    f'{{"user_id":"{user_id}","org_id":"{org_id or "default"}","room":"{actual_room}"}}',
-                )
+                f'{{"user_id":"{user_id}","org_id":"{org_id or "default"}","room":"{actual_room}"}}'
             )
             .with_grants(VideoGrants(room_join=True, room=actual_room))
         )
@@ -86,65 +80,92 @@ async def get_voice_token(
 async def process_voice(request: VoiceProcessRequest, fastapi_request: Request):
     """
     Main voice processing pipeline.
-    Routes to VoiceProcessor for intent locking and multi-turn handling.
+    Routes directly to moneyops_agent via voice_processor — no classify/extract/route.
     """
-    from app.voice_processor import voice_processor, VoiceContext
-
     try:
-        resolved_business_id = (
-            request.business_id
-            or request.context.get("business_id")
-            or request.context.get("businessId")
-            or 1
+        logger.info("voice_process_start", 
+                    session_id=request.session_id, 
+                    user_id=request.user_id,
+                    text_preview=request.text[:50])
+
+        # Fragment guard - single words that are meaningless
+        fragment_words = {"and", "or", "the", "a", "is", "to", "of", "in", "it", "i", "you", "we"}
+        if len(request.text.split()) <= 1 and request.text.lower().strip() in fragment_words:
+            logger.info("fragment_ignored", text=request.text)
+            return {
+                "response_text": "",
+                "intent": "FRAGMENT",
+                "success": True,
+                "stage": "COLLECTING",
+            }
+
+        resolved_business_id = normalize_business_id(
+            request.business_id or request.context.get("business_id") or request.context.get("businessId") or "1"
         )
+
         context = VoiceContext(
             session_id=request.session_id,
             user_id=request.user_id,
             org_uuid=request.org_id,
-            business_id=resolved_business_id,
+            business_id=str(resolved_business_id),
             clerk_org_id=request.org_id,
             raw_text=request.text,
+            history=request.conversation_history,
         )
-        from app.adapters.backend_adapter import normalize_business_id
-        from app.state.session_manager import session_manager
-
-        session = session_manager.get_session(
-            request.session_id,
-            request.user_id,
-            request.org_id,
-            business_id=int(normalize_business_id(resolved_business_id)),
-        )
-        session_manager.save_session(session)
 
         result = await voice_processor.process(request.text, context)
 
-        message = result.get("message", "")
-        if isinstance(message, list):
-            message = " ".join(str(m) for m in message)
-        ui_event = result.get("ui_event")
+        # Extract info from result
+        response_text = result.get("response_text", "")
+        tool_called = result.get("tool_called", "")
+        
+        # Determine stage based on result
         stage = "EXECUTED"
-        needs_more_info = False
-        if ui_event and ui_event.get("type") in {"open_client_picker", "open_input_dialog", "progress"}:
-            stage = "COLLECTING"
-            needs_more_info = True
-        if ui_event and ui_event.get("type") == "invoice_created":
-            stage = "EXECUTED"
-            needs_more_info = False
+        if not result.get("success", True):
+            stage = "FAILED"
+        
+        # Map tool to intent
+        TOOL_TO_INTENT = {
+            "create_invoice": "INVOICE_CREATE",
+            "get_invoices": "INVOICE_QUERY",
+            "record_payment": "PAYMENT_RECORD",
+            "create_client": "CLIENT_CREATE",
+            "get_clients": "CLIENT_QUERY",
+            "check_compliance": "COMPLIANCE",
+            "get_business_health_score": "BUSINESS_HEALTH",
+            "get_daily_briefing": "DAILY_BRIEFING",
+            "get_cash_flow_forecast": "CASH_FLOW",
+            "send_collection_reminder": "COLLECTION",
+            "send_invoice_email": "INVOICE_SEND",
+            "search_market_intelligence": "MARKET_INTEL",
+            "record_expense": "EXPENSE_RECORD",
+            "get_overdue_action_plan": "OVERDUE_PLAN",
+            "get_financial_summary": "FINANCIAL_SUMMARY",
+        }
+        intent = TOOL_TO_INTENT.get(tool_called, "INTELLIGENT_QUERY")
 
+        logger.info("voice_process_complete",
+                    session_id=request.session_id,
+                    tool_called=tool_called,
+                    intent=intent,
+                    success=result.get("success", True))
+
+        # Always return 200 to prevent voice service retries
         return {
-            "response_text": str(message) if message else "I've processed that.",
-            "intent": _classify_intent(request.text),
+            "response_text": response_text if response_text is not None else "I've processed that.",
+            "intent": intent,
             "confidence": 0.9,
             "success": result.get("success", True),
-            "ui_event": ui_event,
             "stage": stage,
-            "needs_more_info": needs_more_info,
-            "action_result": message if result.get("success") else None,
+            "tool_called": tool_called,
+            "needs_more_info": False,
+            "raw_response": result.get("raw_response", ""),
+            "ui_event": result.get("ui_event"),
         }
-    except Exception as e:
-        import traceback
 
+    except Exception as e:
         logger.error("voice_process_failed", error=str(e), exc_info=True)
+        # Always return 200 even on errors — returning 500 causes voice service to retry
         return {
             "response_text": "I hit a snag on that request. Please try again.",
             "success": False,
@@ -155,155 +176,46 @@ async def process_voice(request: VoiceProcessRequest, fastapi_request: Request):
         }
 
 
-def _classify_intent(text: str) -> str:
-    t = (text or "").lower()
-    if any(k in t for k in ["invoice", "bill", "payment"]):
-        return "INVOICE"
-    if any(k in t for k in ["client", "customer", "add client"]):
-        return "CLIENT"
-    if any(k in t for k in ["overdue", "unpaid", "reminder", "follow"]):
-        return "OVERDUE"
-    if any(k in t for k in ["briefing", "summary", "overview", "dashboard"]):
-        return "DAILY_BRIEFING"
-    if any(k in t for k in ["compliance", "tds", "gst", "deadline"]):
-        return "COMPLIANCE"
-    if any(k in t for k in ["transaction", "record", "expense", "income"]):
-        return "TRANSACTION"
-    return "GENERAL_QUERY"
-
-
 @router.post("/voice/dialog-response")
-async def dialog_response(request: Request):
-    """Handle UI-submitted data form for drafts (Invoices or Clients)."""
-    payload = await request.json()
-    session_id = payload.get("session_id")
-    dialog_id = payload.get("dialog_id")
+async def process_voice_dialog_response(request: VoiceDialogResponseRequest):
+    try:
+        session = session_manager.get_session(request.session_id)
+        draft = dict(session.invoice_draft_data or {})
+        fields = dict(request.fields or {})
 
-    from app.state.session_manager import session_manager
-
-    session = session_manager.get_session(session_id)
-
-    if not session:
-        return {"success": False, "message": "Session expired."}
-
-    form_fields = payload.get("fields", payload)
-
-    # Identify which draft we are updating
-    # Logic: Prefer dialog_id or locked_intent
-    is_invoice = (
-        dialog_id == "invoice_preview_form" or session.locked_intent == "INVOICE_CREATE"
-    )
-
-    if is_invoice and session.invoice_draft:
-        from app.voice_processor import VoiceContext
-        from app.agents.finance_agent import finance_agent
-
-        draft = session.invoice_draft
-        # Update invoice fields
-        for k, v in form_fields.items():
-            if v is None:
-                continue
-            if k == "amount" or k == "total_amount":
-                try:
-                    draft.amount = float(v)
-                except:
-                    pass
-            elif k == "gst_percent":
-                try:
-                    draft.gst_percent = float(v)
-                except:
-                    pass
-            elif k == "issue_date":
-                draft.issue_date = v
-            elif k == "gst_applicable":
-                draft.gst_applicable = str(v).lower() in ("true", "yes", "1")
-            elif k == "due_date":
-                draft.due_date = v
-            elif k == "notes":
-                draft.notes = v
-            elif k == "invoice_items_text":
-                parsed_items = finance_agent.parse_line_items_text(v)
+        if request.dialog_id == "invoice_preview_form":
+            if fields.get("client_name"):
+                draft["client_name"] = str(fields.get("client_name")).strip()
+            if fields.get("client_id"):
+                draft["client_id"] = str(fields.get("client_id")).strip()
+            if fields.get("issue_date"):
+                draft["issue_date"] = str(fields.get("issue_date")).strip()
+            if fields.get("due_date"):
+                draft["due_date"] = str(fields.get("due_date")).strip()
+            if fields.get("notes") is not None:
+                draft["notes"] = str(fields.get("notes")).strip()
+            if fields.get("invoice_items_text") is not None:
+                from app.agents.moneyops_agent import _parse_invoice_items_text
+                parsed_items = _parse_invoice_items_text(str(fields.get("invoice_items_text") or ""))
                 if parsed_items:
-                    draft.line_items = parsed_items
-            elif (
-                k == "description"
-                or k == "item_description"
-                or k == "service_description"
-            ):
-                draft.item_description = v
-            elif k == "item_type":
-                draft.item_type = str(v).upper()
-            elif k == "quantity":
-                try:
-                    draft.quantity = int(v)
-                except:
-                    pass
-            elif k == "client_name":
-                draft.client_name = v
-            elif k == "client_id":
-                draft.client_id = v
-            elif k == "teamActionCode" or k == "team_action_code":
-                draft.team_action_code = v
+                    draft["line_items"] = parsed_items
 
-        session.invoice_draft = draft
-        session_manager.save_session(session)
-        voice_context = VoiceContext(
-            session_id=session.session_id,
-            user_id=session.user_id,
-            org_uuid=session.org_id,
-            business_id=session.business_id,
-            raw_text="",
-            extracted_entities=[],
-        )
-        follow_up = await finance_agent.handle_invoice_create(voice_context)
-        message = (
-            follow_up.message
-            if follow_up and follow_up.message
-            else "Invoice draft updated."
-        )
-        title = "Invoice Draft Updated"
-        ui_event = (
-            follow_up.ui_event if follow_up and hasattr(follow_up, "ui_event") else None
-        )
-    else:
-        # Fallback to client
-        if session.client_draft is None:
-            session.client_draft = {}
+            session.invoice_draft_data = draft
+            session_manager.save_session(session)
+            from app.agents.moneyops_agent import _build_invoice_preview_dialog_ui_event
+            return {
+                "success": True,
+                "message": "Invoice draft updated. You can keep editing it or continue by voice.",
+                "ui_event": _build_invoice_preview_dialog_ui_event(request.session_id, draft),
+            }
 
-        for key in [
-            "name",
-            "client_name",
-            "company_name",
-            "phone",
-            "gst_number",
-            "email",
-            "address",
-            "taxId",
-            "phoneNumber",
-            "teamActionCode",
-        ]:
-            if key in form_fields and form_fields[key]:
-                if key in ("name", "client_name", "company_name"):
-                    session.client_draft["client_name"] = form_fields[key]
-                elif key in ("phoneNumber", "phone"):
-                    session.client_draft["phone"] = form_fields[key]
-                elif key in ("taxId", "gst_number"):
-                    session.client_draft["gst_number"] = form_fields[key]
-                else:
-                    session.client_draft[key] = form_fields[key]
-
-        session_manager.save_session(session)
-        message = "Client draft updated. Tell me 'Save Client' to finalize."
-        title = "Client Draft Updated"
-        ui_event = None
-
-    session.dialog_pending = False
-    session.dialog_id = None
-    session_manager.save_session(session)
-
-    return {
-        "success": True,
-        "message": message,
-        "ui_event": ui_event
-        or {"type": "toast", "variant": "success", "title": title, "message": message},
-    }
+        return {
+            "success": False,
+            "message": f"Unsupported dialog: {request.dialog_id}",
+        }
+    except Exception as e:
+        logger.error("voice_dialog_response_failed", error=str(e), exc_info=True)
+        return {
+            "success": False,
+            "message": "I couldn't update that draft right now.",
+        }

@@ -37,6 +37,66 @@ const inputStyle = {
     outline: "none",
 };
 
+function formatDateValue(value, mode = "date") {
+    if (!value) return "—";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "—";
+    return mode === "datetime"
+        ? parsed.toLocaleString()
+        : parsed.toLocaleDateString();
+}
+
+function formatInrValue(value) {
+    const numeric = Number(value || 0);
+    return `₹${numeric.toLocaleString("en-IN")}`;
+}
+
+function parseAuditPayload(value) {
+    if (!value || typeof value !== "string") return null;
+    try {
+        return JSON.parse(value);
+    } catch {
+        return null;
+    }
+}
+
+function summarizeAuditLog(log) {
+    const operation = String(log?.action || log?.operation || "").toUpperCase();
+    const changes = parseAuditPayload(log?.changes);
+    const newValues = parseAuditPayload(log?.newValues);
+    const oldValues = parseAuditPayload(log?.oldValues);
+
+    if (operation === "CREATE" && newValues) {
+        const clientName = newValues.clientName || "client";
+        const invoiceNumber = newValues.invoiceNumber || "invoice";
+        const totalAmount = newValues.totalAmount != null ? formatInrValue(newValues.totalAmount) : null;
+        return totalAmount
+            ? `Created ${invoiceNumber} for ${clientName} with total ${totalAmount}.`
+            : `Created ${invoiceNumber} for ${clientName}.`;
+    }
+
+    if (operation === "UPDATE" && changes && Object.keys(changes).length > 0) {
+        const fields = Object.keys(changes).slice(0, 3);
+        return `Updated ${fields.join(", ")}${Object.keys(changes).length > 3 ? ", and more" : ""}.`;
+    }
+
+    if (operation === "UPDATE" && newValues && oldValues) {
+        const notable = [];
+        if (newValues.status && newValues.status !== oldValues.status) notable.push(`status to ${newValues.status}`);
+        if (newValues.amountPaid != null && newValues.amountPaid !== oldValues.amountPaid) notable.push(`amount paid to ${formatInrValue(newValues.amountPaid)}`);
+        if (newValues.balanceDue != null && newValues.balanceDue !== oldValues.balanceDue) notable.push(`balance due to ${formatInrValue(newValues.balanceDue)}`);
+        if (notable.length) return `Updated ${notable.join(" and ")}.`;
+    }
+
+    if (operation === "DELETE" && oldValues) {
+        const invoiceNumber = oldValues.invoiceNumber || "invoice";
+        return `Deleted ${invoiceNumber}.`;
+    }
+
+    const fallback = String(log?.details || log?.changes || log?.newValues || "").trim();
+    return fallback ? fallback.slice(0, 140) : "Audit entry recorded.";
+}
+
 function DarkInput({ ...props }) {
     return (
         <input
@@ -61,6 +121,8 @@ export default function InvoiceDetailPage() {
     const [loading, setLoading] = useState(true);
     const [sending, setSending] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [downloadingPdf, setDownloadingPdf] = useState(false);
+    const [recordingPayment, setRecordingPayment] = useState(false);
     const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
     const [paymentForm, setPaymentForm] = useState({
         amount: "",
@@ -126,9 +188,14 @@ export default function InvoiceDetailPage() {
 
     const handleRecordPayment = async (e) => {
         e.preventDefault();
+        if (recordingPayment) {
+            return;
+        }
         try {
+            setRecordingPayment(true);
             const token = await getToken();
             const invId = invoice.id || invoice._id;
+            const idempotencyKey = `payment:${invId}:${paymentForm.paymentDate}:${Number(paymentForm.amount || 0).toFixed(2)}:${String(paymentForm.transactionId || "no-ref").trim().toLowerCase()}`;
             const res = await fetch(`/api/invoices/${invId}/payment`, {
                 method: "POST",
                 headers: {
@@ -143,6 +210,7 @@ export default function InvoiceDetailPage() {
                     paymentMethod: paymentForm.paymentMethod,
                     referenceNumber: paymentForm.transactionId,
                     description: paymentForm.notes,
+                    idempotencyKey,
                 }),
             });
             if (!res.ok) throw new Error("Failed to record payment");
@@ -153,7 +221,11 @@ export default function InvoiceDetailPage() {
             fetchInvoice(invoice.id);
             fetchPayments(invoice.id);
             fetchLogs(invoice.id);
-        } catch (error) { toast.error(error?.message || "Failed to record payment"); }
+        } catch (error) {
+            toast.error(error?.message || "Failed to record payment");
+        } finally {
+            setRecordingPayment(false);
+        }
     };
 
     const handleSend = async () => {
@@ -209,6 +281,45 @@ export default function InvoiceDetailPage() {
         }
     };
 
+    const handleDownloadPdf = async () => {
+        if (!invoice || downloadingPdf) {
+            return;
+        }
+
+        try {
+            setDownloadingPdf(true);
+            const token = await getToken();
+            const invId = invoice.id || invoice._id;
+            const res = await fetch(`/api/invoices/${invId}/download`, {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId,
+                },
+            });
+
+            if (!res.ok) {
+                throw new Error("Failed to export invoice PDF");
+            }
+
+            const pdfBlob = await res.blob();
+            const downloadUrl = window.URL.createObjectURL(pdfBlob);
+            const link = document.createElement("a");
+            const fileName = `invoice-${invoice.invoiceNumber || invId}.pdf`;
+            link.href = downloadUrl;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(downloadUrl);
+            toast.success("Invoice PDF downloaded");
+        } catch (error) {
+            toast.error(error?.message || "Failed to export invoice PDF");
+        } finally {
+            setDownloadingPdf(false);
+        }
+    };
+
     const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
     const remainingAmount = invoice ? parseFloat(invoice.totalAmount || 0) - totalPaid : 0;
     const normalizedStatus = invoice?.status?.toLowerCase();
@@ -248,8 +359,13 @@ export default function InvoiceDetailPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                    <button className="mo-btn-secondary flex items-center gap-2 text-sm" onClick={() => window.print()}>
-                        <FileText className="h-4 w-4" /> Export PDF
+                    <button
+                        className="mo-btn-secondary flex items-center gap-2 text-sm disabled:opacity-40"
+                        onClick={handleDownloadPdf}
+                        disabled={downloadingPdf}
+                    >
+                        {downloadingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                        Export PDF
                     </button>
                     <button
                         className="mo-btn-secondary flex items-center gap-2 text-sm disabled:opacity-40"
@@ -309,7 +425,9 @@ export default function InvoiceDetailPage() {
                                         <label htmlFor="pay-notes" className="text-sm text-[#A0A0A0] block mb-1.5">Notes</label>
                                         <DarkInput id="pay-notes" value={paymentForm.notes} onChange={(e) => setPaymentForm((p) => ({ ...p, notes: e.target.value }))} placeholder="Optional" />
                                     </div>
-                                    <button type="submit" className="mo-btn-primary w-full">Record Payment</button>
+                                    <button type="submit" className="mo-btn-primary w-full disabled:opacity-50" disabled={recordingPayment}>
+                                        {recordingPayment ? "Recording..." : "Record Payment"}
+                                    </button>
                                 </form>
                             </DialogContent>
                         </Dialog>
@@ -404,8 +522,8 @@ export default function InvoiceDetailPage() {
                                                 <p className="font-semibold text-white">₹{(payment.amount || 0).toLocaleString("en-IN")}</p>
                                                 <span className="text-xs text-[#A0A0A0] capitalize">{payment.paymentMethod?.replace("_", " ")}</span>
                                             </div>
-                                            <p className="text-xs text-[#A0A0A0]">{new Date(payment.paymentDate).toLocaleDateString()}</p>
-                                            {payment.transactionId && <p className="text-xs text-[#A0A0A0] mt-0.5">Txn: {payment.transactionId}</p>}
+                                            <p className="text-xs text-[#A0A0A0]">{formatDateValue(payment.paymentDate || payment.transactionDate)}</p>
+                                            {(payment.transactionId || payment.referenceNumber) && <p className="text-xs text-[#A0A0A0] mt-0.5">Txn: {payment.transactionId || payment.referenceNumber}</p>}
                                         </div>
                                     </div>
                                 ))}
@@ -423,10 +541,12 @@ export default function InvoiceDetailPage() {
                                 {logs.map((log) => (
                                     <div key={log.id} className="flex gap-3 text-sm">
                                         <div className="w-2 h-2 mt-1.5 rounded-full bg-[#60A5FA] shrink-0" />
-                                        <div>
-                                            <p className="font-medium text-white capitalize">{log.action?.replace("_", " ")}</p>
-                                            <p className="text-xs text-[#A0A0A0]">{new Date(log.createdAt).toLocaleString()}</p>
-                                            {log.details && <p className="text-xs text-[#A0A0A0] mt-0.5">{JSON.stringify(log.details).slice(0, 50)}…</p>}
+                                        <div className="min-w-0 flex-1">
+                                            <p className="font-medium text-white capitalize">{(log.action || log.operation || "").replace("_", " ")}</p>
+                                            <p className="text-xs text-[#A0A0A0]">{formatDateValue(log.createdAt || log.timestamp, "datetime")}</p>
+                                            <p className="text-xs text-[#A0A0A0] mt-0.5 break-words whitespace-pre-wrap overflow-hidden">
+                                                {summarizeAuditLog(log)}
+                                            </p>
                                         </div>
                                     </div>
                                 ))}

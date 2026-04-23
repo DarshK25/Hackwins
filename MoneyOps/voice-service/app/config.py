@@ -7,9 +7,18 @@ from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
-# Load the global root .env at the workspace root (MoneyOps/.env, one level above MoneyOps/MoneyOps/).
-# parents[2] from config.py: voice-service/app → voice-service → MoneyOps/MoneyOps
-_env_path = Path(__file__).resolve().parents[2] / ".env"
+
+def _resolve_env_path() -> Path:
+    """Prefer the voice-service-local .env; fall back to monorepo root if needed."""
+    service_env = Path(__file__).resolve().parents[1] / ".env"
+    if service_env.exists():
+        return service_env
+
+    repo_env = Path(__file__).resolve().parents[2] / ".env"
+    return repo_env
+
+
+_env_path = _resolve_env_path()
 load_dotenv(dotenv_path=_env_path, override=True)
 
 
@@ -49,6 +58,7 @@ class Settings(BaseSettings):
     # External APIs
     ASSEMBLYAI_API_KEY: Optional[str] = None
     CARTESIA_API_KEY: Optional[str] = None
+    TTS_PROVIDER: str = "auto"
 
     # VAD (Voice Activity Detection) — tuned for natural conversation
     # min_speech_duration LOW  → picks up speech quickly (no missed start-of-turn)

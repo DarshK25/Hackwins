@@ -41,14 +41,6 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
                 }),
             });
             const data = await res.json();
-            if (data?.message) {
-                window.dispatchEvent(new CustomEvent("voice:manual_agent_response", {
-                    detail: {
-                        responseText: data.message,
-                        uiEvent: data.ui_event || null,
-                    },
-                }));
-            }
             if (data?.ui_event) {
                 window.dispatchEvent(new CustomEvent("voice:open_client_picker", { detail: null }));
                 window.dispatchEvent(new CustomEvent("voice:manual_ui_event", { detail: data.ui_event }));
