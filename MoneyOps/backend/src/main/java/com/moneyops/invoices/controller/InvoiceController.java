@@ -1,7 +1,8 @@
 package com.moneyops.invoices.controller;
-
 import com.moneyops.invoices.dto.InvoiceDto;
+import com.moneyops.invoices.service.InvoicePdfService;
 import com.moneyops.invoices.service.InvoiceService;
+import com.moneyops.organizations.dto.TeamSecurityCodeValidationRequest;
 import com.moneyops.shared.utils.OrgContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.ByteArrayResource;
@@ -18,6 +19,7 @@ import java.util.List;
 public class InvoiceController {
 
     private final InvoiceService invoiceService;
+    private final InvoicePdfService invoicePdfService;
 
     @PostMapping
     public ResponseEntity<InvoiceDto> createInvoice(@RequestBody InvoiceDto dto) {
@@ -71,9 +73,17 @@ public class InvoiceController {
     }
 
     @PatchMapping("/{id}/send")
-    public ResponseEntity<InvoiceDto> sendInvoice(@PathVariable String id) {
+    public ResponseEntity<InvoiceDto> sendInvoice(
+            @PathVariable String id,
+            @RequestBody(required = false) TeamSecurityCodeValidationRequest request,
+            @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
         String orgId = OrgContext.getOrgId();
-        InvoiceDto sent = invoiceService.sendInvoice(id, orgId);
+        String userId = OrgContext.getUserId();
+        if (userId == null || userId.isBlank()) {
+            userId = userIdHeader;
+        }
+        String teamActionCode = request != null ? request.getTeamActionCode() : null;
+        InvoiceDto sent = invoiceService.sendInvoice(id, orgId, userId, teamActionCode);
         return ResponseEntity.ok(sent);
     }
 
@@ -91,11 +101,11 @@ public class InvoiceController {
         return ResponseEntity.ok(overdue);
     }
 
-    @GetMapping("/{id}/download")
-    public ResponseEntity<ByteArrayResource> downloadInvoice(@PathVariable String id) {
+    @GetMapping("/{id}/export/pdf")
+    public ResponseEntity<ByteArrayResource> exportInvoicePdf(@PathVariable String id) {
         String orgId = OrgContext.getOrgId();
         InvoiceDto invoice = invoiceService.getInvoiceById(id, orgId);
-        byte[] pdf = invoiceService.generateInvoicePdf(id, orgId);
+        byte[] pdf = invoicePdfService.getPdfBytes(id, orgId);
         ByteArrayResource resource = new ByteArrayResource(pdf);
 
         return ResponseEntity.ok()

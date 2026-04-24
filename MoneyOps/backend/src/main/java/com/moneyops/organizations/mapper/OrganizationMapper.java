@@ -47,7 +47,8 @@ public class OrganizationMapper {
         dto.setMsmeNumber(org.getMsmeNumber());
         dto.setIecCode(org.getIecCode());
         dto.setProfessionalTaxReg(org.getProfessionalTaxReg());
-        
+        dto.setCurrency(org.getCurrency());
+
         return dto;
     }
 
@@ -88,6 +89,7 @@ public class OrganizationMapper {
         org.setMsmeNumber(dto.getMsmeNumber());
         org.setIecCode(dto.getIecCode());
         org.setProfessionalTaxReg(dto.getProfessionalTaxReg());
+        org.setCurrency(dto.getCurrency());
 
         return org;
     }

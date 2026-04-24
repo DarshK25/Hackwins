@@ -39,7 +39,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ClientDetailDialog from "@/components/ClientDetailDialog";
 import { AnimatePresence } from "framer-motion";
-import { getRememberedTeamSecurityCode, rememberTeamSecurityCode } from "@/lib/teamSecurityCode";
+import { getTeamSecurityAttemptState } from "@/lib/teamSecurityAttempts";
 
 const INITIAL_FORM = {
     name: "",
@@ -62,20 +62,13 @@ export default function ClientsPage() {
     const [saving, setSaving] = useState(false);
     const [formData, setFormData] = useState(INITIAL_FORM);
     const [selectedClient, setSelectedClient] = useState(null);
+    const [teamCodeAttempts, setTeamCodeAttempts] = useState(0);
 
     useEffect(() => {
         if (internalUserId && internalOrgId) {
             fetchClients();
         }
     }, [internalUserId, internalOrgId]);
-
-    useEffect(() => {
-        if (!internalOrgId) return;
-        setFormData((prev) => ({
-            ...prev,
-            teamActionCode: getRememberedTeamSecurityCode(internalOrgId),
-        }));
-    }, [internalOrgId]);
 
     // LISTEN FOR VOICE ACTIONS (Bug 3 Refresh)
     useEffect(() => {
@@ -134,14 +127,24 @@ export default function ClientsPage() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.message || "Failed to create client");
             toast.success("Client created successfully");
-            rememberTeamSecurityCode(internalOrgId, formData.teamActionCode);
+            setTeamCodeAttempts(0);
             setDialogOpen(false);
-            setFormData({
-                ...INITIAL_FORM,
-                teamActionCode: getRememberedTeamSecurityCode(internalOrgId),
-            });
+            setFormData(INITIAL_FORM);
             fetchClients();
         } catch (error) {
+            const attempt = getTeamSecurityAttemptState(error, teamCodeAttempts);
+            if (attempt.isSecurityCodeError) {
+                toast.error(attempt.message);
+                setFormData((current) => ({ ...current, teamActionCode: "" }));
+                if (attempt.shouldCancel) {
+                    setDialogOpen(false);
+                    setFormData(INITIAL_FORM);
+                    setTeamCodeAttempts(0);
+                } else {
+                    setTeamCodeAttempts(attempt.nextAttempts);
+                }
+                return;
+            }
             toast.error(error?.message || "Failed to create client");
         } finally {
             setSaving(false);
@@ -211,9 +214,24 @@ export default function ClientsPage() {
                     <button className="mo-btn-secondary" onClick={fetchClients} disabled={loading}>
                         <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                     </button>
-                    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                    <Dialog
+                        open={dialogOpen}
+                        onOpenChange={(open) => {
+                            setDialogOpen(open);
+                            if (!open) {
+                                setFormData(INITIAL_FORM);
+                                setTeamCodeAttempts(0);
+                            }
+                        }}
+                    >
                         <DialogTrigger asChild>
-                            <button className="mo-btn-primary flex items-center gap-2">
+                            <button
+                                className="mo-btn-primary flex items-center gap-2"
+                                onClick={() => {
+                                    setFormData(INITIAL_FORM);
+                                    setTeamCodeAttempts(0);
+                                }}
+                            >
                                 <Plus className="h-4 w-4" /> New Client
                             </button>
                         </DialogTrigger>
@@ -229,6 +247,7 @@ export default function ClientsPage() {
                                     <Label htmlFor="name" className="text-white">Name</Label>
                                     <input
                                         id="name"
+                                        autoComplete="off"
                                         className="mo-input px-3 py-2"
                                         value={formData.name}
                                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -239,6 +258,7 @@ export default function ClientsPage() {
                                     <Label htmlFor="email" className="text-white">Email</Label>
                                     <input
                                         id="email"
+                                        autoComplete="off"
                                         className="mo-input px-3 py-2"
                                         value={formData.email}
                                         onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -249,6 +269,7 @@ export default function ClientsPage() {
                                     <Label htmlFor="phone" className="text-white">Phone</Label>
                                     <input
                                         id="phone"
+                                        autoComplete="off"
                                         className="mo-input px-3 py-2"
                                         value={formData.phoneNumber}
                                         onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
@@ -259,6 +280,7 @@ export default function ClientsPage() {
                                     <Label htmlFor="company" className="text-white">Company</Label>
                                     <input
                                         id="company"
+                                        autoComplete="off"
                                         className="mo-input px-3 py-2"
                                         value={formData.company}
                                         onChange={(e) => setFormData({ ...formData, company: e.target.value })}
@@ -269,6 +291,7 @@ export default function ClientsPage() {
                                     <Label htmlFor="notes" className="text-white">Notes</Label>
                                     <Textarea
                                         id="notes"
+                                        autoComplete="off"
                                         className="mo-input"
                                         value={formData.notes}
                                         onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
@@ -280,6 +303,9 @@ export default function ClientsPage() {
                                     <input
                                         id="teamActionCode"
                                         type="password"
+                                        autoComplete="new-password"
+                                        data-lpignore="true"
+                                        data-1p-ignore="true"
                                         className="mo-input px-3 py-2"
                                         value={formData.teamActionCode}
                                         onChange={(e) => setFormData({ ...formData, teamActionCode: e.target.value })}

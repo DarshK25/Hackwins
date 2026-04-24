@@ -4,18 +4,20 @@ import com.moneyops.onboarding.dto.OnboardingRequest;
 import com.moneyops.onboarding.dto.OnboardingStatusResponse;
 import com.moneyops.organizations.entity.BusinessOrganization;
 import com.moneyops.organizations.repository.BusinessOrganizationRepository;
-import com.moneyops.users.entity.User;
 import com.moneyops.users.entity.Invite;
-import com.moneyops.users.repository.UserRepository;
+import com.moneyops.users.entity.User;
 import com.moneyops.users.repository.InviteRepository;
+import com.moneyops.users.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -24,50 +26,84 @@ public class OnboardingService {
     private final UserRepository userRepository;
     private final BusinessOrganizationRepository orgRepository;
     private final InviteRepository inviteRepository;
-    private final org.springframework.data.mongodb.core.MongoTemplate mongoTemplate;
     private final PasswordEncoder passwordEncoder;
 
-    // ── Status check ──────────────────────────────────────────────────────────
-
     public OnboardingStatusResponse getStatus(String clerkId) {
-        Optional<User> userOpt = userRepository.findByClerkIdAndDeletedAtIsNull(clerkId);
+        return getStatus(clerkId, null);
+    }
+
+    public OnboardingStatusResponse getStatus(String clerkId, String email) {
+        Optional<User> userOpt = findUserByIdentity(clerkId, email);
 
         if (userOpt.isEmpty()) {
-            return new OnboardingStatusResponse(false, null, null, "New user — onboarding required");
+            return newUserResponse("New user - onboarding required");
         }
 
         User user = userOpt.get();
-        String orgId = user.getOrgId();
+        String orgId = resolveActiveOrganizationId(user);
 
-        // Healing: If user has no orgId at all, check if they created one
         if (orgId == null) {
-            log.info("User {} has no orgId, checking for created organizations", user.getEmail());
-            var createdOrgs = orgRepository.findAllByCreatedByAndDeletedAtIsNull(user.getId());
-            if (!createdOrgs.isEmpty()) {
-                orgId = createdOrgs.get(0).getId();
-                user.setOrgId(orgId);
-                user.setOnboardingComplete(true);
+            if (isOrphanedDeletedAccount(user)) {
+                log.warn(
+                        "User has no active workspace during onboarding status check. Preserving identity for recovery. clerkId={}, userId={}, staleOrgId={}",
+                        clerkId,
+                        user.getId(),
+                        user.getOrgId()
+                );
+                user.setOrgId(null);
+                user.setOnboardingComplete(false);
                 userRepository.save(user);
-                log.info("Healed user {} with orgId {}", user.getEmail(), orgId);
+
+                return new OnboardingStatusResponse(
+                        false,
+                        user.getId(),
+                        null,
+                        "Previous workspace unavailable - onboarding required"
+                );
             }
+
+            return new OnboardingStatusResponse(
+                    false,
+                    user.getId(),
+                    null,
+                    "Onboarding incomplete"
+            );
         }
 
-        boolean hasOrg = orgId != null;
-        boolean isComplete = user.isOnboardingComplete() || hasOrg;
+        if (!orgId.equals(user.getOrgId()) || !user.isOnboardingComplete()) {
+            user.setOrgId(orgId);
+            user.setOnboardingComplete(true);
+            userRepository.save(user);
+        }
 
         return new OnboardingStatusResponse(
-                isComplete,
+                true,
                 user.getId(),
-                hasOrg ? orgId : null,
-                isComplete ? "Onboarding complete" : "Onboarding incomplete"
+                orgId,
+                "Onboarding complete"
         );
     }
 
-    // ── Create business ───────────────────────────────────────────────────────
-
     public OnboardingStatusResponse createBusiness(OnboardingRequest req) {
         log.info("Creating business for clerkId={}, legalName={}", req.getClerkId(), req.getLegalName());
-        
+
+        User user = getOrCreateUser(req);
+        String existingOrgId = resolveActiveOrganizationId(user);
+        if (existingOrgId != null) {
+            if (!existingOrgId.equals(user.getOrgId()) || !user.isOnboardingComplete()) {
+                user.setOrgId(existingOrgId);
+                user.setOnboardingComplete(true);
+                userRepository.save(user);
+            }
+
+            return new OnboardingStatusResponse(
+                    true,
+                    user.getId(),
+                    existingOrgId,
+                    "Business already exists for this account"
+            );
+        }
+
         BusinessOrganization org = new BusinessOrganization();
         org.setLegalName(req.getLegalName());
         org.setTradingName(req.getTradingName());
@@ -83,7 +119,6 @@ public class OnboardingService {
         org.setEmployeeCount(req.getNumberOfEmployees());
         org.setRegisteredAddress(req.getRegisteredAddress());
 
-        // Regulatory info
         org.setPanNumber(req.getPanNumber());
         org.setStateOfRegistration(req.getStateOfRegistration());
         org.setGstRegistered(Boolean.TRUE.equals(req.getGstRegistered()));
@@ -96,7 +131,6 @@ public class OnboardingService {
         org.setIecCode(req.getIecCode());
         org.setProfessionalTaxReg(req.getProfessionalTaxReg());
 
-        // Context
         org.setPrimaryActivity(req.getPrimaryActivity());
         org.setTargetMarket(req.getTargetMarket());
         org.setKeyProducts(req.getKeyProducts());
@@ -105,13 +139,11 @@ public class OnboardingService {
         org.setFyStartMonth(req.getFyStartMonth() != null ? req.getFyStartMonth() : 4);
         org.setPreferredLanguage(req.getPreferredLanguage() != null ? req.getPreferredLanguage() : "en");
 
-        // Team Security Code (set by owner during onboarding)
         if (req.getTeamActionCode() != null && !req.getTeamActionCode().trim().isEmpty()) {
             org.setTeamActionCodeHash(passwordEncoder.encode(req.getTeamActionCode()));
             log.info("Team security code set for organization during onboarding");
         }
 
-        User user = getOrCreateUser(req);
         org.setCreatedBy(user.getId());
 
         BusinessOrganization savedOrg = orgRepository.save(org);
@@ -127,8 +159,6 @@ public class OnboardingService {
                 "Business created successfully"
         );
     }
-
-    // ── Join business ─────────────────────────────────────────────────────────
 
     public Map<String, Object> verifyInvite(String code) {
         Invite invite = inviteRepository.findByTokenAndDeletedAtIsNull(code)
@@ -154,7 +184,7 @@ public class OnboardingService {
 
     public OnboardingStatusResponse joinBusiness(OnboardingRequest req) {
         log.info("User clerkId={} joining via code={}", req.getClerkId(), req.getInviteCode());
-        
+
         Invite invite = inviteRepository.findByTokenAndDeletedAtIsNull(req.getInviteCode())
                 .orElseThrow(() -> new RuntimeException("Invalid invite code"));
 
@@ -171,7 +201,6 @@ public class OnboardingService {
         user.setRole(invite.getRole());
         userRepository.save(user);
 
-        // Mark invite as accepted
         invite.setStatus(Invite.InviteStatus.ACCEPTED);
         invite.setUpdatedAt(LocalDateTime.now());
         inviteRepository.save(invite);
@@ -184,14 +213,103 @@ public class OnboardingService {
         );
     }
 
+    private String resolveActiveOrganizationId(User user) {
+        String orgId = user.getOrgId();
+
+        if (orgId != null && orgRepository.findByIdAndDeletedAtIsNull(orgId).isPresent()) {
+            return orgId;
+        }
+
+        if (orgId != null) {
+            log.warn("User {} references missing organization {}", user.getEmail(), orgId);
+        } else {
+            log.info("User {} has no orgId, checking for created organizations", user.getEmail());
+        }
+
+        var createdOrgs = orgRepository.findAllByCreatedByAndDeletedAtIsNull(user.getId());
+        if (createdOrgs.isEmpty()) {
+            return null;
+        }
+
+        String healedOrgId = createdOrgs.get(0).getId();
+        log.info("Healed user {} with orgId {}", user.getEmail(), healedOrgId);
+        return healedOrgId;
+    }
+
+    private boolean isOrphanedDeletedAccount(User user) {
+        return user.getOrgId() != null || user.isOnboardingComplete();
+    }
+
     private User getOrCreateUser(OnboardingRequest req) {
-        return userRepository.findByClerkIdAndDeletedAtIsNull(req.getClerkId()).orElseGet(() -> {
+        return findUserByIdentity(req.getClerkId(), req.getEmail()).orElseGet(() -> {
+            if (!hasText(req.getClerkId())) {
+                throw new IllegalArgumentException("Missing Clerk user ID");
+            }
+            if (!hasText(req.getEmail())) {
+                throw new IllegalArgumentException("Missing user email");
+            }
+
             User newUser = new User();
-            newUser.setClerkId(req.getClerkId());
-            newUser.setEmail(req.getEmail());
+            newUser.setClerkId(req.getClerkId().trim());
+            newUser.setEmail(normalizeEmail(req.getEmail()));
             newUser.setName(req.getName());
-            // Audit populated by @EnableMongoAuditing
             return userRepository.save(newUser);
         });
+    }
+
+    private Optional<User> findUserByIdentity(String clerkId, String email) {
+        String normalizedClerkId = trimToNull(clerkId);
+        if (normalizedClerkId != null) {
+            Optional<User> byClerkId = userRepository.findByClerkIdAndDeletedAtIsNull(normalizedClerkId);
+            if (byClerkId.isPresent()) {
+                return byClerkId;
+            }
+        }
+
+        String normalizedEmail = normalizeEmail(email);
+        if (normalizedEmail == null) {
+            return Optional.empty();
+        }
+
+        return userRepository.findByEmailIgnoreCaseAndDeletedAtIsNull(normalizedEmail)
+                .map(user -> relinkClerkIdIfNeeded(user, normalizedClerkId));
+    }
+
+    private User relinkClerkIdIfNeeded(User user, String clerkId) {
+        if (clerkId == null || clerkId.equals(user.getClerkId())) {
+            return user;
+        }
+
+        log.warn(
+                "Relinking existing MoneyOps user to current Clerk identity. userId={}, email={}, oldClerkId={}, newClerkId={}",
+                user.getId(),
+                user.getEmail(),
+                user.getClerkId(),
+                clerkId
+        );
+        user.setClerkId(clerkId);
+        return userRepository.save(user);
+    }
+
+    private OnboardingStatusResponse newUserResponse(String message) {
+        return new OnboardingStatusResponse(false, null, null, message);
+    }
+
+    private String normalizeEmail(String email) {
+        String trimmed = trimToNull(email);
+        return trimmed == null ? null : trimmed.toLowerCase(Locale.ROOT);
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String trimmed = value.trim();
+        return trimmed.isBlank() ? null : trimmed;
+    }
+
+    private boolean hasText(String value) {
+        return trimToNull(value) != null;
     }
 }

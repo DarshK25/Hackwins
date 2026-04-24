@@ -1,9 +1,20 @@
 import { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Save, User, Building, Bell, Shield } from "lucide-react";
-import { useUser } from "@clerk/clerk-react";
+import { Save, User, Building, Bell, Shield, AlertTriangle, Trash2 } from "lucide-react";
+import { useClerk, useUser } from "@clerk/clerk-react";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import { useSettings } from "@/hooks/useSettings";
+import { rememberDeletedAccountNotice } from "@/lib/accountDeletionNotice";
+import { clearRememberedTeamSecurityCode } from "@/lib/teamSecurityCode";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 
 const inputStyle = {
     backgroundColor: "#1A1A1A",
@@ -38,6 +49,17 @@ const monthOptions = [
     { value: "12", label: "December" },
 ];
 
+const currencyOptions = [
+    { value: "INR", label: "Indian Rupee (INR)" },
+    { value: "USD", label: "US Dollar (USD)" },
+    { value: "EUR", label: "Euro (EUR)" },
+    { value: "GBP", label: "British Pound (GBP)" },
+    { value: "AUD", label: "Australian Dollar (AUD)" },
+    { value: "CAD", label: "Canadian Dollar (CAD)" },
+    { value: "SGD", label: "Singapore Dollar (SGD)" },
+    { value: "AED", label: "UAE Dirham (AED)" },
+];
+
 const FIELD_HELP = "Fields marked with * are required.";
 
 function parseLines(value) {
@@ -64,65 +86,29 @@ function Field({ label, id, required = false, children, hint }) {
 }
 
 export default function SettingsPage() {
+    const { signOut } = useClerk();
     const { user } = useUser();
-    const { orgId, userId } = useOnboardingStatus();
+    const { orgId, userId, reset: resetOnboardingStatus } = useOnboardingStatus();
+    const {
+        settings,
+        loading: settingsLoading,
+        savingBySection,
+        profileDraft,
+        setProfileDraft,
+        businessDraft,
+        setBusinessDraft,
+        notificationsDraft,
+        setNotificationsDraft,
+        updateSettings,
+    } = useSettings();
 
-    const [profile, setProfile] = useState({
-        firstName: "",
-        lastName: "",
-        email: "",
-        phone: "",
-        professionalTitle: "",
-    });
-
-    const [business, setBusiness] = useState({
-        id: "",
-        legalName: "",
-        tradingName: "",
-        businessType: "",
-        industry: "",
-        registrationDate: "",
-        annualTurnoverRange: "",
-        primaryEmail: "",
-        primaryPhone: "",
-        website: "",
-        employeeCount: "",
-        registeredAddress: "",
-        pincode: "",
-        panNumber: "",
-        stateOfRegistration: "",
-        gstRegistered: false,
-        gstin: "",
-        gstFilingFrequency: "",
-        tanNumber: "",
-        cin: "",
-        llpin: "",
-        msmeNumber: "",
-        iecCode: "",
-        professionalTaxReg: "",
-        primaryActivity: "",
-        targetMarket: "",
-        keyProductsText: "",
-        currentChallengesText: "",
-        accountingMethod: "accrual",
-        financialYearStartMonth: "4",
-        preferredLanguage: "en",
-    });
-
-    const [notifications, setNotifications] = useState({
-        invoiceDue: true,
-        paymentReceived: true,
-        clientUpdates: false,
-        weeklyReport: true,
-        systemAlerts: true,
-    });
-
-    const [loading, setLoading] = useState(true);
-    const [savingBusiness, setSavingBusiness] = useState(false);
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [deleteTeamActionCode, setDeleteTeamActionCode] = useState("");
+    const [deletingAccount, setDeletingAccount] = useState(false);
 
     useEffect(() => {
-        if (user) {
-            setProfile({
+        if (user && profileDraft === null) {
+            setProfileDraft({
                 firstName: user.firstName || "",
                 lastName: user.lastName || "",
                 email: user.primaryEmailAddress?.emailAddress || "",
@@ -130,161 +116,140 @@ export default function SettingsPage() {
                 professionalTitle: "",
             });
         }
-
-        const fetchBusinessData = async () => {
-            if (!userId) return;
-            try {
-                const response = await fetch("/api/org/my", {
-                    headers: {
-                        "X-User-Id": userId,
-                    },
-                });
-                if (!response.ok) {
-                    throw new Error("Failed to load organization settings");
-                }
-                const result = await response.json();
-                const data = result.data;
-                if (!data) return;
-
-                setBusiness({
-                    id: data.id || "",
-                    legalName: data.legalName || "",
-                    tradingName: data.tradingName || "",
-                    businessType: data.businessType || "",
-                    industry: data.industry || "",
-                    registrationDate: data.registrationDate || "",
-                    annualTurnoverRange: data.annualTurnoverRange || "",
-                    primaryEmail: data.primaryEmail || "",
-                    primaryPhone: data.primaryPhone || "",
-                    website: data.website || "",
-                    employeeCount: data.employeeCount ?? "",
-                    registeredAddress: data.registeredAddress || "",
-                    pincode: data.pincode || "",
-                    panNumber: data.panNumber || "",
-                    stateOfRegistration: data.stateOfRegistration || "",
-                    gstRegistered: Boolean(data.gstRegistered),
-                    gstin: data.gstin || "",
-                    gstFilingFrequency: data.gstFilingFrequency || "",
-                    tanNumber: data.tanNumber || "",
-                    cin: data.cin || "",
-                    llpin: data.llpin || "",
-                    msmeNumber: data.msmeNumber || "",
-                    iecCode: data.iecCode || "",
-                    professionalTaxReg: data.professionalTaxReg || "",
-                    primaryActivity: data.primaryActivity || "",
-                    targetMarket: data.targetMarket || "",
-                    keyProductsText: toLines(data.keyProducts),
-                    currentChallengesText: toLines(data.currentChallenges),
-                    accountingMethod: data.accountingMethod || "accrual",
-                    financialYearStartMonth: data.financialYearStartMonth || "4",
-                    preferredLanguage: data.preferredLanguage || "en",
-                });
-            } catch (error) {
-                console.error("Failed to fetch business data:", error);
-                toast.error(error.message || "Failed to load business settings");
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchBusinessData();
-    }, [user, orgId, userId]);
+    }, [user, profileDraft, setProfileDraft]);
 
     const updateBusiness = (field, value) => {
-        setBusiness((prev) => ({ ...prev, [field]: value }));
+        setBusinessDraft((prev) => ({ ...prev, [field]: value }));
     };
 
     const validateBusiness = () => {
-        if (!business.legalName.trim()) return "Legal name is required";
-        if (!business.businessType.trim()) return "Business type is required";
-        if (!business.industry.trim()) return "Industry is required";
-        if (!business.primaryEmail.trim()) return "Primary email is required";
-        if (!business.primaryPhone.trim()) return "Primary phone is required";
-        if (!business.panNumber.trim()) return "PAN number is required";
-        if (!business.primaryActivity.trim()) return "Primary activity is required";
-        if (!business.targetMarket.trim()) return "Target market is required";
-        if (business.gstRegistered) {
-            if (!business.gstin.trim()) return "GSTIN is required when GST is enabled";
-            if (!business.gstFilingFrequency.trim()) return "GST filing frequency is required when GST is enabled";
+        if (!businessDraft?.legalName?.trim()) return "Legal name is required";
+        if (!businessDraft?.businessType?.trim()) return "Business type is required";
+        if (!businessDraft?.industry?.trim()) return "Industry is required";
+        if (!businessDraft?.primaryEmail?.trim()) return "Primary email is required";
+        if (!businessDraft?.primaryPhone?.trim()) return "Primary phone is required";
+        if (!businessDraft?.panNumber?.trim()) return "PAN number is required";
+        if (!businessDraft?.primaryActivity?.trim()) return "Primary activity is required";
+        if (!businessDraft?.targetMarket?.trim()) return "Target market is required";
+        if (businessDraft?.gstRegistered) {
+            if (!businessDraft?.gstin?.trim()) return "GSTIN is required when GST is enabled";
+            if (!businessDraft?.gstFilingFrequency?.trim()) return "GST filing frequency is required when GST is enabled";
         }
         return null;
     };
 
-    const handleSave = async (section) => {
+    const handleSaveProfile = async () => {
         try {
-            if (section === "Business" && userId) {
-                const targetId = orgId || business.id;
-                if (!targetId) throw new Error("Organization ID not found");
-
-                const validationError = validateBusiness();
-                if (validationError) throw new Error(validationError);
-
-                setSavingBusiness(true);
-                const response = await fetch(`/api/org/${targetId}`, {
-                    method: "PUT",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-User-Id": userId,
-                    },
-                    body: JSON.stringify({
-                        legalName: business.legalName,
-                        tradingName: business.tradingName,
-                        businessType: business.businessType,
-                        industry: business.industry,
-                        registrationDate: business.registrationDate || null,
-                        annualTurnoverRange: business.annualTurnoverRange,
-                        primaryEmail: business.primaryEmail,
-                        primaryPhone: business.primaryPhone,
-                        website: business.website,
-                        employeeCount: business.employeeCount === "" ? null : Number(business.employeeCount),
-                        registeredAddress: business.registeredAddress,
-                        pincode: business.pincode,
-                        panNumber: business.panNumber,
-                        stateOfRegistration: business.stateOfRegistration,
-                        gstRegistered: business.gstRegistered,
-                        gstin: business.gstRegistered ? business.gstin : "",
-                        gstFilingFrequency: business.gstRegistered ? business.gstFilingFrequency : "",
-                        tanNumber: business.tanNumber,
-                        cin: business.cin,
-                        llpin: business.llpin,
-                        msmeNumber: business.msmeNumber,
-                        iecCode: business.iecCode,
-                        professionalTaxReg: business.professionalTaxReg,
-                        primaryActivity: business.primaryActivity,
-                        targetMarket: business.targetMarket,
-                        keyProducts: parseLines(business.keyProductsText),
-                        currentChallenges: parseLines(business.currentChallengesText),
-                        accountingMethod: business.accountingMethod,
-                        financialYearStartMonth: business.financialYearStartMonth,
-                        preferredLanguage: business.preferredLanguage,
-                    }),
-                });
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    throw new Error(payload?.message || "Failed to update business");
+            if (user) {
+                try {
+                    await user.update({
+                        firstName: profileDraft.firstName,
+                        lastName: profileDraft.lastName,
+                    });
+                } catch (clerkErr) {
+                    toast.error("Failed to update profile in Clerk");
+                    return;
                 }
-                toast.success("Business settings saved");
-                if (payload?.data) {
-                    const data = payload.data;
-                    setBusiness((prev) => ({
-                        ...prev,
-                        id: data.id || prev.id,
-                        keyProductsText: toLines(data.keyProducts),
-                        currentChallengesText: toLines(data.currentChallenges),
-                    }));
-                }
-                return;
             }
-
-            toast.success(`${section} settings saved`);
-        } catch (error) {
-            toast.error(error.message);
-        } finally {
-            setSavingBusiness(false);
+            await updateSettings("profile");
+        } catch (err) {
+            // error already shown via toast
         }
     };
 
+    const handleSaveBusiness = async () => {
+        const validationError = validateBusiness();
+        if (validationError) {
+            toast.error(validationError);
+            return;
+        }
+        try {
+            await updateSettings("business");
+        } catch (err) {
+            if (err.message?.includes("403")) {
+                toast.error("You do not have permission to edit business settings");
+            }
+        }
+    };
+
+    const handleSaveNotifications = async () => {
+        try {
+            await updateSettings("notifications");
+        } catch (err) {
+            // error already shown via toast
+        }
+    };
+
+    const handleDeleteDialogChange = (open) => {
+        if (deletingAccount) return;
+        setDeleteDialogOpen(open);
+        if (!open) {
+            setDeleteTeamActionCode("");
+        }
+    };
+
+    const handleDeleteAccount = async () => {
+        if (!orgId || !userId) {
+            toast.error("Account context is missing");
+            return;
+        }
+
+        if (!deleteTeamActionCode.trim()) {
+            toast.error("Team security code is required");
+            return;
+        }
+
+        setDeletingAccount(true);
+        try {
+            const response = await fetch(`/api/org/${orgId}`, {
+                method: "DELETE",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-User-Id": userId,
+                },
+                body: JSON.stringify({
+                    teamActionCode: deleteTeamActionCode.trim(),
+                }),
+            });
+
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload?.message || "Failed to delete account");
+            }
+
+            clearRememberedTeamSecurityCode(orgId);
+            rememberDeletedAccountNotice({
+                businessName: businessDraft?.legalName || businessDraft?.tradingName || "your workspace",
+            });
+            toast.success("Account deleted permanently");
+            setDeleteDialogOpen(false);
+            setDeleteTeamActionCode("");
+            resetOnboardingStatus();
+            await signOut();
+            window.location.replace("/");
+        } catch (error) {
+            toast.error(error.message || "Failed to delete account");
+        } finally {
+            setDeletingAccount(false);
+        }
+    };
+
+    if (settingsLoading) {
+        return (
+            <div className="flex flex-col gap-6">
+                <div>
+                    <h1 className="mo-h1">Settings</h1>
+                    <p className="mo-text-secondary mt-1">Manage your account and business preferences</p>
+                </div>
+                <div className="flex items-center justify-center py-12">
+                    <p className="text-[#A0A0A0]">Loading settings...</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
+        <>
         <div className="flex flex-col gap-6">
             <div>
                 <h1 className="mo-h1">Settings</h1>
@@ -315,28 +280,65 @@ export default function SettingsPage() {
                         <h2 className="mo-h2 mb-1">Profile Information</h2>
                         <p className="mo-text-secondary mb-6">Update your personal information</p>
                         <div className="grid gap-4 md:grid-cols-2">
-                            {[
-                                { label: "First Name", id: "settings-first-name", field: "firstName" },
-                                { label: "Last Name", id: "settings-last-name", field: "lastName" },
-                                { label: "Email", id: "settings-email", field: "email", type: "email" },
-                                { label: "Phone", id: "settings-phone", field: "phone", type: "tel" },
-                                { label: "Professional Title", id: "settings-title", field: "professionalTitle", colSpan: true },
-                            ].map(({ label, id, field, type, colSpan }) => (
-                                <div key={id} className={`grid gap-2 ${colSpan ? "md:col-span-2" : ""}`}>
-                                    <label htmlFor={id} className="text-sm font-medium text-[#A0A0A0]">{label}</label>
-                                    <input
-                                        id={id}
-                                        type={type || "text"}
-                                        value={profile[field]}
-                                        onChange={(e) => setProfile((prev) => ({ ...prev, [field]: e.target.value }))}
-                                        style={inputStyle}
-                                    />
-                                </div>
-                            ))}
+                            <div className="grid gap-2">
+                                <label htmlFor="settings-first-name" className="text-sm font-medium text-[#A0A0A0]">First Name</label>
+                                <input
+                                    id="settings-first-name"
+                                    type="text"
+                                    value={profileDraft?.firstName || ""}
+                                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, firstName: e.target.value }))}
+                                    style={inputStyle}
+                                />
+                            </div>
+                            <div className="grid gap-2">
+                                <label htmlFor="settings-last-name" className="text-sm font-medium text-[#A0A0A0]">Last Name</label>
+                                <input
+                                    id="settings-last-name"
+                                    type="text"
+                                    value={profileDraft?.lastName || ""}
+                                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, lastName: e.target.value }))}
+                                    style={inputStyle}
+                                />
+                            </div>
+                            <div className="grid gap-2">
+                                <label htmlFor="settings-email" className="text-sm font-medium text-[#A0A0A0]">Email</label>
+                                <input
+                                    id="settings-email"
+                                    type="email"
+                                    value={profileDraft?.email || ""}
+                                    readOnly
+                                    style={{ ...inputStyle, opacity: 0.6, cursor: "not-allowed" }}
+                                />
+                                <p className="text-xs text-[#777]">Managed by Clerk</p>
+                            </div>
+                            <div className="grid gap-2">
+                                <label htmlFor="settings-phone" className="text-sm font-medium text-[#A0A0A0]">Phone</label>
+                                <input
+                                    id="settings-phone"
+                                    type="tel"
+                                    value={profileDraft?.phone || ""}
+                                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, phone: e.target.value }))}
+                                    style={inputStyle}
+                                />
+                            </div>
+                            <div className="grid gap-2 md:col-span-2">
+                                <label htmlFor="settings-title" className="text-sm font-medium text-[#A0A0A0]">Professional Title</label>
+                                <input
+                                    id="settings-title"
+                                    type="text"
+                                    value={profileDraft?.professionalTitle || ""}
+                                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, professionalTitle: e.target.value }))}
+                                    style={inputStyle}
+                                />
+                            </div>
                         </div>
                         <div className="mt-6 flex justify-end">
-                            <button onClick={() => handleSave("Profile")} className="mo-btn-primary flex items-center gap-2">
-                                <Save className="h-4 w-4" /> Save Profile
+                            <button
+                                onClick={handleSaveProfile}
+                                disabled={savingBySection?.profile}
+                                className="mo-btn-primary flex items-center gap-2"
+                            >
+                                <Save className="h-4 w-4" /> {savingBySection?.profile ? "Saving..." : "Save Profile"}
                             </button>
                         </div>
                     </div>
@@ -351,125 +353,137 @@ export default function SettingsPage() {
                         <div className="grid gap-6">
                             <div className="grid gap-4 md:grid-cols-2">
                                 <Field label="Legal Name" id="biz-legal-name" required>
-                                    <input id="biz-legal-name" value={business.legalName} onChange={(e) => updateBusiness("legalName", e.target.value)} style={inputStyle} />
+                                    <input id="biz-legal-name" value={businessDraft?.legalName || ""} onChange={(e) => updateBusiness("legalName", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <Field label="Trading Name" id="biz-trading-name">
-                                    <input id="biz-trading-name" value={business.tradingName} onChange={(e) => updateBusiness("tradingName", e.target.value)} style={inputStyle} />
+                                    <input id="biz-trading-name" value={businessDraft?.tradingName || ""} onChange={(e) => updateBusiness("tradingName", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <Field label="Business Type" id="biz-type" required>
-                                    <input id="biz-type" value={business.businessType} onChange={(e) => updateBusiness("businessType", e.target.value)} style={inputStyle} />
+                                    <input id="biz-type" value={businessDraft?.businessType || ""} onChange={(e) => updateBusiness("businessType", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <Field label="Industry" id="biz-industry" required>
-                                    <input id="biz-industry" value={business.industry} onChange={(e) => updateBusiness("industry", e.target.value)} style={inputStyle} />
+                                    <input id="biz-industry" value={businessDraft?.industry || ""} onChange={(e) => updateBusiness("industry", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <Field label="Registration Date" id="biz-registration-date">
-                                    <input id="biz-registration-date" type="date" value={business.registrationDate || ""} onChange={(e) => updateBusiness("registrationDate", e.target.value)} style={inputStyle} />
+                                    <input id="biz-registration-date" type="date" value={businessDraft?.registrationDate || ""} onChange={(e) => updateBusiness("registrationDate", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <Field label="Annual Turnover Range" id="biz-turnover">
-                                    <input id="biz-turnover" value={business.annualTurnoverRange} onChange={(e) => updateBusiness("annualTurnoverRange", e.target.value)} style={inputStyle} />
+                                    <input id="biz-turnover" value={businessDraft?.annualTurnoverRange || ""} onChange={(e) => updateBusiness("annualTurnoverRange", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <Field label="Primary Email" id="biz-primary-email" required>
-                                    <input id="biz-primary-email" type="email" value={business.primaryEmail} onChange={(e) => updateBusiness("primaryEmail", e.target.value)} style={inputStyle} />
+                                    <input id="biz-primary-email" type="email" value={businessDraft?.primaryEmail || ""} onChange={(e) => updateBusiness("primaryEmail", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <Field label="Primary Phone" id="biz-primary-phone" required>
-                                    <input id="biz-primary-phone" value={business.primaryPhone} onChange={(e) => updateBusiness("primaryPhone", e.target.value)} style={inputStyle} />
+                                    <input id="biz-primary-phone" value={businessDraft?.primaryPhone || ""} onChange={(e) => updateBusiness("primaryPhone", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <Field label="Website" id="biz-website">
-                                    <input id="biz-website" value={business.website} onChange={(e) => updateBusiness("website", e.target.value)} style={inputStyle} />
+                                    <input id="biz-website" value={businessDraft?.website || ""} onChange={(e) => updateBusiness("website", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <Field label="Employee Count" id="biz-employee-count">
-                                    <input id="biz-employee-count" type="number" min="0" value={business.employeeCount} onChange={(e) => updateBusiness("employeeCount", e.target.value)} style={inputStyle} />
+                                    <input id="biz-employee-count" type="number" min="0" value={businessDraft?.employeeCount ?? ""} onChange={(e) => updateBusiness("employeeCount", e.target.value === "" ? null : Number(e.target.value))} style={inputStyle} />
                                 </Field>
                                 <div className="md:col-span-2">
                                     <Field label="Registered Address" id="biz-registered-address">
-                                        <textarea id="biz-registered-address" value={business.registeredAddress} onChange={(e) => updateBusiness("registeredAddress", e.target.value)} style={textareaStyle} />
+                                        <textarea id="biz-registered-address" value={businessDraft?.registeredAddress || ""} onChange={(e) => updateBusiness("registeredAddress", e.target.value)} style={textareaStyle} />
                                     </Field>
                                 </div>
                                 <Field label="Pincode" id="biz-pincode">
-                                    <input id="biz-pincode" value={business.pincode} onChange={(e) => updateBusiness("pincode", e.target.value)} style={inputStyle} />
+                                    <input id="biz-pincode" value={businessDraft?.pincode || ""} onChange={(e) => updateBusiness("pincode", e.target.value)} style={inputStyle} />
                                 </Field>
                             </div>
 
                             <div className="grid gap-4 md:grid-cols-2">
                                 <Field label="PAN Number" id="biz-pan" required>
-                                    <input id="biz-pan" value={business.panNumber} onChange={(e) => updateBusiness("panNumber", e.target.value.toUpperCase())} style={inputStyle} />
+                                    <input id="biz-pan" value={businessDraft?.panNumber || ""} onChange={(e) => updateBusiness("panNumber", e.target.value.toUpperCase())} style={inputStyle} />
                                 </Field>
                                 <Field label="State of Registration" id="biz-state">
-                                    <input id="biz-state" value={business.stateOfRegistration} onChange={(e) => updateBusiness("stateOfRegistration", e.target.value)} style={inputStyle} />
+                                    <input id="biz-state" value={businessDraft?.stateOfRegistration || ""} onChange={(e) => updateBusiness("stateOfRegistration", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <div className="flex items-center gap-3 md:col-span-2">
                                     <input
                                         id="biz-gst-registered"
                                         type="checkbox"
-                                        checked={business.gstRegistered}
+                                        checked={businessDraft?.gstRegistered || false}
                                         onChange={(e) => updateBusiness("gstRegistered", e.target.checked)}
                                     />
                                     <label htmlFor="biz-gst-registered" className="text-sm font-medium text-[#A0A0A0]">GST Registered</label>
                                 </div>
-                                <Field label="GSTIN" id="biz-gstin" required={business.gstRegistered}>
-                                    <input id="biz-gstin" value={business.gstin} onChange={(e) => updateBusiness("gstin", e.target.value.toUpperCase())} style={inputStyle} disabled={!business.gstRegistered} />
+                                <Field label="GSTIN" id="biz-gstin" required={businessDraft?.gstRegistered}>
+                                    <input id="biz-gstin" value={businessDraft?.gstin || ""} onChange={(e) => updateBusiness("gstin", e.target.value.toUpperCase())} style={inputStyle} disabled={!businessDraft?.gstRegistered} />
                                 </Field>
-                                <Field label="GST Filing Frequency" id="biz-gst-frequency" required={business.gstRegistered}>
-                                    <input id="biz-gst-frequency" value={business.gstFilingFrequency} onChange={(e) => updateBusiness("gstFilingFrequency", e.target.value)} style={inputStyle} disabled={!business.gstRegistered} />
+                                <Field label="GST Filing Frequency" id="biz-gst-frequency" required={businessDraft?.gstRegistered}>
+                                    <input id="biz-gst-frequency" value={businessDraft?.gstFilingFrequency || ""} onChange={(e) => updateBusiness("gstFilingFrequency", e.target.value)} style={inputStyle} disabled={!businessDraft?.gstRegistered} />
                                 </Field>
                                 <Field label="TAN Number" id="biz-tan">
-                                    <input id="biz-tan" value={business.tanNumber} onChange={(e) => updateBusiness("tanNumber", e.target.value.toUpperCase())} style={inputStyle} />
+                                    <input id="biz-tan" value={businessDraft?.tanNumber || ""} onChange={(e) => updateBusiness("tanNumber", e.target.value.toUpperCase())} style={inputStyle} />
                                 </Field>
                                 <Field label="CIN" id="biz-cin">
-                                    <input id="biz-cin" value={business.cin} onChange={(e) => updateBusiness("cin", e.target.value.toUpperCase())} style={inputStyle} />
+                                    <input id="biz-cin" value={businessDraft?.cin || ""} onChange={(e) => updateBusiness("cin", e.target.value.toUpperCase())} style={inputStyle} />
                                 </Field>
                                 <Field label="LLPIN" id="biz-llpin">
-                                    <input id="biz-llpin" value={business.llpin} onChange={(e) => updateBusiness("llpin", e.target.value.toUpperCase())} style={inputStyle} />
+                                    <input id="biz-llpin" value={businessDraft?.llpin || ""} onChange={(e) => updateBusiness("llpin", e.target.value.toUpperCase())} style={inputStyle} />
                                 </Field>
                                 <Field label="MSME Number" id="biz-msme">
-                                    <input id="biz-msme" value={business.msmeNumber} onChange={(e) => updateBusiness("msmeNumber", e.target.value)} style={inputStyle} />
+                                    <input id="biz-msme" value={businessDraft?.msmeNumber || ""} onChange={(e) => updateBusiness("msmeNumber", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <Field label="IEC Code" id="biz-iec">
-                                    <input id="biz-iec" value={business.iecCode} onChange={(e) => updateBusiness("iecCode", e.target.value.toUpperCase())} style={inputStyle} />
+                                    <input id="biz-iec" value={businessDraft?.iecCode || ""} onChange={(e) => updateBusiness("iecCode", e.target.value.toUpperCase())} style={inputStyle} />
                                 </Field>
                                 <Field label="Professional Tax Registration" id="biz-prof-tax">
-                                    <input id="biz-prof-tax" value={business.professionalTaxReg} onChange={(e) => updateBusiness("professionalTaxReg", e.target.value)} style={inputStyle} />
+                                    <input id="biz-prof-tax" value={businessDraft?.professionalTaxReg || ""} onChange={(e) => updateBusiness("professionalTaxReg", e.target.value)} style={inputStyle} />
                                 </Field>
                             </div>
 
                             <div className="grid gap-4 md:grid-cols-2">
                                 <div className="md:col-span-2">
                                     <Field label="Primary Activity" id="biz-primary-activity" required>
-                                        <textarea id="biz-primary-activity" value={business.primaryActivity} onChange={(e) => updateBusiness("primaryActivity", e.target.value)} style={textareaStyle} />
+                                        <textarea id="biz-primary-activity" value={businessDraft?.primaryActivity || ""} onChange={(e) => updateBusiness("primaryActivity", e.target.value)} style={textareaStyle} />
                                     </Field>
                                 </div>
                                 <Field label="Target Market" id="biz-target-market" required>
-                                    <input id="biz-target-market" value={business.targetMarket} onChange={(e) => updateBusiness("targetMarket", e.target.value)} style={inputStyle} />
+                                    <input id="biz-target-market" value={businessDraft?.targetMarket || ""} onChange={(e) => updateBusiness("targetMarket", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <Field label="Accounting Method" id="biz-accounting-method" required>
-                                    <input id="biz-accounting-method" value={business.accountingMethod} onChange={(e) => updateBusiness("accountingMethod", e.target.value)} style={inputStyle} />
+                                    <input id="biz-accounting-method" value={businessDraft?.accountingMethod || "accrual"} onChange={(e) => updateBusiness("accountingMethod", e.target.value)} style={inputStyle} />
                                 </Field>
                                 <Field label="Financial Year Start Month" id="biz-fy-start" required>
-                                    <select id="biz-fy-start" value={business.financialYearStartMonth} onChange={(e) => updateBusiness("financialYearStartMonth", e.target.value)} style={inputStyle}>
+                                    <select id="biz-fy-start" value={businessDraft?.financialYearStartMonth || "4"} onChange={(e) => updateBusiness("financialYearStartMonth", e.target.value)} style={inputStyle}>
                                         {monthOptions.map((month) => (
                                             <option key={month.value} value={month.value}>{month.label}</option>
                                         ))}
                                     </select>
                                 </Field>
                                 <Field label="Preferred Language" id="biz-language" required>
-                                    <input id="biz-language" value={business.preferredLanguage} onChange={(e) => updateBusiness("preferredLanguage", e.target.value)} style={inputStyle} />
+                                    <input id="biz-language" value={businessDraft?.preferredLanguage || "en"} onChange={(e) => updateBusiness("preferredLanguage", e.target.value)} style={inputStyle} />
+                                </Field>
+                                <Field label="Currency" id="biz-currency" required>
+                                    <select id="biz-currency" value={businessDraft?.currency || "INR"} onChange={(e) => updateBusiness("currency", e.target.value)} style={inputStyle}>
+                                        {currencyOptions.map((curr) => (
+                                            <option key={curr.value} value={curr.value}>{curr.label}</option>
+                                        ))}
+                                    </select>
                                 </Field>
                                 <div className="md:col-span-2">
                                     <Field label="Key Products / Services" id="biz-key-products" hint="Enter one product or service per line.">
-                                        <textarea id="biz-key-products" value={business.keyProductsText} onChange={(e) => updateBusiness("keyProductsText", e.target.value)} style={textareaStyle} />
+                                        <textarea id="biz-key-products" value={toLines(businessDraft?.keyProducts)} onChange={(e) => updateBusiness("keyProducts", parseLines(e.target.value))} style={textareaStyle} />
                                     </Field>
                                 </div>
                                 <div className="md:col-span-2">
                                     <Field label="Current Challenges" id="biz-current-challenges" hint="Enter one challenge per line.">
-                                        <textarea id="biz-current-challenges" value={business.currentChallengesText} onChange={(e) => updateBusiness("currentChallengesText", e.target.value)} style={textareaStyle} />
+                                        <textarea id="biz-current-challenges" value={toLines(businessDraft?.currentChallenges)} onChange={(e) => updateBusiness("currentChallenges", parseLines(e.target.value))} style={textareaStyle} />
                                     </Field>
                                 </div>
                             </div>
                         </div>
 
                         <div className="mt-6 flex justify-end">
-                            <button onClick={() => handleSave("Business")} className="mo-btn-primary flex items-center gap-2" disabled={loading || savingBusiness}>
-                                <Save className="h-4 w-4" /> {savingBusiness ? "Saving..." : "Save Business"}
+                            <button
+                                onClick={handleSaveBusiness}
+                                disabled={savingBySection?.business || !settings?.permissions?.canEditBusiness}
+                                className="mo-btn-primary flex items-center gap-2"
+                                title={!settings?.permissions?.canEditBusiness ? "Only the owner can edit business settings" : ""}
+                            >
+                                <Save className="h-4 w-4" /> {savingBySection?.business ? "Saving..." : "Save Business"}
                             </button>
                         </div>
                     </div>
@@ -480,7 +494,7 @@ export default function SettingsPage() {
                         <h2 className="mo-h2 mb-1">Notification Preferences</h2>
                         <p className="mo-text-secondary mb-6">Choose when you want to be notified</p>
                         <div className="space-y-4">
-                            {Object.entries(notifications).map(([key, enabled]) => {
+                            {Object.entries(notificationsDraft || {}).map(([key, enabled]) => {
                                 const labels = {
                                     invoiceDue: { title: "Invoice Due Reminders", desc: "Get notified when invoices are about to be due" },
                                     paymentReceived: { title: "Payment Received", desc: "Get notified when a payment is received" },
@@ -489,6 +503,7 @@ export default function SettingsPage() {
                                     systemAlerts: { title: "System Alerts", desc: "Important system and security notifications" },
                                 };
                                 const info = labels[key];
+                                if (!info) return null;
 
                                 return (
                                     <div key={key} className="flex items-center justify-between p-4 bg-[#111111] rounded-xl border border-[#2A2A2A]">
@@ -499,7 +514,7 @@ export default function SettingsPage() {
                                         <button
                                             role="switch"
                                             aria-checked={enabled}
-                                            onClick={() => setNotifications((prev) => ({ ...prev, [key]: !prev[key] }))}
+                                            onClick={() => setNotificationsDraft((prev) => ({ ...prev, [key]: !prev[key] }))}
                                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enabled ? "bg-[#4CBB17]" : "bg-[#2A2A2A]"}`}
                                         >
                                             <span className={`inline-block h-4 w-4 transform rounded-full bg-black transition-transform ${enabled ? "translate-x-6" : "translate-x-1"}`} />
@@ -509,8 +524,12 @@ export default function SettingsPage() {
                             })}
                         </div>
                         <div className="mt-6 flex justify-end">
-                            <button onClick={() => handleSave("Notifications")} className="mo-btn-primary flex items-center gap-2">
-                                <Save className="h-4 w-4" /> Save Preferences
+                            <button
+                                onClick={handleSaveNotifications}
+                                disabled={savingBySection?.notifications}
+                                className="mo-btn-primary flex items-center gap-2"
+                            >
+                                <Save className="h-4 w-4" /> {savingBySection?.notifications ? "Saving..." : "Save Preferences"}
                             </button>
                         </div>
                     </div>
@@ -527,9 +546,95 @@ export default function SettingsPage() {
                                 are managed through the Clerk user portal.
                             </p>
                         </div>
+
+                        <div className="mt-6 rounded-xl border border-[#CD1C1840] bg-[#CD1C180F] p-5">
+                            <div className="flex items-start gap-3">
+                                <div className="mt-0.5 rounded-full bg-[#CD1C1820] p-2">
+                                    <AlertTriangle className="h-4 w-4 text-[#FF8A80]" />
+                                </div>
+                                <div className="flex-1">
+                                    <h3 className="text-sm font-semibold text-white">Delete Account</h3>
+                                    <p className="mt-1 text-sm text-[#A0A0A0]">
+                                        This permanently deletes {businessDraft?.legalName || "your business account"} and removes
+                                        its team, clients, invoices, transactions, documents, and related workspace records
+                                        from the database.
+                                    </p>
+                                    <p className="mt-2 text-sm text-[#FF8A80]">
+                                        Only the workspace owner can do this, and the team security code is required.
+                                        After deletion, the next login goes back to onboarding because the old workspace no longer exists.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="mt-5 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={() => setDeleteDialogOpen(true)}
+                                    disabled={!orgId || !userId}
+                                    className="flex items-center gap-2 rounded-lg bg-[#CD1C18] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#B71C1C] disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    <Trash2 className="h-4 w-4" />
+                                    Delete Account
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </TabsContent>
             </Tabs>
         </div>
+
+        <Dialog open={deleteDialogOpen} onOpenChange={handleDeleteDialogChange}>
+            <DialogContent className="border-[#2A2A2A] bg-[#111111] text-white sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Permanently Delete Account</DialogTitle>
+                    <DialogDescription className="text-[#A0A0A0]">
+                        Enter the team security code to permanently delete this account from the database.
+                        This action cannot be undone.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="rounded-xl border border-[#CD1C1840] bg-[#CD1C1810] p-4 text-sm text-[#FFB4B1]">
+                    Deleting this account removes the workspace, team members, clients, invoices, transactions,
+                    documents, audit history, and related organization records. The next sign-in will be treated as
+                    a fresh onboarding flow.
+                </div>
+
+                <div className="grid gap-2">
+                    <label htmlFor="delete-account-security-code" className="text-sm font-medium text-[#A0A0A0]">
+                        Team Security Code
+                    </label>
+                    <input
+                        id="delete-account-security-code"
+                        type="password"
+                        value={deleteTeamActionCode}
+                        onChange={(e) => setDeleteTeamActionCode(e.target.value)}
+                        placeholder="Enter team security code"
+                        style={inputStyle}
+                        autoFocus
+                    />
+                </div>
+
+                <DialogFooter className="gap-2 sm:justify-end">
+                    <button
+                        type="button"
+                        onClick={() => handleDeleteDialogChange(false)}
+                        className="mo-btn-secondary"
+                        disabled={deletingAccount}
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleDeleteAccount}
+                        disabled={deletingAccount}
+                        className="flex items-center justify-center gap-2 rounded-lg bg-[#CD1C18] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#B71C1C] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        <Trash2 className="h-4 w-4" />
+                        {deletingAccount ? "Deleting..." : "Delete Permanently"}
+                    </button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+        </>
     );
 }

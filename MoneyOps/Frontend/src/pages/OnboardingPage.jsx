@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Building2, Users, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
 import { useUser } from "@clerk/clerk-react";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import { consumeDeletedAccountNotice } from "@/lib/accountDeletionNotice";
 
 import { BusinessInfoStep } from "@/components/onboarding/BusinessInfoStep";
 import { RegulatoryInfoStep } from "@/components/onboarding/RegulatoryInfoStep";
@@ -17,10 +19,16 @@ const STEP_SEQUENCES = {
 
 export default function OnboardingPage() {
     const { user } = useUser();
+    const { statusMessage, refetch } = useOnboardingStatus();
     const [mode, setMode] = useState("choose");
     const [currentStep, setCurrentStep] = useState("welcome");
     const [formData, setFormData] = useState({});
     const [loading, setLoading] = useState(false);
+    const [deletedAccountNotice, setDeletedAccountNotice] = useState(null);
+
+    useEffect(() => {
+        setDeletedAccountNotice(consumeDeletedAccountNotice());
+    }, []);
 
     const steps = STEP_SEQUENCES[mode] ?? [];
     const currentStepIndex = steps.indexOf(currentStep);
@@ -73,9 +81,9 @@ export default function OnboardingPage() {
                 body: JSON.stringify(payload),
             });
             if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || "Failed to complete onboarding");
+                throw new Error(await readErrorMessage(response));
             }
+            await refetch();
             toast.success("Onboarding completed! Redirecting to dashboard…");
             setTimeout(() => { window.location.href = "/analytics"; }, 1500);
         } catch (error) {
@@ -89,6 +97,14 @@ export default function OnboardingPage() {
     // ── Welcome screen ────────────────────────────────────────────────────────
 
     if (currentStep === "welcome") {
+        const recoveryMessage = deletedAccountNotice
+            ? `Your previous workspace${deletedAccountNotice.businessName ? ` (${deletedAccountNotice.businessName})` : ""} was permanently deleted. This onboarding screen is expected after account deletion. Create or join a business to continue.`
+            : statusMessage?.toLowerCase().includes("unable to verify")
+                ? statusMessage
+                : statusMessage?.toLowerCase().includes("workspace unavailable")
+                    ? "We could not find an active workspace for this account. You can create a new business or join an existing one to continue."
+                    : "";
+
         return (
             <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#000000" }}>
                 <div className="w-full max-w-4xl">
@@ -103,6 +119,13 @@ export default function OnboardingPage() {
                         <h1 className="text-4xl font-bold text-white mb-3">Welcome to MoneyOps!</h1>
                         <p className="text-[#A0A0A0] text-lg">Let's get you set up. Choose an option to continue.</p>
                     </div>
+
+                    {recoveryMessage ? (
+                        <div className="mb-6 rounded-2xl border border-[#FFB30040] bg-[#FFB30012] px-5 py-4 text-left">
+                            <p className="text-sm font-semibold text-[#FFD166]">Workspace Status</p>
+                            <p className="mt-1 text-sm leading-6 text-[#E5E7EB]">{recoveryMessage}</p>
+                        </div>
+                    ) : null}
 
                     {/* Mode cards */}
                     <div className="grid gap-6 md:grid-cols-2">
@@ -197,4 +220,19 @@ export default function OnboardingPage() {
             </div>
         </div>
     );
+}
+
+async function readErrorMessage(response) {
+    const fallback = "Failed to complete onboarding";
+    const text = await response.text();
+    if (!text) {
+        return fallback;
+    }
+
+    try {
+        const payload = JSON.parse(text);
+        return payload.message || payload.error || payload.data?.message || fallback;
+    } catch {
+        return text;
+    }
 }

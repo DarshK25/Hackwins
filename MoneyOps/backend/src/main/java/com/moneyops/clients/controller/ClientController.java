@@ -1,6 +1,5 @@
 // src/main/java/com/moneyops/clients/controller/ClientController.java
 package com.moneyops.clients.controller;
-
 import com.moneyops.clients.dto.ClientDto;
 import com.moneyops.clients.service.ClientService;
 import com.moneyops.shared.utils.OrgContext;

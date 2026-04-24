@@ -21,6 +21,7 @@ public class TeamInvite {
     
     private String email;
     private String orgId;
+    private String invitedByUserId;
     private String role;
     
     @Indexed(unique = true)

@@ -4,7 +4,6 @@ import lombok.Data;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.index.Indexed;
-import jakarta.annotation.PostConstruct;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -39,8 +38,12 @@ public class AuditLog {
     @Indexed
     private LocalDateTime timestamp;
 
-    @PostConstruct
-    public void generateId() {
+    /**
+     * Auto-populate ID and timestamp before first save.
+     * Using a regular method instead of @PostConstruct since entities
+     * are not Spring-managed beans.
+     */
+    public AuditLog() {
         if (this.id == null) {
             this.id = UUID.randomUUID().toString();
         }

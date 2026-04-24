@@ -2,6 +2,7 @@
 package com.moneyops.auth.security;
 
 import com.moneyops.shared.utils.OrgContext;
+import com.moneyops.shared.utils.RequestContext;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -56,6 +57,10 @@ public class JwtFilter extends OncePerRequestFilter {
 
             SecurityContextHolder.getContext().setAuthentication(authentication);
 
+            // Populate request metadata for audit logging
+            RequestContext.setIpAddress(RequestContext.resolveIp(request));
+            RequestContext.setUserAgent(request.getHeader("User-Agent"));
+
             try {
                 // Production-level Security: Derive orgId from User record, not from potentially faked headers.
                 // This ensures multi-tenant isolation is strictly maintained.
@@ -99,6 +104,7 @@ public class JwtFilter extends OncePerRequestFilter {
                 filterChain.doFilter(request, response);
             } finally {
                 OrgContext.clear();
+                RequestContext.clear();
             }
         } else {
             // Fallback: If no valid internal token, check for a Clerk ID in headers for development/onboarding flow
@@ -107,6 +113,9 @@ public class JwtFilter extends OncePerRequestFilter {
 
             if (userIdHeader != null) {
                 try {
+                    // Populate request metadata for audit logging
+                    RequestContext.setIpAddress(RequestContext.resolveIp(request));
+                    RequestContext.setUserAgent(request.getHeader("User-Agent"));
                     final String idStr = userIdHeader;
                     var userOpt = userRepository.findByClerkIdAndDeletedAtIsNull(idStr);
                     
@@ -135,6 +144,7 @@ public class JwtFilter extends OncePerRequestFilter {
                     filterChain.doFilter(request, response);
                 } finally {
                     OrgContext.clear();
+                    RequestContext.clear();
                 }
             } else {
                 filterChain.doFilter(request, response);

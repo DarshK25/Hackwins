@@ -61,6 +61,7 @@ public class SecurityConfig {
                 "/api/invites/**",
                 "/api/documents/**",
                 "/api/invoices/**",
+                "/api/orchestrator/**",
                 "/oauth2/**",
                 "/swagger-ui/**",
                 "/v3/api-docs/**"

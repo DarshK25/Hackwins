@@ -76,6 +76,7 @@ public class BusinessOrganization {
     private String accountingMethod;
     private Integer fyStartMonth;
     private String preferredLanguage;
+    private String currency = "INR";
 
     // ── Audit ──────────────────────────────────────────────────────────────────
     @CreatedDate

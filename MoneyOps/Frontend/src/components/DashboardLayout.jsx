@@ -7,7 +7,8 @@ import { useCallback } from "react"
 
 const PAGE_TITLES = {
     "/analytics": "Overview",
-    "/finances": "Bank Accounts",
+    "/finances": "Expenses",
+    "/expenses": "Expenses",
     "/transactions": "Transactions",
     "/invoices": "Invoices",
     "/clients": "Clients",
@@ -40,6 +41,8 @@ export default function DashboardLayout() {
             window.dispatchEvent(new CustomEvent("voice:invoice-created"));
         } else if (action.type === "client_created") {
             window.dispatchEvent(new CustomEvent("voice:client-created"));
+        } else if (action.type === "expense_created") {
+            window.dispatchEvent(new CustomEvent("voice:expense-created"));
         }
     }, []);
 

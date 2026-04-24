@@ -22,10 +22,12 @@ public class TransactionMapper {
         dto.setCategory(transaction.getCategory());
         dto.setDescription(transaction.getDescription());
         dto.setPaymentMethod(transaction.getPaymentMethod());
+        dto.setReceiptUrl(transaction.getReceiptUrl());
         dto.setReferenceNumber(transaction.getReferenceNumber());
         dto.setAiCategory(transaction.getAiCategory());
         dto.setAiConfidence(transaction.getAiConfidence());
         dto.setIdempotencyKey(transaction.getIdempotencyKey());
+        dto.setStatus(transaction.getStatus());
         dto.setVoiceContext(transaction.getVoiceContext());
         return dto;
     }
@@ -47,10 +49,14 @@ public class TransactionMapper {
         transaction.setCategory(dto.getCategory());
         transaction.setDescription(dto.getDescription());
         transaction.setPaymentMethod(dto.getPaymentMethod());
+        transaction.setReceiptUrl(dto.getReceiptUrl());
         transaction.setReferenceNumber(dto.getReferenceNumber());
         transaction.setAiCategory(dto.getAiCategory());
         transaction.setAiConfidence(dto.getAiConfidence());
         transaction.setIdempotencyKey(dto.getIdempotencyKey());
+        if (dto.getStatus() != null) {
+            transaction.setStatus(dto.getStatus());
+        }
         transaction.setVoiceContext(dto.getVoiceContext());
         return transaction;
     }

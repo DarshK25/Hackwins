@@ -17,7 +17,7 @@ import { Plus, Trash, ArrowLeft, Loader2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useUser } from "@clerk/clerk-react";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
-import { getRememberedTeamSecurityCode, rememberTeamSecurityCode } from "@/lib/teamSecurityCode";
+import { getTeamSecurityAttemptState } from "@/lib/teamSecurityAttempts";
 
 const BLANK_ITEM = { description: "", quantity: 1, rate: 0, gstPercent: 18, isService: false };
 const BLANK_CLIENT = { name: "", email: "", phone: "", company: "", gstin: "", address: "", teamActionCode: "", source: "MANUAL" };
@@ -56,6 +56,8 @@ export default function NewInvoicePage() {
     const [clientDialogOpen, setClientDialogOpen] = useState(false);
     const [savingClient, setSavingClient] = useState(false);
     const [teamActionCode, setTeamActionCode] = useState("");
+    const [invoiceCodeAttempts, setInvoiceCodeAttempts] = useState(0);
+    const [clientCodeAttempts, setClientCodeAttempts] = useState(0);
     const [newClientData, setNewClientData] = useState(BLANK_CLIENT);
     const [formData, setFormData] = useState({
         clientId: "",
@@ -70,15 +72,6 @@ export default function NewInvoicePage() {
             fetchClients();
         }
     }, [internalUserId, internalOrgId]);
-
-    useEffect(() => {
-        if (!internalOrgId) return;
-        setTeamActionCode(getRememberedTeamSecurityCode(internalOrgId));
-        setNewClientData((prev) => ({
-            ...prev,
-            teamActionCode: getRememberedTeamSecurityCode(internalOrgId),
-        }));
-    }, [internalOrgId]);
 
     const fetchClients = async () => {
         try {
@@ -115,13 +108,26 @@ export default function NewInvoicePage() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.message || "Failed to create client");
             toast.success("Client created successfully");
-            rememberTeamSecurityCode(internalOrgId, newClientData.teamActionCode);
+            setClientCodeAttempts(0);
             setClientDialogOpen(false);
-            setNewClientData({ ...BLANK_CLIENT, teamActionCode: getRememberedTeamSecurityCode(internalOrgId) });
+            setNewClientData(BLANK_CLIENT);
             await fetchClients();
             // Client API returns ClientDto directly
             setFormData((prev) => ({ ...prev, clientId: data.id, customerName: data.name }));
         } catch (error) {
+            const attempt = getTeamSecurityAttemptState(error, clientCodeAttempts);
+            if (attempt.isSecurityCodeError) {
+                toast.error(attempt.message);
+                setNewClientData((current) => ({ ...current, teamActionCode: "" }));
+                if (attempt.shouldCancel) {
+                    setClientDialogOpen(false);
+                    setNewClientData(BLANK_CLIENT);
+                    setClientCodeAttempts(0);
+                } else {
+                    setClientCodeAttempts(attempt.nextAttempts);
+                }
+                return;
+            }
             toast.error(error?.message || "Failed to create client");
         } finally { setSavingClient(false); }
     };
@@ -219,9 +225,24 @@ export default function NewInvoicePage() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.message || "Failed to create invoice");
             toast.success("Invoice created successfully");
-            rememberTeamSecurityCode(internalOrgId, teamActionCode);
+            setInvoiceCodeAttempts(0);
+            setTeamActionCode("");
             navigate("/invoices");
-        } catch (error) { toast.error(error?.message || "Failed to create invoice"); }
+        } catch (error) {
+            const attempt = getTeamSecurityAttemptState(error, invoiceCodeAttempts);
+            if (attempt.isSecurityCodeError) {
+                toast.error(attempt.message);
+                setTeamActionCode("");
+                if (attempt.shouldCancel) {
+                    setInvoiceCodeAttempts(0);
+                    setPreviewData(null);
+                } else {
+                    setInvoiceCodeAttempts(attempt.nextAttempts);
+                }
+                return;
+            }
+            toast.error(error?.message || "Failed to create invoice");
+        }
         finally { setLoading(false); }
     };
 
@@ -275,7 +296,11 @@ export default function NewInvoicePage() {
                                     <button
                                         type="button"
                                         className="px-3 py-2 rounded-lg border border-[#2A2A2A] text-[#A0A0A0] hover:text-[#4CBB17] hover:border-[#4CBB17] transition-all"
-                                        onClick={() => setClientDialogOpen(true)}
+                                        onClick={() => {
+                                            setNewClientData(BLANK_CLIENT);
+                                            setClientCodeAttempts(0);
+                                            setClientDialogOpen(true);
+                                        }}
                                         title="Add new client"
                                     >
                                         <UserPlus className="h-4 w-4" />
@@ -414,6 +439,9 @@ export default function NewInvoicePage() {
                                 <label className="text-sm font-medium text-[#A0A0A0] block">Team Security Code *</label>
                                 <DarkInput
                                     type="password"
+                                    autoComplete="new-password"
+                                    data-lpignore="true"
+                                    data-1p-ignore="true"
                                     value={teamActionCode}
                                     onChange={(e) => setTeamActionCode(e.target.value)}
                                     placeholder="Enter team security code"
@@ -433,7 +461,16 @@ export default function NewInvoicePage() {
             </div>
 
             {/* ── Create Client Dialog ──────────────────────────────────────── */}
-            <Dialog open={clientDialogOpen} onOpenChange={setClientDialogOpen}>
+            <Dialog
+                open={clientDialogOpen}
+                onOpenChange={(open) => {
+                    setClientDialogOpen(open);
+                    if (!open) {
+                        setNewClientData(BLANK_CLIENT);
+                        setClientCodeAttempts(0);
+                    }
+                }}
+            >
                 <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto bg-[#111111] border-[#2A2A2A]">
                     <DialogHeader>
                         <DialogTitle className="text-white">Create New Client</DialogTitle>
@@ -452,6 +489,9 @@ export default function NewInvoicePage() {
                                 <DarkInput
                                     id={id}
                                     type={type || "text"}
+                                    autoComplete={field === "teamActionCode" ? "new-password" : "off"}
+                                    data-lpignore={field === "teamActionCode" ? "true" : undefined}
+                                    data-1p-ignore={field === "teamActionCode" ? "true" : undefined}
                                     value={newClientData[field]}
                                     onChange={(e) => setNewClientData((p) => ({ ...p, [field]: field === "gstin" ? e.target.value.toUpperCase() : e.target.value }))}
                                     placeholder={placeholder}

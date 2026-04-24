@@ -27,6 +27,8 @@ class Intent(str, Enum):
     # Transaction & Payment operations
     TRANSACTION_QUERY = "TRANSACTION_QUERY"
     TRANSACTION_CREATE = "TRANSACTION_CREATE"
+    EXPENSE_CREATE = "EXPENSE_CREATE"
+    EXPENSE_QUERY = "EXPENSE_QUERY"
     PAYMENT_RECORD = "PAYMENT_RECORD"
     PAYMENT_QUERY = "PAYMENT_QUERY"
     BALANCE_CHECK = "BALANCE_CHECK"
@@ -310,6 +312,18 @@ INTENT_REQUIREMENTS: Dict[Intent, IntentRequirements] = {
         optional_entities=["date", "notes", "category", "payment_method", "invoice_id"],
         requires_user_confirmation=True,
         primary_agent=AgentType.FINANCE_AGENT,
+    ),
+    Intent.EXPENSE_CREATE: IntentRequirements(
+        required_entities=["amount", "category"],
+        optional_entities=["date", "description", "payment_method"],
+        requires_user_confirmation=False,
+        primary_agent=AgentType.FINANCE_AGENT,
+        requires_multi_turn=True,
+    ),
+    Intent.EXPENSE_QUERY: IntentRequirements(
+        optional_entities=["category", "date_range", "time_period"],
+        primary_agent=AgentType.FINANCE_AGENT,
+        requires_historical_data=True,
     ),
     Intent.TRANSACTION_QUERY: IntentRequirements(
         optional_entities=["date_range", "type", "category", "account"],

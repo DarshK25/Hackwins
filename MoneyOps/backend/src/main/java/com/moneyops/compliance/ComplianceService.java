@@ -9,6 +9,9 @@ import com.moneyops.invoices.entity.InvoiceStatus;
 import com.moneyops.invoices.repository.InvoiceRepository;
 import com.moneyops.transactions.entity.Transaction;
 import com.moneyops.transactions.repository.TransactionRepository;
+import com.moneyops.organizations.entity.RegulatoryProfile;
+import com.moneyops.organizations.repository.RegulatoryProfileRepository;
+import com.moneyops.compliance.dto.ComplianceSummaryDTO;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -31,6 +34,7 @@ public class ComplianceService {
     private final ClientRepository clientRepository;
     private final DocumentRepository documentRepository;
     private final TransactionRepository transactionRepository;
+    private final RegulatoryProfileRepository regulatoryProfileRepository;
 
     @Data
     public static class DeadlineDTO {
@@ -192,6 +196,61 @@ public class ComplianceService {
         response.setAuditReadiness(auditReadiness);
         response.setGeneratedAt(today.toString());
         return response;
+    }
+
+    public ComplianceSummaryDTO getComplianceSummary(String orgId) {
+        if (orgId == null || orgId.isBlank()) return ComplianceSummaryDTO.builder().build();
+
+        List<Invoice> invoices = invoiceRepository.findAllByOrgIdAndDeletedAtIsNull(orgId);
+        long totalInvoices = invoices.size();
+        long paidInvoices = invoices.stream().filter(i -> i.getStatus() == InvoiceStatus.PAID).count();
+        long overdueInvoices = invoices.stream().filter(i -> i.getStatus() == InvoiceStatus.OVERDUE).count();
+
+        // Calculate GST collected this FY
+        int currentYear = LocalDate.now().getYear();
+        int fyStartYear = LocalDate.now().getMonthValue() >= 4 ? currentYear : currentYear - 1;
+        LocalDate fyStart = LocalDate.of(fyStartYear, 4, 1);
+        
+        BigDecimal totalGst = invoices.stream()
+                .filter(i -> i.getStatus() != InvoiceStatus.DRAFT)
+                .filter(i -> i.getIssueDate() != null && !i.getIssueDate().isBefore(fyStart))
+                .map(i -> i.getGstTotal() != null ? i.getGstTotal() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        RegulatoryProfile profile = regulatoryProfileRepository.findByOrgIdAndDeletedAtIsNull(orgId).orElse(null);
+        List<String> missingFields = new ArrayList<>();
+        double completeness = 0.0;
+        int totalFields = 5;
+        int filledFields = 0;
+
+        if (profile != null) {
+            if (profile.getGstNumber() != null && !profile.getGstNumber().isBlank()) filledFields++;
+            else missingFields.add("GSTIN is missing. Update your regulatory profile.");
+
+            if (profile.getPanNumber() != null && !profile.getPanNumber().isBlank()) filledFields++;
+            else missingFields.add("PAN is missing. Tax filings may be blocked.");
+
+            if (profile.getTanNumber() != null && !profile.getTanNumber().isBlank()) filledFields++;
+            else missingFields.add("TAN is missing.");
+
+            if (profile.getCinOrLlpIn() != null && !profile.getCinOrLlpIn().isBlank()) filledFields++;
+            else missingFields.add("CIN/LLPIN is missing.");
+
+            if (profile.getMsmeNumber() != null && !profile.getMsmeNumber().isBlank()) filledFields++;
+        } else {
+            missingFields.add("Regulatory Profile is missing. Please complete your organization setup.");
+        }
+
+        completeness = ((double) filledFields / totalFields) * 100.0;
+
+        return ComplianceSummaryDTO.builder()
+                .totalInvoices(totalInvoices)
+                .paidInvoices(paidInvoices)
+                .overdueInvoices(overdueInvoices)
+                .totalGstCollected(totalGst)
+                .regulatoryCompletenessPercentage(completeness)
+                .missingComplianceFields(missingFields)
+                .build();
     }
 
     public TdsCalculationResponse calculateTds(TdsCalcRequest request) {

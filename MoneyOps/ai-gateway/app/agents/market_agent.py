@@ -14,6 +14,12 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.agents.base_agent import BaseAgent, AgentResponse, ToolDefinition
 from app.schemas.intents import Intent, AgentType
 from app.adapters.backend_adapter import get_backend_adapter
+from app.services.market_intelligence_service import (
+    get_business_snapshot,
+    get_cached_market_intelligence,
+    get_market_intelligence_payload,
+    set_cached_market_intelligence,
+)
 from app.tools.tool_registry import Tool, tool_registry
 from app.tools.market_intelligence import (
     fetch_market_news,
@@ -65,7 +71,6 @@ async def _groq_chat(prompt: str, max_tokens: int = 400) -> str:
 
 # ── In-memory market_agent cache ───────────────────────────────────────
 # Stores latest market snapshots per org_uuid
-_market_cache: Dict[str, Dict[str, Any]] = {}
 
 
 class MarketAgent(BaseAgent):
@@ -89,7 +94,8 @@ class MarketAgent(BaseAgent):
         logger.info({"event": "market_agent_initialized"})
 
     def get_agent_type(self) -> AgentType:
-        return AgentType.MARKET_AGENT
+        # We expose this implementation as the production strategy agent.
+        return AgentType.STRATEGY_AGENT
 
     def get_supported_intents(self) -> List[Intent]:
         return [
@@ -230,18 +236,19 @@ class MarketAgent(BaseAgent):
             competitors = results[1]
 
             # Cache result
-            _market_cache[org_uuid] = {
+            cached_payload = {
                 "timestamp": datetime.now().isoformat(),
                 "industry": industry,
                 "news": news if not isinstance(news, Exception) else {},
                 "competitors": competitors if not isinstance(competitors, Exception) else {},
                 "geopolitical": {},
             }
+            set_cached_market_intelligence(org_uuid, cached_payload)
 
             logger.info({
                 "event": "market_cache_updated",
                 "org_uuid": org_uuid,
-                "timestamp": _market_cache[org_uuid]["timestamp"]
+                "timestamp": cached_payload["timestamp"]
             })
 
         except Exception as e:
@@ -249,61 +256,28 @@ class MarketAgent(BaseAgent):
 
     def get_cached_intelligence(self, org_uuid: str) -> Optional[Dict]:
         """Get latest cached market data for an org"""
-        return _market_cache.get(org_uuid)
+        return get_cached_market_intelligence(org_uuid)
 
     # ── Business Context Fetcher ───────────────────────────────────
 
     async def _get_business_snapshot(self, context) -> Dict[str, Any]:
         """Fetch all business data in parallel for context injection"""
-        try:
-            org_uuid = context.org_uuid if hasattr(context, 'org_uuid') else context.get("org_uuid", "")
-            user_id = context.user_id if hasattr(context, 'user_id') else context.get("user_id", "")
-            business_id = context.business_id if hasattr(context, 'business_id') else context.get("business_id", "default")
+        org_uuid = context.org_uuid if hasattr(context, 'org_uuid') else context.get("org_uuid", "")
+        user_id = context.user_id if hasattr(context, 'user_id') else context.get("user_id", "")
+        business_id = context.business_id if hasattr(context, 'business_id') else context.get("business_id", 1)
+        return await get_business_snapshot(
+            org_uuid=org_uuid,
+            business_id=int(business_id or 1),
+            user_id=user_id,
+        )
 
-            metrics_task = self.backend.get_finance_metrics(business_id, org_uuid, user_id)
-            invoices_task = self.backend._request("GET", "/api/invoices", org_id=org_uuid, user_id=user_id)
-            clients_task = self.backend.get_clients(org_uuid)
-
-            results = await asyncio.gather(
-                metrics_task, invoices_task, clients_task,
-                return_exceptions=True
-            )
-            
-            metrics_resp = results[0]
-            invoices_resp = results[1]
-            clients = results[2]
-
-            m = {}
-            if not isinstance(metrics_resp, Exception) and metrics_resp.success:
-                m = metrics_resp.data or {}
-
-            invoices = []
-            if not isinstance(invoices_resp, Exception) and invoices_resp.success:
-                invoices = invoices_resp.data or []
-
-            clients_list = clients if not isinstance(clients, Exception) else []
-
-            overdue = [i for i in invoices if i.get("status") == "OVERDUE"]
-            paid = [i for i in invoices if i.get("status") == "PAID"]
-            pending = [i for i in invoices if i.get("status") in ("DRAFT", "SENT")]
-
-            return {
-                "revenue": m.get("revenue", 0),
-                "expenses": m.get("expenses", 0),
-                "net_profit": m.get("netProfit", 0),
-                "total_clients": len(clients_list or []),
-                "total_invoices": len(invoices),
-                "paid_count": len(paid),
-                "pending_count": len(pending),
-                "overdue_count": len(overdue),
-                "overdue_amount": sum(float(i.get("totalAmount", 0)) for i in overdue),
-                "profit_margin": round(
-                    (m.get("netProfit", 0) / m.get("revenue", 1)) * 100, 1
-                ) if m.get("revenue", 0) > 0 else 0,
-            }
-        except Exception as e:
-            logger.error({"event": "business_snapshot_error", "error": str(e)})
-            return {}
+    def _infer_market_topic(self, text: str) -> str:
+        lowered = (text or "").lower()
+        if any(keyword in lowered for keyword in ("news", "headline", "latest", "live", "war", "crude oil", "oil price")):
+            return "news"
+        if any(keyword in lowered for keyword in ("growth", "opportunit", "expand", "scale")):
+            return "growth"
+        return "overview"
 
     async def handle_market_query(self, text: str, context, conversation_history: list = None) -> AgentResponse:
         """Main entry point for strategic market queries in voice path"""
@@ -322,14 +296,21 @@ class MarketAgent(BaseAgent):
         business_id = context.business_id if hasattr(context, 'business_id') else context.get("business_id", "default")
         self.start_market_monitor(org_uuid, business_id)
 
-        # 2. Get business snapshot
-        snapshot = await self._get_business_snapshot(context)
-
-        # 3. Get cached market data
-        market_data = _market_cache.get(org_uuid, {})
+        # 2. Reuse the same market intelligence payload used by the Market Research page
+        topic = self._infer_market_topic(text)
+        payload = await get_market_intelligence_payload(
+            org_uuid=org_uuid,
+            business_id=int(business_id or 1),
+            user_id=context.user_id if hasattr(context, "user_id") else context.get("user_id", ""),
+            user_query=text,
+            topic=topic,
+            force_refresh=topic == "news",
+        )
+        snapshot = payload.get("snapshot", {})
+        market_data = payload.get("market", {})
 
         # 4. Synthesize strategy response
-        prompt = self._build_strategy_prompt(text, snapshot, market_data, history_str)
+        prompt = self._build_strategy_prompt(text, snapshot, market_data, history_str, topic)
 
         # Synthesize via Groq
         response_text = await _groq_chat(prompt, max_tokens=350)
@@ -363,7 +344,7 @@ class MarketAgent(BaseAgent):
         # Default from client names if available
         return "professional services"
 
-    def _build_strategy_prompt(self, user_query, snapshot, market_data, history_str=""):
+    def _build_strategy_prompt(self, user_query, snapshot, market_data, history_str="", topic="overview"):
         """Construct the prompt for Groq strategy synthesis"""
         news_answer = market_data.get("news", {}).get("answer", "No recent news found.")
         news_list = market_data.get("news", {}).get("news", [])
@@ -371,6 +352,11 @@ class MarketAgent(BaseAgent):
         competitor_moves = market_data.get("competitors", {}).get("recent_moves", "No specific competitor moves detected.")
         geo_answer = market_data.get("geopolitical", {}).get("answer", "No specific geopolitical data available.")
         opportunities = market_data.get("opportunities", {}).get("opportunities", "No specific opportunities detected.")
+        focus_instruction = {
+            "news": "Focus on the latest market news and its business impact. Do not drift into generic growth advice unless the user asked for growth.",
+            "growth": "Focus on the strongest growth opportunities and use only the most relevant news signal as support.",
+            "overview": "Balance news, risks, and growth opportunities based on the user's question.",
+        }.get(topic, "Answer directly and stay tightly aligned with the user's question.")
 
         return f"""
 ROLE: You are the MoneyOps Market Intelligence Agent. You provide world-class, McKinsey-level strategic advice based on LIVE market data and EXACT business metrics.
@@ -415,6 +401,7 @@ INSTRUCTIONS:
 - Keep it under 4 sentences — this will be spoken via voice.
 - Do NOT say "based on the data provided" — speak as if you know this business intimately.
 - Be direct, confident, and professional.
+- {focus_instruction}
 """
 
     # ── Intent-specific handlers ───────────────────────────────────

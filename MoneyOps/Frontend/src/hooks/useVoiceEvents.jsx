@@ -18,6 +18,10 @@ export function useVoiceEvents() {
         const message = JSON.parse(raw);
         console.log("[VoiceEvents] Parsed message:", message);
 
+        if (topic === "gateway_results" && message?.type === "conversation_update") {
+          window.dispatchEvent(new CustomEvent("voice:conversation_update", { detail: message }));
+        }
+
         // Handle direct UI events
         if (topic === "ui_events" && message.type === "moneyops_ui_event") {
           dispatchUIEvent(message.payload, navigate);
@@ -71,6 +75,24 @@ function dispatchUIEvent(event, navigate) {
         className: "bg-[#111] border border-white/10 text-white"
       }
     );
+    window.dispatchEvent(new CustomEvent("voice:invoice-created", { detail: event }));
+    return;
+  }
+
+  if (type === "expense_created") {
+    toast.success(
+      <div className="flex flex-col gap-1">
+        <span className="font-semibold text-sm">Expense Recorded</span>
+        <span className="text-xs text-white/70">{event.description || event.category || "Expense saved"}</span>
+        <span className="text-xs font-semibold">Rs {Number(event.amount || 0).toLocaleString("en-IN")}</span>
+      </div>,
+      {
+        duration: 6000,
+        id: "expense-created",
+        className: "bg-[#111] border border-white/10 text-white"
+      }
+    );
+    window.dispatchEvent(new CustomEvent("voice:expense-created", { detail: event }));
     return;
   }
 

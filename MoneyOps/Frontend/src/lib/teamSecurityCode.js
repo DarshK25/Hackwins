@@ -1,15 +1,15 @@
 const teamSecurityCodeStorageKey = (orgId) => `moneyops.teamSecurityCode.${orgId}`;
 
 export function getRememberedTeamSecurityCode(orgId) {
-    if (!orgId || typeof window === "undefined") return "";
-    return window.localStorage.getItem(teamSecurityCodeStorageKey(orgId)) || "";
+    if (orgId && typeof window !== "undefined") {
+        window.localStorage.removeItem(teamSecurityCodeStorageKey(orgId));
+    }
+    return "";
 }
 
 export function rememberTeamSecurityCode(orgId, code) {
     if (!orgId || typeof window === "undefined") return;
-    const trimmed = (code || "").trim();
-    if (!trimmed) return;
-    window.localStorage.setItem(teamSecurityCodeStorageKey(orgId), trimmed);
+    window.localStorage.removeItem(teamSecurityCodeStorageKey(orgId));
 }
 
 export function clearRememberedTeamSecurityCode(orgId) {

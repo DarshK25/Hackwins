@@ -22,8 +22,13 @@ public class OnboardingController {
 
     @GetMapping("/status")
     public ResponseEntity<ApiResponse<OnboardingStatusResponse>> getStatus(
-            @RequestParam String clerkId) {
-        OnboardingStatusResponse status = onboardingService.getStatus(clerkId);
+            @RequestParam String clerkId,
+            @RequestParam(required = false) String email,
+            @RequestHeader(value = "X-User-Email", required = false) String emailHeader) {
+        OnboardingStatusResponse status = onboardingService.getStatus(
+                clerkId,
+                email != null && !email.isBlank() ? email : emailHeader
+        );
         return ResponseEntity.ok(ApiResponse.success(status));
     }
 

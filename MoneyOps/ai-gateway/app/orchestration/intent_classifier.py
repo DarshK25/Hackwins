@@ -53,6 +53,12 @@ class IntentClassifier:
                 r"get.*invoices?",
                 r"which invoices?",
                 r"what.*invoices?",
+                r"how many.*invoices?",
+                r"invoice count",
+                r"total.*invoices?",
+                r".*invoices?.*name of.*",
+                r".*invoices?.*(does|do).+have",
+                r"which client.*invoices?",
             ],
             Intent.PAYMENT_RECORD: [
                 r"record.*payment",
@@ -60,6 +66,23 @@ class IntentClassifier:
                 r"mark.*paid",
                 r"received.*payment",
                 r"got.*payment",
+            ],
+            Intent.EXPENSE_CREATE: [
+                r"record.*expense",
+                r"add.*expense",
+                r"log.*expense",
+                r"spent\s+(?:rupees|rs\.?|inr)?\s*\d",
+                r"expense of\s+(?:rupees|rs\.?|inr)?\s*\d",
+            ],
+            Intent.EXPENSE_QUERY: [
+                r"what.*spend",
+                r"how much.*spend",
+                r"show.*expenses?",
+                r"list.*expenses?",
+                r"expenses?.*this month",
+                r"expenses?.*this quarter",
+                r"expenses?.*this year",
+                r"spend.*on\s+\w+",
             ],
             Intent.BALANCE_CHECK: [
                 r"what.*balance",
@@ -80,6 +103,33 @@ class IntentClassifier:
                 r"list.*clients?",
                 r"who.*clients?",
                 r"find.*client",
+            ],
+            Intent.ANALYTICS_QUERY: [
+                r"which client.*highest.*revenue",
+                r"highest.*revenue.*client",
+                r"highest.*paying.*client",
+                r"top.*paying.*client",
+                r"who.*pays.*me.*most",
+                r"who.*paying.*me.*most",
+                r"top.*clients?.*revenue",
+                r"revenue.*from.*client",
+                r"how much.*revenue",
+                r"how much.*(he|she|they).*paying",
+                r"how much.*that client.*paying",
+                r"how much.*gave me",
+                r"client.*contribut.*revenue",
+                r"how many.*invoices?.*(that client|he|she|they)",
+                r"invoice.*count.*client",
+                r"how much.*remain.*collect",
+                r"how much.*remained.*collect",
+                r"how much.*left.*collect",
+                r"remaining.*collect",
+                r"outstanding.*(money|amount|revenue|payment|payments)",
+                r"receivables?",
+                r"balance due",
+                r"statistics.*business",
+                r"business.*statistics",
+                r"stats.*business",
             ],
 
             # Strategic intents
@@ -126,6 +176,9 @@ class IntentClassifier:
                 r"expansion.*strategy",
                 r"scale.*business",
                 r"growth.*plan",
+                r"growth.*opportunit",
+                r"opportunit.*growth",
+                r"opportunit.*business",
             ],
 
             # Conversational intents
@@ -259,6 +312,8 @@ OPERATIONAL INTENTS (Basic CRUD operations):
 - CLIENT_CREATE: Add a new client
 - CLIENT_QUERY: Search/list clients
 - PAYMENT_RECORD: Record a payment received
+- EXPENSE_CREATE: Record a business expense
+- EXPENSE_QUERY: Query expense totals or categories
 - PAYMENT_QUERY: Search/list payments
 - BALANCE_CHECK: Check account balance
 - TRANSACTION_QUERY: Search/list transactions

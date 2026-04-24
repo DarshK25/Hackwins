@@ -76,6 +76,9 @@ class TestBug2AmountParser:
     def test_ten_thousand(self):
         assert self.parse("ten thousand rupees") == 10_000.0
 
+    def test_does_not_parse_conversational_to_as_amount(self):
+        assert self.parse("how much total money is remained to collect") is None
+
 
 # ---------------------------------------------------------------------------
 # Bug 2b: Date Parser — weekdays and extended support

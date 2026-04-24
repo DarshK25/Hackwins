@@ -17,6 +17,11 @@ from app.orchestration.entity_extractor import EntityExtractor
 from app.utils.logger import get_logger
 from app.config import settings
 from app.adapters.backend_adapter import get_backend_adapter
+from app.services.voice_provider_status import (
+    get_voice_provider_error_http_status,
+    get_voice_provider_error_message,
+    get_voice_provider_status,
+)
 
 try:
     from livekit.api.access_token import AccessToken, VideoGrants
@@ -52,6 +57,16 @@ async def get_voice_token(
         if not settings.LIVEKIT_API_KEY or not settings.LIVEKIT_API_SECRET:
             raise HTTPException(status_code=500, detail="LiveKit credentials missing")
 
+        provider_status = await get_voice_provider_status()
+        if provider_status["blocking"]:
+            raise HTTPException(
+                status_code=get_voice_provider_error_http_status(provider_status),
+                detail={
+                    "message": get_voice_provider_error_message(provider_status),
+                    "provider_status": provider_status,
+                },
+            )
+
         actual_room = room_name or f"voice-{user_id}-{str(uuid.uuid4())[:8]}"
         
         token = AccessToken(settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET) \
@@ -63,7 +78,10 @@ async def get_voice_token(
             "token": token.to_jwt(),
             "url": settings.LIVEKIT_URL,
             "room_name": actual_room,
+            "provider_status": provider_status,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("token_generation_failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -99,7 +117,11 @@ async def process_voice(request: VoiceProcessRequest, fastapi_request: Request):
 
 @router.post("/voice/dialog-response")
 async def dialog_response(request: Request):
-    """Handle UI-submitted data form for drafts (Invoices or Clients)."""
+    """Handle UI-submitted data form for drafts (Invoices or Clients).
+    
+    Uses the same input processing lock as /voice/process to prevent
+    duplicate responses when user clicks UI + speaks simultaneously.
+    """
     payload = await request.json()
     session_id = payload.get("session_id")
     dialog_id = payload.get("dialog_id")
@@ -110,82 +132,126 @@ async def dialog_response(request: Request):
     if not session:
         return {"success": False, "message": "Session expired."}
     
-    form_fields = payload.get("fields", payload)
-    
-    # Identify which draft we are updating
-    # Logic: Prefer dialog_id or locked_intent
-    is_invoice = (dialog_id == "invoice_preview_form" or session.locked_intent == "INVOICE_CREATE")
-    
-    if is_invoice and session.invoice_draft:
-        from app.voice_processor import VoiceContext
-        from app.agents.finance_agent import finance_agent
-
-        draft = session.invoice_draft
-        # Update invoice fields
-        for k, v in form_fields.items():
-            if v is None: continue
-            if k == "amount" or k == "total_amount": 
-                try: draft.amount = float(v)
-                except: pass
-            elif k == "gst_percent":
-                try: draft.gst_percent = float(v)
-                except: pass
-            elif k == "gst_applicable":
-                draft.gst_applicable = str(v).lower() in ("true", "yes", "1")
-            elif k == "due_date": draft.due_date = v
-            elif k == "description" or k == "item_description" or k == "service_description": draft.item_description = v
-            elif k == "item_type": draft.item_type = str(v).upper()
-            elif k == "quantity":
-                try: draft.quantity = int(v)
-                except: pass
-            elif k == "client_name": draft.client_name = v
-            elif k == "client_id": draft.client_id = v
-            elif k == "teamActionCode" or k == "team_action_code":
-                draft.team_action_code = v
-            
-        session.invoice_draft = draft
-        session_manager.save_session(session)
-        voice_context = VoiceContext(
-            session_id=session.session_id,
-            user_id=session.user_id,
-            org_uuid=session.org_id,
-            business_id=session.business_id,
-            raw_text="",
-            extracted_entities=[],
-        )
-        follow_up = await finance_agent.handle_invoice_create(voice_context)
-        message = follow_up.message if follow_up and follow_up.message else "Invoice draft updated."
-        title = "Invoice Draft Updated"
-        ui_event = follow_up.ui_event if follow_up and hasattr(follow_up, "ui_event") else None
-    else:
-        # Fallback to client
-        if session.client_draft is None:
-            session.client_draft = {}
-        
-        for key in ["name", "client_name", "company_name", "phone", "gst_number", "email", "address", "taxId", "phoneNumber", "teamActionCode"]:
-            if key in form_fields and form_fields[key]:
-                if key in ("name", "client_name", "company_name"): session.client_draft["client_name"] = form_fields[key]
-                elif key in ("phoneNumber", "phone"): session.client_draft["phone"] = form_fields[key]
-                elif key in ("taxId", "gst_number"): session.client_draft["gst_number"] = form_fields[key]
-                else: session.client_draft[key] = form_fields[key]
-        
-        session_manager.save_session(session)
-        message = "Client draft updated. Tell me 'Save Client' to finalize."
-        title = "Client Draft Updated"
-        ui_event = None
-
-    session.dialog_pending = False
-    session.dialog_id = None
-    session_manager.save_session(session)
-    
-    return {
-        "success": True,
-        "message": message,
-        "ui_event": ui_event or {
-            "type": "toast",
-            "variant": "success",
-            "title": title,
-            "message": message
+    # ── ATTEMPT TO ACQUIRE INPUT PROCESSING LOCK ───────────────────────────────────
+    # If lock fails, it means voice input is currently being processed
+    if not session_manager.acquire_processing_lock(session_id):
+        logger.warning({
+            "session_id": session_id,
+            "event": "dialog_response_rejected_processing_lock_held",
+            "dialog_id": dialog_id
+        })
+        return {
+            "success": False,
+            "message": "Voice input is being processed. Please wait.",
+            "is_locked": True
         }
-    }
+    
+    try:
+        form_fields = payload.get("fields", payload)
+        
+        # Identify which draft we are updating
+        is_invoice = (dialog_id == "invoice_preview_form" or session.locked_intent == "INVOICE_CREATE")
+        
+        if is_invoice and session.invoice_draft:
+            from app.voice_processor import VoiceContext
+            from app.agents.finance_agent import finance_agent
+
+            draft = session.invoice_draft
+            # Update invoice fields from form submission
+            for k, v in form_fields.items():
+                if v is None: continue
+                if k == "amount" or k == "total_amount": 
+                    try: draft.amount = float(v)
+                    except: pass
+                elif k == "gst_percent":
+                    try: draft.gst_percent = float(v)
+                    except: pass
+                elif k == "gst_applicable":
+                    draft.gst_applicable = str(v).lower() in ("true", "yes", "1")
+                elif k == "due_date": draft.due_date = v
+                elif k == "description" or k == "item_description" or k == "service_description": draft.item_description = v
+                elif k == "item_type": draft.item_type = str(v).upper()
+                elif k == "quantity":
+                    try: draft.quantity = int(v)
+                    except: pass
+                elif k == "client_name": draft.client_name = v
+                elif k == "client_id": draft.client_id = v
+                elif k == "teamActionCode" or k == "team_action_code":
+                    draft.team_action_code = v
+                
+            session.invoice_draft = draft
+            session_manager.save_session(session)
+            voice_context = VoiceContext(
+                session_id=session.session_id,
+                user_id=session.user_id,
+                org_uuid=session.org_id,
+                business_id=session.business_id,
+                raw_text="[UI_form_submission]",  # Mark as UI input
+                extracted_entities=[],
+            )
+            follow_up = await finance_agent.handle_invoice_create(voice_context)
+            message = follow_up.message if follow_up and follow_up.message else "Invoice draft updated."
+            title = "Invoice Draft Updated"
+            ui_event = follow_up.ui_event if follow_up and hasattr(follow_up, "ui_event") else None
+            result_success = True
+        else:
+            # Fallback to client
+            from app.voice_processor import VoiceContext, voice_processor
+
+            if session.client_draft is None:
+                session.client_draft = {}
+            
+            for key in ["name", "client_name", "company", "company_name", "phone", "gst_number", "email", "address", "taxId", "phoneNumber", "teamActionCode"]:
+                if key in form_fields and form_fields[key]:
+                    if key in ("name", "client_name"):
+                        session.client_draft["client_name"] = form_fields[key]
+                    elif key in ("company", "company_name"):
+                        session.client_draft["company"] = form_fields[key]
+                    elif key in ("phoneNumber", "phone"):
+                        session.client_draft["phone"] = form_fields[key]
+                    elif key in ("taxId", "gst_number"):
+                        session.client_draft["gst_number"] = form_fields[key]
+                    else:
+                        session.client_draft[key] = form_fields[key]
+
+            session.locked_intent = "CLIENT_CREATE"
+            session.dialog_pending = False
+            session.dialog_id = None
+            session_manager.save_session(session)
+
+            voice_context = VoiceContext(
+                session_id=session.session_id,
+                user_id=session.user_id,
+                org_uuid=session.org_id,
+                business_id=session.business_id,
+                raw_text="[UI_form_submission]",
+                extracted_entities=[
+                    {"type": key, "value": value}
+                    for key, value in session.client_draft.items()
+                    if value is not None
+                ],
+            )
+            follow_up = await voice_processor._handle_client_create("[UI_form_submission]", voice_context)
+            message = follow_up.message if follow_up and follow_up.message else "Client draft updated."
+            title = "Client Draft Updated"
+            ui_event = follow_up.ui_event if follow_up and hasattr(follow_up, "ui_event") else None
+            result_success = bool(follow_up.success) if follow_up else True
+
+        session.dialog_pending = False
+        session.dialog_id = None
+        session_manager.save_session(session)
+        
+        return {
+            "success": result_success,
+            "message": message,
+            "ui_event": ui_event or {
+                "type": "toast",
+                "variant": "success" if result_success else "warning",
+                "title": title,
+                "message": message
+            }
+        }
+    finally:
+        # Always release the lock
+        session_manager.release_processing_lock(session_id)
  

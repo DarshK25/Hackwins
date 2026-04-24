@@ -92,6 +92,25 @@ public class FinanceIntelligenceService {
         private int totalEntries = 0;
     }
 
+    @Data
+    public static class ClientRevenueItemDTO {
+        private String clientId;
+        private String clientName;
+        private BigDecimal billedRevenue = BigDecimal.ZERO;
+        private BigDecimal collectedRevenue = BigDecimal.ZERO;
+        private BigDecimal outstandingRevenue = BigDecimal.ZERO;
+        private int invoiceCount = 0;
+        private int paidInvoiceCount = 0;
+    }
+
+    @Data
+    public static class ClientRevenueSummaryDTO {
+        private List<ClientRevenueItemDTO> topClients = new ArrayList<>();
+        private BigDecimal totalBilledRevenue = BigDecimal.ZERO;
+        private BigDecimal totalCollectedRevenue = BigDecimal.ZERO;
+        private int totalClients = 0;
+    }
+
     public MetricsDTO getMetrics(String businessId) {
         MetricsDTO dto = new MetricsDTO();
         try {
@@ -299,5 +318,114 @@ public class FinanceIntelligenceService {
             org.slf4j.LoggerFactory.getLogger(FinanceIntelligenceService.class).error("Error getting ledger for " + businessId, e);
             return dto;
         }
+    }
+
+    public ClientRevenueSummaryDTO getClientRevenueSummary(String businessId, int limit) {
+        ClientRevenueSummaryDTO dto = new ClientRevenueSummaryDTO();
+        try {
+            String orgId = OrgContext.getOrgId();
+            if (orgId == null) return dto;
+
+            List<com.moneyops.clients.dto.ClientDto> clients = clientService.getAllClients(orgId);
+            List<InvoiceDto> invoices = invoiceService.getAllInvoices(orgId);
+            List<TransactionDto> transactions = transactionService.getAllTransactions(orgId);
+
+            Map<String, ClientRevenueItemDTO> revenueByClient = new HashMap<>();
+
+            for (com.moneyops.clients.dto.ClientDto client : clients) {
+                ClientRevenueItemDTO item = new ClientRevenueItemDTO();
+                item.setClientId(client.getId());
+                item.setClientName(client.getName());
+                revenueByClient.put(client.getId(), item);
+            }
+
+            for (InvoiceDto invoice : invoices) {
+                String clientId = invoice.getClientId();
+                if (clientId == null || clientId.isBlank()) {
+                    continue;
+                }
+
+                ClientRevenueItemDTO item = revenueByClient.computeIfAbsent(clientId, key -> {
+                    ClientRevenueItemDTO created = new ClientRevenueItemDTO();
+                    created.setClientId(key);
+                    created.setClientName(invoice.getClientName() != null ? invoice.getClientName() : "Unknown Client");
+                    return created;
+                });
+
+                if (item.getClientName() == null || item.getClientName().isBlank()) {
+                    item.setClientName(invoice.getClientName() != null ? invoice.getClientName() : "Unknown Client");
+                }
+
+                BigDecimal invoiceAmount = invoice.getTotalAmount() != null ? invoice.getTotalAmount() : BigDecimal.ZERO;
+                BigDecimal outstanding = invoice.getBalanceDue() != null
+                        ? invoice.getBalanceDue()
+                        : invoiceAmount.subtract(invoice.getAmountPaid() != null ? invoice.getAmountPaid() : BigDecimal.ZERO);
+
+                item.setBilledRevenue(item.getBilledRevenue().add(invoiceAmount));
+                item.setOutstandingRevenue(item.getOutstandingRevenue().add(outstanding.max(BigDecimal.ZERO)));
+                item.setInvoiceCount(item.getInvoiceCount() + 1);
+
+                if ("PAID".equalsIgnoreCase(invoice.getStatus())) {
+                    item.setPaidInvoiceCount(item.getPaidInvoiceCount() + 1);
+                }
+            }
+
+            for (TransactionDto transaction : transactions) {
+                String clientId = transaction.getClientId();
+                if (clientId == null || clientId.isBlank()) {
+                    continue;
+                }
+                if (!"INCOME".equalsIgnoreCase(transaction.getType())) {
+                    continue;
+                }
+
+                ClientRevenueItemDTO item = revenueByClient.computeIfAbsent(clientId, key -> {
+                    ClientRevenueItemDTO created = new ClientRevenueItemDTO();
+                    created.setClientId(key);
+                    created.setClientName("Unknown Client");
+                    return created;
+                });
+
+                BigDecimal amount = transaction.getAmount() != null ? transaction.getAmount() : BigDecimal.ZERO;
+                item.setCollectedRevenue(item.getCollectedRevenue().add(amount));
+            }
+
+            List<ClientRevenueItemDTO> rankedClients = revenueByClient.values().stream()
+                    .filter(item -> item.getBilledRevenue().compareTo(BigDecimal.ZERO) > 0
+                            || item.getCollectedRevenue().compareTo(BigDecimal.ZERO) > 0)
+                    .sorted(Comparator
+                            .comparing(ClientRevenueItemDTO::getBilledRevenue, Comparator.nullsFirst(BigDecimal::compareTo))
+                            .thenComparing(ClientRevenueItemDTO::getCollectedRevenue, Comparator.nullsFirst(BigDecimal::compareTo))
+                            .reversed())
+                    .collect(Collectors.toList());
+
+            dto.setTopClients(rankedClients.stream().limit(limit).collect(Collectors.toList()));
+            dto.setTotalClients(rankedClients.size());
+            dto.setTotalBilledRevenue(rankedClients.stream()
+                    .map(ClientRevenueItemDTO::getBilledRevenue)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add));
+            dto.setTotalCollectedRevenue(rankedClients.stream()
+                    .map(ClientRevenueItemDTO::getCollectedRevenue)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add));
+
+            org.slf4j.LoggerFactory.getLogger(FinanceIntelligenceService.class).info("Computed client revenue summary for businessId: {}", businessId);
+            return dto;
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(FinanceIntelligenceService.class).error("Error getting client revenue summary for " + businessId, e);
+            return dto;
+        }
+    }
+
+    public ClientRevenueItemDTO getClientRevenueDetails(String businessId, String clientId) {
+        ClientRevenueSummaryDTO summary = getClientRevenueSummary(businessId, Integer.MAX_VALUE);
+        return summary.getTopClients().stream()
+                .filter(item -> item.getClientId() != null && item.getClientId().equals(clientId))
+                .findFirst()
+                .orElseGet(() -> {
+                    ClientRevenueItemDTO empty = new ClientRevenueItemDTO();
+                    empty.setClientId(clientId);
+                    empty.setClientName("Unknown Client");
+                    return empty;
+                });
     }
 }

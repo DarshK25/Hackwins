@@ -85,7 +85,7 @@ class EntityExtractor:
         # e.g. "invoice for Tanoosh Jain for 10000" — regex finds amount but misses client_name
         force_llm_intents = {
             Intent.INVOICE_CREATE, Intent.INVOICE_UPDATE, Intent.CLIENT_CREATE,
-            Intent.TRANSACTION_CREATE, Intent.PAYMENT_RECORD
+            Intent.TRANSACTION_CREATE, Intent.PAYMENT_RECORD, Intent.EXPENSE_CREATE, Intent.EXPENSE_QUERY
         }
 
         call_llm = (
@@ -219,7 +219,7 @@ Return ONLY a JSON array of entities like:
 Important:
 - Return [] if none found
 - Confidence 0.0 - 1.0
-- Use snake_case types: client_name, amount, invoice_id, phone, email, gst_number, tax_id, gst_percent, due_date, due_days, company_name, city, address
+- Use snake_case types: client_name, amount, invoice_id, phone, email, gst_number, tax_id, gst_percent, due_date, due_days, company_name, city, address, category, description, payment_method
 - For CLIENT_CREATE or INVOICE_CREATE: Extract as many details as possible (email, phone, address, etc.)
 - For relative dates (e.g., "next 15 days", "in 2 weeks", "fifteen days"): 
   → Extract numeric value as `due_days`

@@ -224,7 +224,14 @@ public class InvoiceService {
         invoiceRepository.save(invoice);
     }
 
-    public InvoiceDto sendInvoice(String id, String orgId) {
+    public InvoiceDto sendInvoice(String id, String orgId, String userId, String teamActionCode) {
+        if (orgId == null || orgId.isBlank()) {
+            throw new com.moneyops.shared.exceptions.UnauthorizedException("Missing organization context");
+        }
+        if (userId == null || userId.isBlank()) {
+            throw new com.moneyops.shared.exceptions.UnauthorizedException("Missing user context");
+        }
+
         Invoice invoice = invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice not found"));
 
@@ -242,6 +249,8 @@ public class InvoiceService {
         if (currentStatus != InvoiceStatus.DRAFT && currentStatus != InvoiceStatus.SENT) {
             throw new ValidationException("Only draft or sent invoices can be emailed.");
         }
+
+        teamActionAuthorizationService.assertUserCanCreateSensitiveAction(orgId, userId, teamActionCode);
 
         String orgName = getOrganizationDisplayName(orgId);
         String subject = buildInvoiceEmailSubject(invoice, orgName);

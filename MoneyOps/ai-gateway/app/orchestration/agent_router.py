@@ -6,6 +6,8 @@ from typing import Dict, Any, Optional, List
 from app.schemas.intents import Intent, AgentType, get_intent_requirements
 from app.agents.base_agent import BaseAgent, AgentResponse
 from app.agents.finance_agent import finance_agent
+from app.agents.general_agent import general_agent
+from app.agents.market_agent import market_agent_instance
 from app.features import feature_flags
 from app.utils.logger import get_logger
 
@@ -33,14 +35,16 @@ class AgentRouter:
         # Finance Agent (MVP)
         if feature_flags.ENABLE_FINANCE_AGENT:
             self._agents[AgentType.FINANCE_AGENT] = finance_agent
+
+        # General agent must always be available for conversational fallbacks.
+        self._agents[AgentType.GENERAL_AGENT] = general_agent
+
+        # The market agent is the current production implementation for strategic flows.
+        self._agents[AgentType.STRATEGY_AGENT] = market_agent_instance
         
         # Other agents (v2.0 - stubs for now)
         if feature_flags.ENABLE_SALES_AGENT:
             # self._agents[AgentType.SALES_AGENT] = sales_agent
-            pass
-        
-        if feature_flags.ENABLE_STRATEGY_AGENT:
-            # self._agents[AgentType.STRATEGY_AGENT] = strategy_agent
             pass
         
         # ... other agents
@@ -57,7 +61,8 @@ class AgentRouter:
         self,
         intent: Intent,
         entities: Dict[str, Any],
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None
     ) -> AgentResponse:
         """
         Route intent to appropriate agent(s)
@@ -66,6 +71,7 @@ class AgentRouter:
             intent: Classified intent
             entities: Extracted entities
             context: Additional context (org_id, user_id, etc.)
+            session_id: Optional session_id to check for locked agent
         
         Returns:
             AgentResponse from primary agent
@@ -76,11 +82,42 @@ class AgentRouter:
         primary_agent_type = requirements.primary_agent
         supporting_agent_types = requirements.supporting_agents
         
+        # ── AGENT LOCKING: If session has locked agent, use it ──────────────────────
+        locked_agent_type = None
+        if session_id:
+            from app.state.session_manager import session_manager
+            locked_agent_type_str = session_manager.get_locked_agent_type(session_id)
+            if locked_agent_type_str:
+                try:
+                    locked_agent_type = AgentType[locked_agent_type_str]
+                    # Override primary agent with locked agent if it supports this intent
+                    if self.is_agent_available(locked_agent_type):
+                        locked_agent = self.get_agent(locked_agent_type)
+                        if locked_agent and locked_agent.supports_intent(intent):
+                            primary_agent_type = locked_agent_type
+                            logger.info(
+                                "using_locked_agent",
+                                session_id=session_id,
+                                locked_agent_type=locked_agent_type.value,
+                                intent=intent.value
+                            )
+                        else:
+                            logger.warning(
+                                "locked_agent_does_not_support_intent",
+                                locked_agent_type=locked_agent_type.value,
+                                intent=intent.value,
+                                falling_back_to=primary_agent_type.value
+                            )
+                except (KeyError, ValueError):
+                    logger.warning(f"Invalid locked agent type: {locked_agent_type_str}")
+        
         logger.info(
             "routing_intent",
             intent=intent.value,
             primary_agent=primary_agent_type.value,
-            supporting_agents=[a.value for a in supporting_agent_types]
+            supporting_agents=[a.value for a in supporting_agent_types],
+            session_id=session_id,
+            is_locked=locked_agent_type is not None
         )
         
         # Get primary agent

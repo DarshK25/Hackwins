@@ -24,6 +24,8 @@ import {
 import { toast } from "sonner";
 import { useAuth, useUser } from "@clerk/clerk-react";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import { getTeamSecurityAttemptState } from "@/lib/teamSecurityAttempts";
+import TeamSecurityCodeDialog from "@/components/TeamSecurityCodeDialog";
 
 const STATUS_STYLES = {
     paid: "mo-badge-success",
@@ -55,6 +57,7 @@ export default function InvoicesPage() {
     const [activeTab, setActiveTab] = useState("all");
     const [searchQuery, setSearchQuery] = useState("");
     const [actionLoading, setActionLoading] = useState(null);
+    const [sendCodeDialog, setSendCodeDialog] = useState({ open: false, attempts: 0, resolver: null });
 
     useEffect(() => {
         if (internalUserId && internalOrgId) {
@@ -129,27 +132,64 @@ export default function InvoicesPage() {
         try {
             const token = await getToken();
             const id = invoice.id || invoice._id;
-            const res = await fetch(`/api/invoices/${id}/send`, {
-                method: "PATCH",
-                headers: {
-                    "Authorization": `Bearer ${token}`,
-                    "X-User-Id": internalUserId,
-                    "X-Org-Id": internalOrgId
+            let codeAttempts = 0;
+
+            while (codeAttempts < 2) {
+                const teamActionCode = await new Promise((resolve) => {
+                    setSendCodeDialog({ open: true, attempts: codeAttempts, resolver: resolve });
+                });
+                if (teamActionCode == null) {
+                    return;
                 }
-            });
-            if (!res.ok) {
-                const errorData = await res.json().catch(() => null);
-                throw new Error(errorData?.message || "Failed to send invoice");
+                if (!teamActionCode) {
+                    toast.error("Team security code is required.");
+                    continue;
+                }
+
+                const res = await fetch(`/api/invoices/${id}/send`, {
+                    method: "PATCH",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": internalUserId,
+                        "X-Org-Id": internalOrgId
+                    },
+                    body: JSON.stringify({ teamActionCode }),
+                });
+
+                if (!res.ok) {
+                    const errorData = await res.json().catch(() => null);
+                    const error = new Error(errorData?.message || "Failed to send invoice");
+                    const attempt = getTeamSecurityAttemptState(error, codeAttempts);
+                    if (attempt.isSecurityCodeError) {
+                        toast.error(attempt.message);
+                        codeAttempts = attempt.nextAttempts;
+                        if (attempt.shouldCancel) {
+                            return;
+                        }
+                        continue;
+                    }
+                    throw error;
+                }
+
+                toast.success(normalizedStatus === "sent"
+                    ? "Invoice re-sent successfully"
+                    : "Invoice emailed successfully");
+                fetchInvoices();
+                return;
             }
-            toast.success(normalizedStatus === "sent"
-                ? `Invoice re-sent to ${invoice.clientEmail}`
-                : `Invoice emailed to ${invoice.clientEmail}`);
-            fetchInvoices();
         } catch (error) {
             toast.error(error?.message || "Failed to send invoice");
         } finally {
             setActionLoading(null);
         }
+    };
+
+    const closeSendCodeDialog = (value = null) => {
+        setSendCodeDialog((current) => {
+            current.resolver?.(value);
+            return { open: false, attempts: 0, resolver: null };
+        });
     };
 
     const canEmailInvoice = (invoice) => {
@@ -419,6 +459,12 @@ export default function InvoicesPage() {
                     ))}
                 </div>
             )}
+            <TeamSecurityCodeDialog
+                open={sendCodeDialog.open}
+                attempts={sendCodeDialog.attempts}
+                onClose={() => closeSendCodeDialog(null)}
+                onSubmit={(code) => closeSendCodeDialog(code)}
+            />
         </div>
     );
 }

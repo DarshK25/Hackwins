@@ -1,6 +1,7 @@
 // src/main/java/com/moneyops/audit/controller/AuditLogController.java
 package com.moneyops.audit.controller;
 
+import com.moneyops.audit.dto.AuditLogDTO;
 import com.moneyops.audit.entity.AuditLog;
 import com.moneyops.audit.service.AuditLogService;
 import com.moneyops.shared.dto.ApiResponse;
@@ -13,7 +14,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/audit")
@@ -24,68 +24,78 @@ public class AuditLogController {
     private final AuditLogService auditLogService;
 
     @GetMapping
-    @Operation(summary = "Get all audit logs for the organization")
-    public ResponseEntity<ApiResponse<PageResponse<AuditLog>>> getAllAuditLogs(
+    @Operation(summary = "Get all audit logs for the organization (paginated)")
+    public ResponseEntity<ApiResponse<PageResponse<AuditLogDTO>>> getAllAuditLogs(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "50") int size) {
+            @RequestParam(defaultValue = "20") int size) {
 
-        List<AuditLog> logs = auditLogService.getAllAuditLogs();
-        // TODO: Implement pagination
-        PageResponse<AuditLog> pageResponse = PageResponse.<AuditLog>builder()
-                .content(logs)
-                .pageNumber(page)
-                .pageSize(size)
-                .totalElements(logs.size())
-                .totalPages(1)
-                .build();
+        // Clamp page size to prevent abuse
+        int clampedSize = Math.min(Math.max(size, 1), 100);
 
+        PageResponse<AuditLogDTO> pageResponse = auditLogService.getAllAuditLogsPaginated(page, clampedSize);
         return ResponseEntity.ok(ApiResponse.success(pageResponse));
     }
 
     @GetMapping("/entity/{entityType}")
-    @Operation(summary = "Get audit logs for a specific entity type")
-    public ResponseEntity<ApiResponse<List<AuditLog>>> getAuditLogsByEntityType(
-            @PathVariable String entityType) {
+    @Operation(summary = "Get audit logs for a specific entity type (paginated)")
+    public ResponseEntity<ApiResponse<PageResponse<AuditLogDTO>>> getAuditLogsByEntityType(
+            @PathVariable String entityType,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
 
-        List<AuditLog> logs = auditLogService.getAuditLogsByEntityType(entityType);
-        return ResponseEntity.ok(ApiResponse.success(logs));
+        int clampedSize = Math.min(Math.max(size, 1), 100);
+        PageResponse<AuditLogDTO> pageResponse = auditLogService.getAuditLogsByEntityTypePaginated(entityType, page, clampedSize);
+        return ResponseEntity.ok(ApiResponse.success(pageResponse));
     }
 
     @GetMapping("/entity/{entityType}/{entityId}")
-    @Operation(summary = "Get audit logs for a specific entity")
-    public ResponseEntity<ApiResponse<List<AuditLog>>> getAuditLogsByEntityId(
+    @Operation(summary = "Get audit logs for a specific entity (paginated)")
+    public ResponseEntity<ApiResponse<PageResponse<AuditLogDTO>>> getAuditLogsByEntityId(
             @PathVariable String entityType,
-            @PathVariable String entityId) {
+            @PathVariable String entityId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
 
-        List<AuditLog> logs = auditLogService.getAuditLogsByEntityId(entityId);
-        return ResponseEntity.ok(ApiResponse.success(logs));
+        int clampedSize = Math.min(Math.max(size, 1), 100);
+        // entityType is accepted for URL semantics but we query by entityId
+        PageResponse<AuditLogDTO> pageResponse = auditLogService.getAuditLogsByEntityIdPaginated(entityId, page, clampedSize);
+        return ResponseEntity.ok(ApiResponse.success(pageResponse));
     }
 
     @GetMapping("/user/{userId}")
-    @Operation(summary = "Get audit logs for a specific user")
-    public ResponseEntity<ApiResponse<List<AuditLog>>> getAuditLogsByUserId(
-            @PathVariable String userId) {
+    @Operation(summary = "Get audit logs for a specific user (paginated)")
+    public ResponseEntity<ApiResponse<PageResponse<AuditLogDTO>>> getAuditLogsByUserId(
+            @PathVariable String userId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
 
-        List<AuditLog> logs = auditLogService.getAuditLogsByUserId(userId);
-        return ResponseEntity.ok(ApiResponse.success(logs));
+        int clampedSize = Math.min(Math.max(size, 1), 100);
+        PageResponse<AuditLogDTO> pageResponse = auditLogService.getAuditLogsByUserIdPaginated(userId, page, clampedSize);
+        return ResponseEntity.ok(ApiResponse.success(pageResponse));
     }
 
     @GetMapping("/operation/{operation}")
-    @Operation(summary = "Get audit logs for a specific operation")
-    public ResponseEntity<ApiResponse<List<AuditLog>>> getAuditLogsByOperation(
-            @PathVariable AuditLog.Operation operation) {
+    @Operation(summary = "Get audit logs for a specific operation (paginated)")
+    public ResponseEntity<ApiResponse<PageResponse<AuditLogDTO>>> getAuditLogsByOperation(
+            @PathVariable AuditLog.Operation operation,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
 
-        List<AuditLog> logs = auditLogService.getAuditLogsByOperation(operation);
-        return ResponseEntity.ok(ApiResponse.success(logs));
+        int clampedSize = Math.min(Math.max(size, 1), 100);
+        PageResponse<AuditLogDTO> pageResponse = auditLogService.getAuditLogsByOperationPaginated(operation, page, clampedSize);
+        return ResponseEntity.ok(ApiResponse.success(pageResponse));
     }
 
     @GetMapping("/daterange")
-    @Operation(summary = "Get audit logs within a date range")
-    public ResponseEntity<ApiResponse<List<AuditLog>>> getAuditLogsByDateRange(
+    @Operation(summary = "Get audit logs within a date range (paginated)")
+    public ResponseEntity<ApiResponse<PageResponse<AuditLogDTO>>> getAuditLogsByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end) {
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
 
-        List<AuditLog> logs = auditLogService.getAuditLogsByDateRange(start, end);
-        return ResponseEntity.ok(ApiResponse.success(logs));
+        int clampedSize = Math.min(Math.max(size, 1), 100);
+        PageResponse<AuditLogDTO> pageResponse = auditLogService.getAuditLogsByDateRangePaginated(start, end, page, clampedSize);
+        return ResponseEntity.ok(ApiResponse.success(pageResponse));
     }
 }

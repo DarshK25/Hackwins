@@ -58,6 +58,11 @@ public class TeamActionAuthorizationService {
         }
     }
 
+    public void assertOwnerCanDeleteOrganization(String orgId, String userId, String rawTeamCode) {
+        assertOwnerCanSetTeamActionCode(orgId, userId);
+        teamSecurityCodeService.assertTeamActionCodeValid(orgId, rawTeamCode);
+    }
+
     public record CreatorMetadata(String userId, String email, String role) {
         public CreatorMetadata {
             if (userId == null || userId.isBlank()) throw new ValidationException("Creator userId missing.");

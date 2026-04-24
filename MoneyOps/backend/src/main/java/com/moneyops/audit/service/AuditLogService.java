@@ -1,17 +1,26 @@
 // src/main/java/com/moneyops/audit/service/AuditLogService.java
 package com.moneyops.audit.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moneyops.audit.dto.AuditLogDTO;
 import com.moneyops.audit.entity.AuditLog;
 import com.moneyops.audit.repository.AuditLogRepository;
+import com.moneyops.shared.dto.PageResponse;
 import com.moneyops.shared.utils.OrgContext;
+import com.moneyops.shared.utils.RequestContext;
 import com.moneyops.shared.utils.SecurityUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -55,39 +64,130 @@ public class AuditLogService {
             auditLog.setEntityId(entityId);
             auditLog.setOperation(operation);
 
-            if (oldEntity != null) {
-                auditLog.setOldValues(objectMapper.writeValueAsString(oldEntity));
-            }
-
-            if (newEntity != null) {
-                auditLog.setNewValues(objectMapper.writeValueAsString(newEntity));
-            }
+            // Null-safe JSON serialization for old/new values
+            auditLog.setOldValues(safeSerialize(oldEntity));
+            auditLog.setNewValues(safeSerialize(newEntity));
 
             if (changes != null && !changes.isEmpty()) {
-                auditLog.setChanges(objectMapper.writeValueAsString(changes));
+                auditLog.setChanges(safeSerialize(changes));
             }
 
-            // TODO: Add IP address and user agent from request context
-            auditLog.setIpAddress("TODO");
-            auditLog.setUserAgent("TODO");
+            // Capture IP address and User-Agent from the request context
+            String ip = RequestContext.getIpAddress();
+            String ua = RequestContext.getUserAgent();
+            auditLog.setIpAddress(ip != null ? ip : "system");
+            auditLog.setUserAgent(ua != null ? ua : "system");
 
             auditLogRepository.save(auditLog);
 
-            log.info("Audit logged: {} {} {} by user {}", operation, entityType, entityId,
-                    SecurityUtil.getCurrentUserId());
+            log.info("Audit logged: {} {} {} by user {} from {}",
+                    operation, entityType, entityId, currentUserId, ip);
 
         } catch (Exception e) {
             log.error("Failed to log audit event", e);
         }
     }
 
-    private Map<String, Object> calculateChanges(Object oldEntity, Object newEntity) {
-        // TODO: Implement proper change calculation using reflection or diff libraries
-        // For now, return empty map
-        return Map.of();
+    /**
+     * Safely serialize an object to JSON string.
+     * Handles null values, circular references, and serialization errors gracefully.
+     */
+    private String safeSerialize(Object obj) {
+        if (obj == null) return null;
+        // Already a String — could be pre-serialized JSON
+        if (obj instanceof String s) {
+            return s.isBlank() ? null : s;
+        }
+        try {
+            return objectMapper.writeValueAsString(obj);
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to serialize audit value: {}", e.getMessage());
+            // Fallback: store toString() representation wrapped as JSON string
+            return "\"" + obj.toString().replace("\"", "\\\"") + "\"";
+        }
     }
 
-    // Query methods
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> calculateChanges(Object oldEntity, Object newEntity) {
+        try {
+            Map<String, Object> oldMap = objectMapper.convertValue(oldEntity, Map.class);
+            Map<String, Object> newMap = objectMapper.convertValue(newEntity, Map.class);
+            if (oldMap == null || newMap == null) return Map.of();
+
+            Map<String, Object> diff = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> entry : newMap.entrySet()) {
+                Object oldVal = oldMap.get(entry.getKey());
+                Object newVal = entry.getValue();
+                if (oldVal == null && newVal == null) continue;
+                if (oldVal == null || !oldVal.equals(newVal)) {
+                    diff.put(entry.getKey(), Map.of(
+                            "old", oldVal != null ? oldVal : "null",
+                            "new", newVal != null ? newVal : "null"
+                    ));
+                }
+            }
+            return diff;
+        } catch (Exception e) {
+            log.warn("Failed to calculate changes: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
+    // ── Paginated query methods ──────────────────────────────────────────────
+
+    public PageResponse<AuditLogDTO> getAllAuditLogsPaginated(int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "timestamp"));
+        Page<AuditLog> logPage = auditLogRepository.findByOrgId(OrgContext.getOrgId(), pageable);
+        return toPageResponse(logPage);
+    }
+
+    public PageResponse<AuditLogDTO> getAuditLogsByEntityTypePaginated(String entityType, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "timestamp"));
+        Page<AuditLog> logPage = auditLogRepository.findByOrgIdAndEntityType(OrgContext.getOrgId(), entityType, pageable);
+        return toPageResponse(logPage);
+    }
+
+    public PageResponse<AuditLogDTO> getAuditLogsByEntityIdPaginated(String entityId, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "timestamp"));
+        Page<AuditLog> logPage = auditLogRepository.findByOrgIdAndEntityId(OrgContext.getOrgId(), entityId, pageable);
+        return toPageResponse(logPage);
+    }
+
+    public PageResponse<AuditLogDTO> getAuditLogsByUserIdPaginated(String userId, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "timestamp"));
+        Page<AuditLog> logPage = auditLogRepository.findByOrgIdAndUserId(OrgContext.getOrgId(), userId, pageable);
+        return toPageResponse(logPage);
+    }
+
+    public PageResponse<AuditLogDTO> getAuditLogsByOperationPaginated(AuditLog.Operation operation, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "timestamp"));
+        Page<AuditLog> logPage = auditLogRepository.findByOrgIdAndOperation(OrgContext.getOrgId(), operation, pageable);
+        return toPageResponse(logPage);
+    }
+
+    public PageResponse<AuditLogDTO> getAuditLogsByDateRangePaginated(LocalDateTime start, LocalDateTime end, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "timestamp"));
+        Page<AuditLog> logPage = auditLogRepository.findByOrgIdAndTimestampBetween(OrgContext.getOrgId(), start, end, pageable);
+        return toPageResponse(logPage);
+    }
+
+    private PageResponse<AuditLogDTO> toPageResponse(Page<AuditLog> page) {
+        List<AuditLogDTO> dtos = page.getContent().stream()
+                .map(AuditLogDTO::from)
+                .toList();
+        return PageResponse.<AuditLogDTO>builder()
+                .content(dtos)
+                .pageNumber(page.getNumber())
+                .pageSize(page.getSize())
+                .totalElements(page.getTotalElements())
+                .totalPages(page.getTotalPages())
+                .first(page.isFirst())
+                .last(page.isLast())
+                .build();
+    }
+
+    // ── Legacy non-paginated methods (kept for backward compatibility) ───────
+
     public List<AuditLog> getAllAuditLogs() {
         return auditLogRepository.findByOrgIdOrderByTimestampDesc(OrgContext.getOrgId());
     }
@@ -105,10 +205,10 @@ public class AuditLogService {
     }
 
     public List<AuditLog> getAuditLogsByDateRange(LocalDateTime start, LocalDateTime end) {
-        return auditLogRepository.findByOrgIdAndTimestampBetween(OrgContext.getOrgId(), start, end);
+        return auditLogRepository.findByOrgIdAndTimestampBetweenOrderByTimestampDesc(OrgContext.getOrgId(), start, end);
     }
 
     public List<AuditLog> getAuditLogsByOperation(AuditLog.Operation operation) {
-        return auditLogRepository.findByOrgIdAndOperation(OrgContext.getOrgId(), operation);
+        return auditLogRepository.findByOrgIdAndOperationOrderByTimestampDesc(OrgContext.getOrgId(), operation);
     }
 }

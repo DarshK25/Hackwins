@@ -13,6 +13,7 @@ The LLM in AgentSession is required by the framework but is effectively
 bypassed: we intercept UserInputTranscribedEvent before it reaches the LLM.
 """
 import asyncio
+import contextlib
 import json
 import uuid
 from typing import Dict, Any, List, Optional
@@ -31,11 +32,11 @@ from livekit.agents import (
     AgentSession,
     JobContext,
     JobProcess,
-    RoomInputOptions,
     WorkerOptions,
     cli,
 )
 from livekit.plugins import silero, groq
+from livekit.agents.voice.room_io import RoomOptions
 
 # Move optional plugin imports to top level to satisfy plugin registration
 # which must happen on the main thread.
@@ -57,6 +58,25 @@ from app.utils.logger import setup_logging, get_logger
 
 setup_logging(settings.LOG_LEVEL)
 logger = get_logger(__name__)
+
+
+def _install_asyncio_exception_filter() -> None:
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+
+    def _handler(current_loop: asyncio.AbstractEventLoop, context: dict) -> None:
+        exc = context.get("exception")
+        message = context.get("message", "")
+        if isinstance(exc, asyncio.CancelledError) and "exception was never retrieved" in message:
+            logger.debug("ignored_cancelled_gather_future_during_shutdown")
+            return
+
+        if previous_handler:
+            previous_handler(current_loop, context)
+        else:
+            current_loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_handler)
 
 
 # ── Bug 8: Premature Confirmation Guard ───────────────────────────────────────
@@ -101,6 +121,7 @@ def premature_confirmation_guard(response_text: str, stage: str) -> str:
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 async def entrypoint(ctx: JobContext):
     logger.info("voice_session_starting", room=ctx.room.name)
+    _install_asyncio_exception_filter()
 
     # Connect to the LiveKit room (v1.4.2 — no room_options param on connect())
     await ctx.connect()
@@ -108,7 +129,10 @@ async def entrypoint(ctx: JobContext):
     # Wait for the frontend user to join so we can read their metadata.
     # The agent worker dispatches BEFORE the user connects, so without this wait
     # ctx.room.remote_participants is always empty → user_id/org_id = "unknown".
-    await _wait_for_participant(ctx, timeout=15.0)
+    participant_joined = await _wait_for_participant(ctx, timeout=15.0)
+    if not participant_joined:
+        logger.info("voice_session_aborted_no_participant", room=ctx.room.name)
+        return
 
     # Extract user/org identifiers from room or participant metadata
     user_context = _extract_user_context(ctx)
@@ -141,6 +165,35 @@ async def entrypoint(ctx: JobContext):
 
     # ── Speech handler: intercept transcriptions before they hit the LLM ─────
     # ── Bug 5: Voice Turn Debouncing ───────────────────────────────────────────
+    session_closed = asyncio.Event()
+    background_tasks: set[asyncio.Task] = set()
+
+    def _track_task(coro, task_name: str) -> asyncio.Task:
+        task = asyncio.create_task(coro, name=task_name)
+        background_tasks.add(task)
+
+        def _on_done(done_task: asyncio.Task) -> None:
+            background_tasks.discard(done_task)
+            if done_task.cancelled():
+                return
+            with contextlib.suppress(asyncio.CancelledError):
+                exc = done_task.exception()
+                if exc:
+                    logger.error(
+                        "voice_background_task_failed",
+                        task=task_name,
+                        error=str(exc),
+                    )
+
+        task.add_done_callback(_on_done)
+        return task
+
+    def _session_can_respond() -> bool:
+        return (
+            not session_closed.is_set()
+            and getattr(session, "_activity", None) is not None
+        )
+
     transcript_buffer: list[str] = []
     debounce_task: Optional[asyncio.Task] = None
     processing_lock = asyncio.Lock()
@@ -149,6 +202,31 @@ async def entrypoint(ctx: JobContext):
     # ── Utterance Buffering (VAD Split Fix) ──────────────────────────────────
     long_term_buffer: list[str] = []
     flush_task: Optional[asyncio.Task] = None
+
+    def _cancel_task(task: Optional[asyncio.Task]) -> None:
+        if task and not task.done():
+            task.cancel()
+
+    def _cancel_background_tasks() -> None:
+        _cancel_task(debounce_task)
+        _cancel_task(flush_task)
+        for task in list(background_tasks):
+            _cancel_task(task)
+        transcript_buffer.clear()
+        long_term_buffer.clear()
+        pending_follow_ups.clear()
+
+    @session.on("close")
+    def on_session_close(ev):
+        session_closed.set()
+        _cancel_background_tasks()
+        raw_reason = getattr(ev, "reason", None)
+        reason = getattr(raw_reason, "value", raw_reason)
+        logger.info(
+            "voice_session_closed_cleanup",
+            reason=reason,
+            pending_tasks=len(background_tasks),
+        )
     
     INCOMPLETE_UTTERANCE_PATTERNS = [
         r"^(amount|price|cost|total|the|for|is|and|but|so|rupees|percent|dollars|of|to)\b.{0,30}$",
@@ -175,11 +253,13 @@ async def entrypoint(ctx: JobContext):
     async def _flush_long_term_buffer():
         """If no continuation comes, process what we have."""
         await asyncio.sleep(2.0)
+        if session_closed.is_set():
+            return
         if long_term_buffer:
             combined = " ".join(long_term_buffer)
             long_term_buffer.clear()
             logger.info("flushing_fragment_buffer", text=combined)
-            asyncio.create_task(_process_and_say(combined))
+            _track_task(_process_and_say(combined), "process_fragment_buffer")
 
     def sanitize_for_voice(text: str) -> str:
         """Remove any internal system strings before speaking."""
@@ -203,9 +283,33 @@ async def entrypoint(ctx: JobContext):
         
         return text
 
+    async def _safe_say(text: str, *, allow_interruptions: bool = True) -> bool:
+        if not _session_can_respond():
+            logger.info("skipping_say_session_closed", preview=text[:80])
+            return False
+
+        try:
+            await session.say(text, allow_interruptions=allow_interruptions)
+            return True
+        except RuntimeError as exc:
+            error = str(exc)
+            if "isn't running" in error or "is closing" in error:
+                session_closed.set()
+                logger.info("skipping_say_session_closed", error=error)
+                return False
+            raise
+
     async def _process_and_say(text: str) -> None:
         """Helper to send buffered text to gateway and speak response."""
+        if not _session_can_respond():
+            logger.info("skipping_gateway_session_closed", text=text[:120])
+            return
+
         async with processing_lock:
+            if not _session_can_respond():
+                logger.info("skipping_gateway_session_closed", text=text[:120])
+                return
+
             logger.info("requesting_gateway", text=text[:120])
             try:
                 response = await ai_gateway_client.process_voice_input(
@@ -217,6 +321,13 @@ async def entrypoint(ctx: JobContext):
                 )
 
                 # ── Inform Frontend Logic (UI + History) ──
+                if not _session_can_respond():
+                    logger.info(
+                        "discarding_gateway_response_after_session_close",
+                        text=text[:120],
+                    )
+                    return
+
                 ui_event = response.get("ui_event")
                 # Get user identities to ensure direct delivery
                 dest_identities = list(ctx.room.remote_participants.keys())
@@ -274,21 +385,27 @@ async def entrypoint(ctx: JobContext):
                     logger.warning("gateway_execution_failed_history_not_updated", intent=intent)
 
                 safe_response_text = sanitize_for_voice(response_text)
-                await session.say(safe_response_text, allow_interruptions=True)
+                spoke = await _safe_say(safe_response_text, allow_interruptions=True)
+                if not spoke:
+                    return
                 
                 # Check for follow-ups that arrived while we were processing
                 if pending_follow_ups:
                     next_text = " ".join(pending_follow_ups)
                     pending_follow_ups.clear()
-                    asyncio.create_task(_process_and_say(next_text))
+                    _track_task(_process_and_say(next_text), "process_follow_up")
 
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 logger.error("gateway_call_failed", error=str(exc))
-                await session.say("I'm sorry, I'm having trouble connecting. One moment.")
+                await _safe_say("I'm sorry, I'm having trouble connecting. One moment.")
 
     async def _debounce_timer():
         """Wait for silence then trigger processing."""
         await asyncio.sleep(settings.TURN_DETECTION_DELAY)
+        if session_closed.is_set():
+            return
         if transcript_buffer:
             combined = " ".join(transcript_buffer)
             transcript_buffer.clear()
@@ -298,7 +415,7 @@ async def entrypoint(ctx: JobContext):
                 logger.info("buffering_incomplete_utterance", text=combined)
                 long_term_buffer.append(combined)
                 if flush_task: flush_task.cancel()
-                flush_task = asyncio.create_task(_flush_long_term_buffer())
+                flush_task = _track_task(_flush_long_term_buffer(), "flush_fragment_buffer")
                 return
 
             # If we have a pending buffer, prepend it
@@ -311,11 +428,14 @@ async def entrypoint(ctx: JobContext):
                 logger.info("buffering_interrupted_speech", text=combined[:50])
                 pending_follow_ups.append(combined)
             else:
-                asyncio.create_task(_process_and_say(combined))
+                _track_task(_process_and_say(combined), "process_debounced_utterance")
 
     @session.on("user_input_transcribed")
     def on_user_speech(ev):
         nonlocal debounce_task
+        if session_closed.is_set():
+            return
+
         if not getattr(ev, "is_final", True):
             return
             
@@ -340,14 +460,17 @@ async def entrypoint(ctx: JobContext):
         # If confidence is too low, we trigger a "re-ask" directly
         if confidence < 0.7:
             logger.warning("stt_confidence_low_blocking", text=text, confidence=confidence)
-            asyncio.create_task(session.say("I didn't quite catch that. Could you repeat?"))
+            _track_task(
+                _safe_say("I didn't quite catch that. Could you repeat?"),
+                "low_confidence_reask",
+            )
             return
 
         transcript_buffer.append(text)
         
         if debounce_task:
             debounce_task.cancel()
-        debounce_task = asyncio.create_task(_debounce_timer())
+        debounce_task = _track_task(_debounce_timer(), "voice_debounce")
 
     @session.on("agent_speech_committed")
     def on_agent_speech(ev):
@@ -358,19 +481,12 @@ async def entrypoint(ctx: JobContext):
     await session.start(
         room=ctx.room,
         agent=Agent(instructions="MoneyOps Voice Agent"),
-        room_input_options=RoomInputOptions(
-            # Prevent session from ending after replying, so user can follow up
-            # (although standard attribute might be different depending on core library version, 
-            # this prevents default close)
-        ),
+        room_options=RoomOptions(close_on_disconnect=True),
     )
 
     # Greet the user immediately
     try:
-        await session.say(
-            "Welcome to MoneyOps. What would you like to do?",
-            allow_interruptions=True,
-        )
+        await _safe_say("Welcome to MoneyOps. What would you like to do?")
     except RuntimeError as e:
         logger.warning("failed_to_say_greeting_session_closing", error=str(e))
     logger.info("voice_session_live", room=ctx.room.name, session_id=session_id)
@@ -378,7 +494,7 @@ async def entrypoint(ctx: JobContext):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-async def _wait_for_participant(ctx: JobContext, timeout: float = 10.0) -> None:
+async def _wait_for_participant(ctx: JobContext, timeout: float = 10.0) -> bool:
     """Wait until at least one remote participant is in the room, or until timeout.
     
     The agent worker connects to the room BEFORE the frontend user joins.
@@ -386,6 +502,7 @@ async def _wait_for_participant(ctx: JobContext, timeout: float = 10.0) -> None:
     We subscribe to the 'participant_connected' event to wait for the user.
     """
     if ctx.room.remote_participants:
+        return True
         return  # Already have participants — nothing to wait for
     done = asyncio.Event()
 
@@ -394,9 +511,13 @@ async def _wait_for_participant(ctx: JobContext, timeout: float = 10.0) -> None:
 
     ctx.room.on("participant_connected", _on_participant_connected)
     try:
+        if ctx.room.remote_participants:
+            return True
         await asyncio.wait_for(done.wait(), timeout=timeout)
+        return True
     except asyncio.TimeoutError:
         logger.warning("no_participant_joined_within_timeout", timeout=timeout)
+        return False
     finally:
         ctx.room.off("participant_connected", _on_participant_connected)
 

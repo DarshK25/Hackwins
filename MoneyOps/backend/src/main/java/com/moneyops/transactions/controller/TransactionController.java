@@ -2,10 +2,14 @@
 package com.moneyops.transactions.controller;
 
 import com.moneyops.transactions.dto.TransactionDto;
+import com.moneyops.transactions.service.LedgerPdfService;
 import com.moneyops.transactions.service.TransactionService;
 import com.moneyops.shared.utils.OrgContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,6 +24,7 @@ import java.util.Map;
 public class TransactionController {
 
     private final TransactionService transactionService;
+    private final LedgerPdfService ledgerPdfService;
 
     @PostMapping
     public ResponseEntity<TransactionDto> createTransaction(@RequestBody TransactionDto dto) {
@@ -95,5 +100,29 @@ public class TransactionController {
 
         Map<String, BigDecimal> summary = transactionService.getFinancialSummary(orgId);
         return ResponseEntity.ok(summary);
+    }
+
+    public static class LedgerExportRequest {
+        public String orgId;
+        public LocalDate dateFrom;
+        public LocalDate dateTo;
+    }
+
+    @PostMapping("/export/ledger/pdf")
+    public ResponseEntity<ByteArrayResource> exportLedgerPdf(@RequestBody LedgerExportRequest request) {
+        String orgId = OrgContext.getOrgId();
+        if (orgId == null) {
+            orgId = request.orgId; // Fallback if needed, though OrgContext should be preferred
+        }
+        if (orgId == null) return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
+
+        byte[] pdf = ledgerPdfService.generateLedgerPdf(orgId, request.dateFrom, request.dateTo);
+        ByteArrayResource resource = new ByteArrayResource(pdf);
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"ledger.pdf\"")
+                .contentLength(pdf.length)
+                .body(resource);
     }
 }

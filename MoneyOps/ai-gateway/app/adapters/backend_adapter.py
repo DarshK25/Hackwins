@@ -15,6 +15,46 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+INTENT_TO_AGENT_NAME = {
+    "INVOICE_CREATE": "Finance Agent",
+    "INVOICE_UPDATE": "Finance Agent",
+    "INVOICE_QUERY": "Finance Agent",
+    "BALANCE_CHECK": "Finance Agent",
+    "ANALYTICS_QUERY": "Finance Agent",
+    "BUSINESS_HEALTH_CHECK": "Finance Agent",
+    "PAYMENT_RECORD": "Finance Agent",
+    "EXPENSE_CREATE": "Finance Agent",
+    "EXPENSE_QUERY": "Finance Agent",
+    "CLIENT_CREATE": "Sales Agent",
+    "CLIENT_QUERY": "Sales Agent",
+    "CLIENT_HISTORY": "Sales Agent",
+    "GENERAL_QUERY": "General Agent",
+    "MARKET_NEWS": "Market Agent",
+    "TREND_ANALYSIS": "Market Agent",
+    "GROWTH_STRATEGY": "Market Agent",
+    "COMPLIANCE_CHECK": "Compliance Agent",
+}
+
+INTENT_TO_ACTIVITY_TYPE = {
+    "INVOICE_CREATE": "INVOICE_CREATED",
+    "INVOICE_UPDATE": "INVOICE_UPDATED",
+    "INVOICE_QUERY": "QUERY_ANSWERED",
+    "BALANCE_CHECK": "QUERY_ANSWERED",
+    "ANALYTICS_QUERY": "QUERY_ANSWERED",
+    "BUSINESS_HEALTH_CHECK": "QUERY_ANSWERED",
+    "PAYMENT_RECORD": "PAYMENT_RECORDED",
+    "EXPENSE_CREATE": "EXPENSE_CREATED",
+    "EXPENSE_QUERY": "QUERY_ANSWERED",
+    "CLIENT_CREATE": "CLIENT_CREATED",
+    "CLIENT_QUERY": "QUERY_ANSWERED",
+    "CLIENT_HISTORY": "QUERY_ANSWERED",
+    "GENERAL_QUERY": "QUERY_ANSWERED",
+    "MARKET_NEWS": "QUERY_ANSWERED",
+    "TREND_ANALYSIS": "QUERY_ANSWERED",
+    "GROWTH_STRATEGY": "QUERY_ANSWERED",
+    "COMPLIANCE_CHECK": "QUERY_ANSWERED",
+}
+
 class OrgIsolationError(Exception):
     """Raised when an operation violates organization isolation rules."""
     pass
@@ -161,8 +201,107 @@ class BackendHttpAdapter:
     async def get_finance_metrics(self, business_id: str, org_id: str, user_id: Optional[str] = None) -> BackendResponse:
         return await self._request("GET", "/api/finance-intelligence/metrics", params={"businessId": business_id}, org_id=org_id, user_id=user_id)
 
+    async def get_finance_insights(self, business_id: str, org_id: str, user_id: Optional[str] = None) -> BackendResponse:
+        return await self._request("GET", "/api/finance-intelligence/insights", params={"businessId": business_id}, org_id=org_id, user_id=user_id)
+
+    async def get_client_revenue_summary(self, business_id: str, org_id: str, limit: int = 5, user_id: Optional[str] = None) -> BackendResponse:
+        return await self._request(
+            "GET",
+            "/api/finance-intelligence/client-revenue-summary",
+            params={"businessId": business_id, "limit": limit},
+            org_id=org_id,
+            user_id=user_id,
+        )
+
+    async def get_client_revenue_detail(self, business_id: str, client_id: str, org_id: str, user_id: Optional[str] = None) -> BackendResponse:
+        return await self._request(
+            "GET",
+            f"/api/finance-intelligence/client-revenue/{client_id}",
+            params={"businessId": business_id},
+            org_id=org_id,
+            user_id=user_id,
+        )
+
     async def get_financial_summary(self, org_id: str, user_id: Optional[str] = None) -> BackendResponse:
         return await self._request("GET", "/api/transactions/summary", org_id=org_id, user_id=user_id)
+
+    async def create_expense(self, org_id: str, user_id: str, payload: Dict[str, Any]) -> BackendResponse:
+        resp = await self._request("POST", "/api/expenses", data=payload, org_id=org_id, user_id=user_id)
+        if resp.success and isinstance(resp.data, dict) and "data" in resp.data:
+            resp.data = resp.data.get("data")
+        return resp
+
+    async def get_expense_summary(
+        self,
+        org_id: str,
+        period: str = "monthly",
+        category: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> BackendResponse:
+        params: Dict[str, Any] = {"period": period}
+        if category:
+            params["category"] = category
+        if date_from:
+            params["dateFrom"] = date_from
+        if date_to:
+            params["dateTo"] = date_to
+
+        resp = await self._request("GET", "/api/expenses/summary", params=params, org_id=org_id, user_id=user_id)
+        if resp.success and isinstance(resp.data, dict) and "data" in resp.data:
+            resp.data = resp.data.get("data")
+        return resp
+
+    async def get_my_organization(self, user_id: str) -> BackendResponse:
+        resp = await self._request("GET", "/api/org/my", user_id=user_id)
+        if resp.success and isinstance(resp.data, dict) and "data" in resp.data:
+            resp.data = resp.data.get("data")
+        return resp
+
+    async def get_organization(self, org_id: str, user_id: str) -> BackendResponse:
+        resp = await self._request("GET", f"/api/org/{org_id}", org_id=org_id, user_id=user_id)
+        if resp.success and isinstance(resp.data, dict) and "data" in resp.data:
+            resp.data = resp.data.get("data")
+        return resp
+
+    async def get_user_by_id(self, user_id: str, org_id: str) -> BackendResponse:
+        return await self._request("GET", f"/api/users/{user_id}", org_id=org_id, user_id=user_id)
+
+    async def get_org_users(self, org_id: str, user_id: Optional[str] = None) -> BackendResponse:
+        return await self._request("GET", "/api/users", org_id=org_id, user_id=user_id)
+
+    async def report_orchestrator_activity(
+        self,
+        org_id: str,
+        user_id: str,
+        intent: str,
+        description: str,
+        status: str = "COMPLETED",
+        session_id: Optional[str] = None,
+        agent_name: Optional[str] = None,
+        activity_type: Optional[str] = None,
+        timestamp: Optional[str] = None,
+    ) -> BackendResponse:
+        normalized_intent = (intent or "UNKNOWN").strip().upper()
+        payload = {
+            "orgId": org_id,
+            "userId": user_id,
+            "type": activity_type or INTENT_TO_ACTIVITY_TYPE.get(normalized_intent, "QUERY_ANSWERED"),
+            "description": description,
+            "agentName": agent_name or INTENT_TO_AGENT_NAME.get(normalized_intent, "Orchestrator"),
+            "status": (status or "COMPLETED").strip().upper(),
+            "intent": normalized_intent,
+            "sessionId": session_id,
+            "timestamp": timestamp or datetime.datetime.utcnow().replace(microsecond=0).isoformat(),
+        }
+        return await self._request(
+            "POST",
+            "/api/orchestrator/activities",
+            data=payload,
+            org_id=org_id,
+            user_id=user_id,
+        )
 
     def set_auth_token(self, token: str):
         self.auth_token = token

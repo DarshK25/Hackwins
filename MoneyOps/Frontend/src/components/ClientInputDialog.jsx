@@ -1,11 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { X, Save, Phone, Mail, MapPin, Hash, User, IndianRupee, Calendar, FileText, Percent } from 'lucide-react';
 
 export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
   const [values, setValues] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const initialValues = Object.fromEntries(
+      (dialog?.fields || []).map((field) => [field.id, field.defaultValue || ""])
+    );
+    setValues(initialValues);
+  }, [dialog]);
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
@@ -21,7 +28,7 @@ export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
       });
       const data = await res.json();
       if (data.ui_event) {
-        window.dispatchEvent(new CustomEvent("voice:" + data.ui_event.type.replace('_', '-'), { detail: data.ui_event }));
+        window.dispatchEvent(new CustomEvent("voice:manual_ui_event", { detail: data.ui_event }));
       }
       onSubmit(data);
       onClose();
@@ -75,7 +82,7 @@ export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
               {field.type === 'textarea' ? (
                 <textarea 
                   className="w-full bg-white/[0.03] text-white rounded-xl px-4 py-2.5 text-sm border border-white/10 focus:border-blue-500/50 focus:bg-white/[0.05] outline-none transition-all resize-none"
-                  defaultValue={field.defaultValue || values[field.id] || ''}
+                  value={values[field.id] || ''}
                   onChange={e => setValues(v => ({...v, [field.id]: e.target.value}))}
                   placeholder={field.placeholder || ''} 
                   rows={2} 
@@ -84,7 +91,7 @@ export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
                 <input 
                   type={field.type} 
                   className="w-full bg-white/[0.03] text-white rounded-xl px-4 py-2.5 text-sm border border-white/10 focus:border-blue-500/50 focus:bg-white/[0.05] outline-none transition-all"
-                  defaultValue={field.defaultValue || values[field.id] || ''}
+                  value={values[field.id] || ''}
                   onChange={e => setValues(v => ({...v, [field.id]: e.target.value}))}
                   placeholder={field.placeholder || ''} 
                 />

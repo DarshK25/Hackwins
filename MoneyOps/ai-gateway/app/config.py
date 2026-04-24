@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     # LLM Providers
     GROQ_API_KEY: str
     ANTHROPIC_API_KEY: Optional[str] = None
+    CARTESIA_API_KEY: Optional[str] = None
     
     # LLM Models
     GROQ_MODEL: str = "llama-3.1-8b-instant"  
@@ -87,6 +88,7 @@ class Settings(BaseSettings):
     LIVEKIT_URL: str = "wss://your-project.livekit.cloud"
     LIVEKIT_API_KEY: Optional[str] = None
     LIVEKIT_API_SECRET: Optional[str] = None
+    VOICE_PROVIDER_CHECK_TIMEOUT_S: float = 6.0
     
     model_config = SettingsConfigDict(
         env_file=str(_ROOT_ENV),

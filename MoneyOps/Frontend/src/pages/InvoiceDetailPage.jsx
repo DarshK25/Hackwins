@@ -18,6 +18,9 @@ import { ArrowLeft, Send, FileText, Loader2, DollarSign, Trash2 } from "lucide-r
 import { toast } from "sonner";
 import { useAuth, useUser } from "@clerk/clerk-react";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import { getTeamSecurityAttemptState } from "@/lib/teamSecurityAttempts";
+import TeamSecurityCodeDialog from "@/components/TeamSecurityCodeDialog";
+import { formatAppDateTime } from "@/lib/dateTime";
 
 const STATUS_BADGE = {
     paid: "bg-[#4CBB1720] text-[#4CBB17] border-[#4CBB1740]",
@@ -57,10 +60,14 @@ export default function InvoiceDetailPage() {
 
     const [invoice, setInvoice] = useState(null);
     const [logs, setLogs] = useState([]);
+    const [logPage, setLogPage] = useState(0);
+    const [logTotalPages, setLogTotalPages] = useState(1);
     const [payments, setPayments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [sending, setSending] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [exporting, setExporting] = useState(false);
+    const [sendCodeDialog, setSendCodeDialog] = useState({ open: false, attempts: 0, resolver: null });
     const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
     const [paymentForm, setPaymentForm] = useState({
         amount: "",
@@ -73,10 +80,16 @@ export default function InvoiceDetailPage() {
     useEffect(() => {
         if (id && internalUserId && internalOrgId) {
             fetchInvoice(id);
-            fetchLogs(id);
+            fetchLogs(id, 0);
             fetchPayments(id);
         }
     }, [id, internalUserId, internalOrgId]);
+
+    useEffect(() => {
+        if (id && internalUserId && internalOrgId) {
+            fetchLogs(id, logPage);
+        }
+    }, [logPage]);
 
     const fetchInvoice = async (invoiceId) => {
         try {
@@ -96,17 +109,23 @@ export default function InvoiceDetailPage() {
         } finally { setLoading(false); }
     };
 
-    const fetchLogs = async (invoiceId) => {
+    const fetchLogs = async (invoiceId, page = 0) => {
         try {
             const token = await getToken();
-            const res = await fetch(`/api/invoices/${invoiceId}/logs`, {
+            const res = await fetch(`/api/audit/entity/INVOICE/${invoiceId}?page=${page}&size=5`, {
                 headers: {
                     "Authorization": `Bearer ${token}`,
                     "X-User-Id": internalUserId,
                     "X-Org-Id": internalOrgId
                 }
             });
-            if (res.ok) setLogs(await res.json());
+            if (res.ok) {
+                const result = await res.json();
+                if (result.success && result.data) {
+                    setLogs(result.data.content || []);
+                    setLogTotalPages(result.data.totalPages || 1);
+                }
+            }
         } catch (error) { console.error(error); }
     };
 
@@ -152,7 +171,8 @@ export default function InvoiceDetailPage() {
             setPaymentForm({ amount: "", paymentDate: new Date().toISOString().split("T")[0], paymentMethod: "bank_transfer", transactionId: "", notes: "" });
             fetchInvoice(invoice.id);
             fetchPayments(invoice.id);
-            fetchLogs(invoice.id);
+            fetchLogs(invoice.id, 0);
+            setLogPage(0);
         } catch (error) { toast.error(error?.message || "Failed to record payment"); }
     };
 
@@ -164,26 +184,64 @@ export default function InvoiceDetailPage() {
         setSending(true);
         try {
             const token = await getToken();
-            const res = await fetch(`/api/invoices/${invoice.id}/send`, {
-                method: "PATCH",
-                headers: {
-                    "Authorization": `Bearer ${token}`,
-                    "X-User-Id": internalUserId,
-                    "X-Org-Id": internalOrgId
+            let codeAttempts = 0;
+
+            while (codeAttempts < 2) {
+                const teamActionCode = await new Promise((resolve) => {
+                    setSendCodeDialog({ open: true, attempts: codeAttempts, resolver: resolve });
+                });
+                if (teamActionCode == null) {
+                    return;
                 }
-            });
-            if (!res.ok) {
-                const errorData = await res.json().catch(() => null);
-                throw new Error(errorData?.message || "Failed to send invoice");
+                if (!teamActionCode) {
+                    toast.error("Team security code is required.");
+                    continue;
+                }
+
+                const res = await fetch(`/api/invoices/${invoice.id}/send`, {
+                    method: "PATCH",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}`,
+                        "X-User-Id": internalUserId,
+                        "X-Org-Id": internalOrgId
+                    },
+                    body: JSON.stringify({ teamActionCode }),
+                });
+
+                if (!res.ok) {
+                    const errorData = await res.json().catch(() => null);
+                    const error = new Error(errorData?.message || "Failed to send invoice");
+                    const attempt = getTeamSecurityAttemptState(error, codeAttempts);
+                    if (attempt.isSecurityCodeError) {
+                        toast.error(attempt.message);
+                        codeAttempts = attempt.nextAttempts;
+                        if (attempt.shouldCancel) {
+                            return;
+                        }
+                        continue;
+                    }
+                    throw error;
+                }
+
+                const updated = await res.json();
+                setInvoice(updated);
+                toast.success(invoice.status?.toLowerCase() === "sent"
+                    ? "Invoice re-sent successfully"
+                    : "Invoice emailed successfully");
+                fetchLogs(invoice.id, 0);
+                setLogPage(0);
+                return;
             }
-            const updated = await res.json();
-            setInvoice(updated);
-            toast.success(invoice.status?.toLowerCase() === "sent"
-                ? "Invoice re-sent successfully"
-                : "Invoice emailed successfully");
-            fetchLogs(invoice.id);
         } catch (error) { toast.error(error?.message || "Failed to send invoice"); }
         finally { setSending(false); }
+    };
+
+    const closeSendCodeDialog = (value = null) => {
+        setSendCodeDialog((current) => {
+            current.resolver?.(value);
+            return { open: false, attempts: 0, resolver: null };
+        });
     };
 
     const handleDelete = async () => {
@@ -206,6 +264,37 @@ export default function InvoiceDetailPage() {
         } catch (error) {
             toast.error(error?.message || "Failed to delete invoice");
             setDeleting(false);
+        }
+    };
+
+    const handleExportPdf = async () => {
+        setExporting(true);
+        try {
+            const token = await getToken();
+            const res = await fetch(`/api/invoices/${invoice.id}/export/pdf`, {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId
+                }
+            });
+            if (!res.ok) throw new Error("Failed to export PDF");
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `invoice-${invoice.invoiceNumber}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            toast.success("PDF exported successfully");
+        } catch (error) {
+            toast.error(error?.message || "Failed to export PDF");
+        } finally {
+            setExporting(false);
         }
     };
 
@@ -248,8 +337,13 @@ export default function InvoiceDetailPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                    <button className="mo-btn-secondary flex items-center gap-2 text-sm" onClick={() => window.print()}>
-                        <FileText className="h-4 w-4" /> Export PDF
+                    <button
+                        className="mo-btn-secondary flex items-center gap-2 text-sm disabled:opacity-40"
+                        onClick={handleExportPdf}
+                        disabled={exporting}
+                    >
+                        {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                        Export PDF
                     </button>
                     <button
                         className="mo-btn-secondary flex items-center gap-2 text-sm disabled:opacity-40"
@@ -337,7 +431,6 @@ export default function InvoiceDetailPage() {
                             ))}
                         </div>
 
-                        {/* Line Items Table */}
                         <h3 className="font-semibold text-white mb-3">Items</h3>
                         <div className="rounded-xl overflow-hidden border border-[#2A2A2A]">
                             <table className="w-full text-sm">
@@ -376,7 +469,6 @@ export default function InvoiceDetailPage() {
 
                 {/* Right — sidebar */}
                 <div className="flex flex-col gap-5">
-                    {/* Payment Summary */}
                     <div className="mo-card">
                         <h2 className="mo-h2 mb-4">Payment Summary</h2>
                         <div className="flex flex-col gap-2 text-sm">
@@ -389,7 +481,6 @@ export default function InvoiceDetailPage() {
                         </div>
                     </div>
 
-                    {/* Payment History */}
                     <div className="mo-card">
                         <h2 className="mo-h2 mb-4">Payment History</h2>
                         {payments.length === 0 ? (
@@ -413,28 +504,48 @@ export default function InvoiceDetailPage() {
                         )}
                     </div>
 
-                    {/* Audit Log */}
                     <div className="mo-card">
                         <h2 className="mo-h2 mb-4">Audit Log</h2>
                         {logs.length === 0 ? (
                             <p className="text-[#A0A0A0] text-sm">No logs found.</p>
                         ) : (
                             <div className="flex flex-col gap-3">
-                                {logs.map((log) => (
-                                    <div key={log.id} className="flex gap-3 text-sm">
+                                {logs.map((log, index) => (
+                                    <div key={log.id || `${log.entityId || "invoice-log"}-${index}`} className="flex gap-3 text-sm">
                                         <div className="w-2 h-2 mt-1.5 rounded-full bg-[#60A5FA] shrink-0" />
                                         <div>
-                                            <p className="font-medium text-white capitalize">{log.action?.replace("_", " ")}</p>
-                                            <p className="text-xs text-[#A0A0A0]">{new Date(log.createdAt).toLocaleString()}</p>
-                                            {log.details && <p className="text-xs text-[#A0A0A0] mt-0.5">{JSON.stringify(log.details).slice(0, 50)}…</p>}
+                                            <p className="font-medium text-white capitalize">{(log.operation || log.action || "").replace("_", " ") || "Updated"}</p>
+                                            <p className="text-xs text-[#A0A0A0]">{formatAppDateTime(log.timestamp || log.createdAt)}</p>
+                                            {(log.changes || log.newValues || log.details) && (
+                                                <p className="text-xs text-[#A0A0A0] mt-0.5">
+                                                    {String(log.changes || log.newValues || JSON.stringify(log.details)).slice(0, 80)}...
+                                                </p>
+                                            )}
                                         </div>
                                     </div>
                                 ))}
+                                {logTotalPages > 1 && (
+                                    <div className="flex items-center justify-between pt-2 text-xs text-[#A0A0A0]">
+                                        <button className="mo-btn-secondary px-3 py-1 disabled:opacity-40" disabled={logPage === 0} onClick={() => setLogPage((page) => Math.max(0, page - 1))}>
+                                            Previous
+                                        </button>
+                                        <span>Page {logPage + 1} of {logTotalPages}</span>
+                                        <button className="mo-btn-secondary px-3 py-1 disabled:opacity-40" disabled={logPage >= logTotalPages - 1} onClick={() => setLogPage((page) => page + 1)}>
+                                            Next
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
                 </div>
             </div>
+            <TeamSecurityCodeDialog
+                open={sendCodeDialog.open}
+                attempts={sendCodeDialog.attempts}
+                onClose={() => closeSendCodeDialog(null)}
+                onSubmit={(code) => closeSendCodeDialog(code)}
+            />
         </div>
     );
 }

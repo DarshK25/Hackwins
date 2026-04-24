@@ -1,346 +1,450 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
+    AlertTriangle,
     BarChart3,
-    TrendingUp,
-    TrendingDown,
-    Target,
-    Calendar,
+    Download,
     Loader2,
     RefreshCw,
-    Info,
+    TrendingDown,
+    TrendingUp,
+    Users,
+    Wallet,
 } from "lucide-react";
-import { toast } from "sonner";
-import { InteractiveTrendCard } from "@/components/ui/trend-card";
-import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import {
+    Bar,
+    BarChart,
+    CartesianGrid,
+    Legend,
+    ResponsiveContainer,
+    Tooltip,
+    XAxis,
+    YAxis,
+} from "recharts";
 import { useAuth, useUser } from "@clerk/clerk-react";
+import { toast } from "sonner";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 
-// ── Fallback Data (only used when API fails) ────────────────────────────────
-const FALLBACK_DATA = {
-    kpis: [
-        { name: "Total Revenue", value: "₹0", trend: "neutral", change: "0%" },
-        { name: "Net Profit", value: "₹0", trend: "neutral", change: "0%" },
-        { name: "Expenses", value: "₹0", trend: "neutral", change: "0%" },
-        { name: "Active Clients", value: "0", trend: "neutral", change: "0%" },
-    ],
-    revenueByCategory: [],
-    monthlyTrends: [
-        { month: "Jan", revenue: 0, expenses: 0 },
-        { month: "Feb", revenue: 0, expenses: 0 },
-        { month: "Mar", revenue: 0, expenses: 0 },
-    ],
-    clientMetrics: [
-        { metric: "Client Retention Rate", value: 0, target: 95, percentage: 0 },
-        { metric: "On-time Payment Rate", value: 0, target: 90, percentage: 0 },
-        { metric: "Avg Project Value", value: "₹0", target: "₹3.0L", percentage: 0 },
-        { metric: "New Leads / Month", value: 0, target: 20, percentage: 0 },
-    ],
-};
+const PERIOD_OPTIONS = [
+    { value: "monthly", label: "This Month" },
+    { value: "quarterly", label: "This Quarter" },
+    { value: "yearly", label: "This Year" },
+];
+
+function formatMoney(value) {
+    return `₹${Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+function formatPercent(value) {
+    return `${Number(value || 0).toFixed(1)}%`;
+}
+
+function ChartTooltip({ active, payload, label }) {
+    if (!active || !payload?.length) {
+        return null;
+    }
+
+    return (
+        <div className="rounded-xl border border-[#2A2A2A] bg-[#111111] px-3 py-2 text-sm shadow-lg">
+            <div className="mb-1 text-xs text-[#A0A0A0]">{label}</div>
+            {payload.map((entry) => (
+                <div key={entry.dataKey} className="flex items-center justify-between gap-4">
+                    <span style={{ color: entry.color }}>{entry.name}</span>
+                    <span className="text-white">{typeof entry.value === "number" ? formatMoney(entry.value) : entry.value}</span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function StatCard({ label, value, caption, icon: Icon, accent }) {
+    return (
+        <div className="mo-stat-card">
+            <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-medium text-[#A0A0A0]">{label}</span>
+                <Icon className="h-4 w-4" style={{ color: accent || "#A0A0A0" }} />
+            </div>
+            <div className="text-2xl font-bold text-white">{value}</div>
+            <div className="mt-1 text-xs text-[#A0A0A0]">{caption}</div>
+        </div>
+    );
+}
+
+async function parseError(response, fallbackMessage) {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+        const payload = await response.json().catch(() => null);
+        return payload?.message || payload?.error || fallbackMessage;
+    }
+    const text = await response.text().catch(() => "");
+    return text || fallbackMessage;
+}
 
 export default function AnalyticsPage() {
     const { userId, orgId } = useOnboardingStatus();
     const { getToken } = useAuth();
     const { user } = useUser();
-    const [data, setData] = useState(null);
-    const [orgName, setOrgName] = useState("Your Business");
+
+    const [period, setPeriod] = useState("monthly");
+    const [metrics, setMetrics] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [exporting, setExporting] = useState(false);
 
     useEffect(() => {
-        if (user?.id) {
-            fetchAnalytics();
-            fetchOrgName();
+        if (user?.id && orgId) {
+            fetchMetrics();
         }
-    }, [orgId, userId, user?.id]);
+    }, [user?.id, orgId, period]);
 
-    const fetchOrgName = async () => {
-        if (!userId) return;
-        try {
-            const res = await fetch(`/api/org/my`, {
-                headers: { "X-User-Id": userId, "X-Org-Id": orgId }
-            });
-            if (res.ok) {
-                const result = await res.json();
-                setOrgName(result.data?.legalName || "Your Business");
-            }
-        } catch (err) {
-            console.error("Failed to fetch org name", err);
-        }
-    };
+    async function buildHeaders() {
+        const token = await getToken();
+        return {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            "X-User-Id": userId || user?.id,
+            "X-Org-Id": orgId,
+        };
+    }
 
-    const fetchAnalytics = async () => {
+    async function fetchMetrics() {
         try {
             setLoading(true);
-            const token = await getToken();
-            const headers = {
-                "Authorization": `Bearer ${token}`,
-                "X-User-Id": user?.id,
-                "X-Org-Id": orgId
-            };
+            const headers = await buildHeaders();
+            const response = await fetch(
+                `/api/overview/metrics?orgId=${encodeURIComponent(orgId)}&period=${encodeURIComponent(period)}`,
+                { headers }
+            );
 
-            // Fetch all data in parallel from our backend
-            const [metricsRes, budgetRes, ledgerRes, clientsRes, invoicesRes] = await Promise.all([
-                fetch(`/api/finance-intelligence/metrics?businessId=1`, { headers }),
-                fetch(`/api/finance-intelligence/budget?businessId=1`, { headers }),
-                fetch(`/api/finance-intelligence/ledger?businessId=1`, { headers }),
-                fetch(`/api/clients`, { headers }),
-                fetch(`/api/invoices`, { headers }),
-            ]);
-
-            let metrics = null, budget = null, ledger = null, clients = [], invoices = [];
-
-            if (metricsRes.ok) metrics = await metricsRes.json();
-            if (budgetRes.ok) budget = await budgetRes.json();
-            if (ledgerRes.ok) ledger = await ledgerRes.json();
-            if (clientsRes.ok) {
-                const cr = await clientsRes.json();
-                clients = cr.data || cr || [];
-            }
-            if (invoicesRes.ok) {
-                const ir = await invoicesRes.json();
-                invoices = ir.data || ir || [];
+            if (!response.ok) {
+                throw new Error(await parseError(response, "Failed to load overview metrics"));
             }
 
-            const revenue = metrics?.revenue || 0;
-            const expenses = metrics?.expenses || 0;
-            const netProfit = metrics?.netProfit || 0;
-            const collectionRate = metrics?.collectionRate || 0;
-            const totalClients = Array.isArray(clients) ? clients.length : 0;
-
-            // Build KPIs from real data
-            const kpis = [
-                { name: "Total Revenue", value: `₹${revenue.toLocaleString("en-IN")}`, trend: revenue > 0 ? "up" : "neutral", change: revenue > 0 ? `+${collectionRate.toFixed(0)}% collected` : "0%" },
-                { name: "Net Profit", value: `₹${netProfit.toLocaleString("en-IN")}`, trend: netProfit > 0 ? "up" : netProfit < 0 ? "down" : "neutral", change: revenue > 0 ? `${((netProfit / revenue) * 100).toFixed(1)}% margin` : "0%" },
-                { name: "Expenses", value: `₹${expenses.toLocaleString("en-IN")}`, trend: expenses > 0 ? "down" : "neutral", change: revenue > 0 ? `${((expenses / revenue) * 100).toFixed(1)}% of revenue` : "0%" },
-                { name: "Active Clients", value: String(totalClients), trend: totalClients > 0 ? "up" : "neutral", change: `${metrics?.totalInvoices || 0} invoices` },
-            ];
-
-            // Build revenue by category from budget data
-            const budgetItems = budget?.items || [];
-            const revenueByCategory = budgetItems.length > 0
-                ? budgetItems.map(b => ({
-                    category: b.category,
-                    amount: b.actual || 0,
-                    percentage: budget.totalActual > 0 ? Math.round((b.actual / budget.totalActual) * 100) : 0,
-                }))
-                : FALLBACK_DATA.revenueByCategory;
-
-            // Build monthly trends from ledger entries
-            const entries = ledger?.entries || [];
-            const monthMap = {};
-            entries.forEach(e => {
-                const d = new Date(e.date);
-                const key = d.toLocaleString("en-US", { month: "short" });
-                if (!monthMap[key]) monthMap[key] = { month: key, revenue: 0, expenses: 0 };
-                if (e.type === "INCOME") monthMap[key].revenue += e.amount || 0;
-                else monthMap[key].expenses += e.amount || 0;
-            });
-            const monthlyTrends = Object.values(monthMap).length > 0
-                ? Object.values(monthMap)
-                : FALLBACK_DATA.monthlyTrends;
-
-            // Build client metrics from real data
-            const paidInvoices = metrics?.paidCount || 0;
-            const totalInvoices = metrics?.totalInvoices || 0;
-            const paymentRate = totalInvoices > 0 ? Math.round((paidInvoices / totalInvoices) * 100) : 0;
-            const avgValue = totalClients > 0 ? Math.round(revenue / totalClients) : 0;
-
-            const clientMetrics = [
-                { metric: "Collection Rate", value: collectionRate, target: 90, percentage: collectionRate },
-                { metric: "On-time Payment Rate", value: paymentRate, target: 90, percentage: paymentRate },
-                { metric: "Avg Client Value", value: `₹${avgValue.toLocaleString("en-IN")}`, target: "₹1,00,000", percentage: Math.min(100, Math.round((avgValue / 100000) * 100)) },
-                { metric: "Total Invoices", value: totalInvoices, target: 20, percentage: Math.min(100, Math.round((totalInvoices / 20) * 100)) },
-            ];
-
-            setData({ kpis, revenueByCategory, monthlyTrends, clientMetrics });
+            const data = await response.json();
+            setMetrics(data);
         } catch (error) {
-            console.error("Failed to load analytics:", error);
-            toast.error("Failed to load analytics data");
-            setData(FALLBACK_DATA);
+            console.error("Failed to load overview metrics", error);
+            toast.error(error.message || "Failed to load overview metrics");
+            setMetrics(null);
         } finally {
             setLoading(false);
         }
-    };
+    }
+
+    async function handleExportReport() {
+        try {
+            setExporting(true);
+            const headers = await buildHeaders();
+            const response = await fetch(
+                `/api/overview/export/pdf?orgId=${encodeURIComponent(orgId)}&period=${encodeURIComponent(period)}`,
+                { headers }
+            );
+
+            if (!response.ok) {
+                throw new Error(await parseError(response, "Failed to export overview report"));
+            }
+
+            const blob = await response.blob();
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const disposition = response.headers.get("content-disposition");
+            const filenameMatch = disposition?.match(/filename=\"([^\"]+)\"/);
+            const filename = filenameMatch?.[1] || `overview-${period}-${new Date().toISOString().slice(0, 10)}.pdf`;
+
+            const link = document.createElement("a");
+            link.href = downloadUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(downloadUrl);
+            toast.success("Overview report exported");
+        } catch (error) {
+            console.error("Failed to export overview report", error);
+            toast.error(error.message || "Failed to export overview report");
+        } finally {
+            setExporting(false);
+        }
+    }
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-96">
+            <div className="flex h-96 items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-[#4CBB17]" />
             </div>
         );
     }
 
-    if (!data) {
+    if (!metrics) {
         return (
-            <div className="flex flex-col items-center justify-center h-96 gap-4">
-                <p className="text-[#A0A0A0]">Failed to load analytics data</p>
-                <button onClick={fetchAnalytics} className="mo-btn-primary flex items-center gap-2">
-                    <RefreshCw className="h-4 w-4" /> Retry
+            <div className="flex h-96 flex-col items-center justify-center gap-4">
+                <AlertTriangle className="h-10 w-10 text-[#FFB300]" />
+                <p className="text-[#A0A0A0]">Failed to load overview data</p>
+                <button onClick={fetchMetrics} className="mo-btn-primary flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4" />
+                    Retry
                 </button>
             </div>
         );
     }
 
-    const { kpis, revenueByCategory, monthlyTrends, clientMetrics } = data;
+    const orgName = metrics.organization?.tradingName || metrics.organization?.legalName || "Your Business";
+    const topClients = metrics.topClients || [];
+    const monthComparisons = metrics.monthComparisons || [];
+    const invoiceBreakdown = metrics.invoiceStatusBreakdown || {};
+    const complianceSummary = metrics.complianceSummary || {};
+
+    const monthChartData = monthComparisons.map((row) => ({
+        label: row.label,
+        Revenue: Number(row.revenue || 0),
+        Expenses: Number(row.expenses || 0),
+        Net: Number(row.netProfitLoss || 0),
+    }));
+
+    const topClientChartData = topClients.map((client) => ({
+        label: client.clientName,
+        Revenue: Number(client.revenue || 0),
+    }));
 
     return (
         <div className="flex flex-col gap-6">
-            {/* ── Header ──────────────────────────────────────────────────────── */}
-            <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                    <h1 className="mo-h1">Analytics</h1>
-                    <p className="mo-text-secondary mt-1">Performance metrics for {orgName}</p>
+                    <h1 className="mo-h1">Overview</h1>
+                    <p className="mo-text-secondary mt-1">{metrics.reportTitle} for {orgName}</p>
                 </div>
-                <div className="flex gap-2">
-                    <button onClick={fetchAnalytics} className="mo-btn-secondary flex items-center gap-2">
-                        <RefreshCw className="h-4 w-4" /> Refresh
+                <div className="flex flex-wrap items-center gap-2">
+                    <select
+                        value={period}
+                        onChange={(event) => setPeriod(event.target.value)}
+                        className="rounded-lg border border-[#2A2A2A] bg-[#111111] px-3 py-2 text-sm text-white outline-none"
+                    >
+                        {PERIOD_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
+                    <button onClick={fetchMetrics} className="mo-btn-secondary flex items-center gap-2" disabled={loading}>
+                        <RefreshCw className="h-4 w-4" />
+                        Refresh
                     </button>
-                    <button className="mo-btn-primary flex items-center gap-2">
-                        <BarChart3 className="h-4 w-4" /> Export Report
+                    <button
+                        onClick={handleExportReport}
+                        disabled={exporting}
+                        className="mo-btn-primary flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                        {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                        {exporting ? "Generating..." : "Export Report"}
                     </button>
                 </div>
             </div>
 
-            {/* ── KPIs ────────────────────────────────────────────────────────── */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                {kpis.map((kpi, index) => (
-                    <div key={index} className="mo-stat-card">
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="text-sm text-[#A0A0A0] font-medium">{kpi.name}</span>
-                            {kpi.trend === "up" ? (
-                                <TrendingUp className="h-4 w-4 text-[#4CBB17]" />
-                            ) : kpi.trend === "down" ? (
-                                <TrendingDown className="h-4 w-4 text-[#CD1C18]" />
-                            ) : (
-                                <Info className="h-4 w-4 text-[#A0A0A0]" />
-                            )}
-                        </div>
-                        <div className="text-2xl font-bold text-white">{kpi.value}</div>
-                        <p className={`text-xs mt-1 font-medium ${kpi.trend === "up"
-                            ? "text-[#4CBB17]"
-                            : kpi.trend === "down"
-                                ? "text-[#CD1C18]"
-                                : "text-[#A0A0A0]"
-                            }`}>
-                            {kpi.change}
-                        </p>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <StatCard
+                    label="Total Revenue"
+                    value={formatMoney(metrics.totalRevenue)}
+                    caption={`${metrics.reportTitle}`}
+                    icon={TrendingUp}
+                    accent="#4CBB17"
+                />
+                <StatCard
+                    label="Total Expenses"
+                    value={formatMoney(metrics.totalExpenses)}
+                    caption="Live expense transactions"
+                    icon={TrendingDown}
+                    accent="#CD1C18"
+                />
+                <StatCard
+                    label="Net Profit/Loss"
+                    value={formatMoney(metrics.netProfitLoss)}
+                    caption={Number(metrics.netProfitLoss) >= 0 ? "Positive operating result" : "Operating loss for selected period"}
+                    icon={Wallet}
+                    accent={Number(metrics.netProfitLoss) >= 0 ? "#4CBB17" : "#CD1C18"}
+                />
+                <StatCard
+                    label="Outstanding Invoices"
+                    value={`${metrics.outstandingInvoicesCount}`}
+                    caption={formatMoney(metrics.outstandingInvoicesAmount)}
+                    icon={BarChart3}
+                    accent="#FFB300"
+                />
+                <StatCard
+                    label="Overdue Invoices"
+                    value={`${metrics.overdueInvoicesCount}`}
+                    caption={formatMoney(metrics.overdueInvoicesAmount)}
+                    icon={AlertTriangle}
+                    accent="#CD1C18"
+                />
+                <StatCard
+                    label="New Clients"
+                    value={`${metrics.newClients}`}
+                    caption="Created in selected period"
+                    icon={Users}
+                    accent="#60A5FA"
+                />
+            </div>
+
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+                <div className="mo-card">
+                    <div className="mb-4">
+                        <h2 className="mo-h2">Monthly Comparison</h2>
+                        <p className="mo-text-secondary mt-1">Revenue, expenses, and net movement across the selected window.</p>
                     </div>
-                ))}
-            </div>
+                    <div className="h-[340px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={monthChartData}>
+                                <CartesianGrid stroke="#1F1F1F" vertical={false} />
+                                <XAxis dataKey="label" stroke="#8F8F8F" tickLine={false} axisLine={false} />
+                                <YAxis stroke="#8F8F8F" tickLine={false} axisLine={false} tickFormatter={(value) => `₹${Number(value).toLocaleString("en-IN")}`} />
+                                <Tooltip content={<ChartTooltip />} />
+                                <Legend />
+                                <Bar dataKey="Revenue" fill="#4CBB17" radius={[6, 6, 0, 0]} />
+                                <Bar dataKey="Expenses" fill="#CD1C18" radius={[6, 6, 0, 0]} />
+                                <Bar dataKey="Net" fill="#60A5FA" radius={[6, 6, 0, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
 
-            {/* ── Charts Row ──────────────────────────────────────────────────── */}
-            <div className="grid gap-6 md:grid-cols-2">
-                {/* Revenue Trend — InteractiveTrendCard */}
-                <InteractiveTrendCard
-                    title="Revenue"
-                    subtitle="Transaction Trend"
-                    totalValue={monthlyTrends.reduce((s, m) => s + m.revenue, 0)}
-                    newValue={monthlyTrends[monthlyTrends.length - 1]?.revenue ?? 0}
-                    totalValueLabel="Total Revenue"
-                    newValueLabel="Last Month"
-                    chartData={monthlyTrends.map(m => ({ month: m.month, value: m.revenue }))}
-                    defaultBarColor="#2A2A2A"
-                    barColor="#4CBB17"
-                    adjacentBarColor="#4CBB1760"
-                    formatValue={(v) => `₹${v.toLocaleString("en-IN")}`}
-                    formatTooltip={(v) => `₹${v.toLocaleString("en-IN")}`}
-                />
-
-                {/* Expense Trend — InteractiveTrendCard */}
-                <InteractiveTrendCard
-                    title="Expenses"
-                    subtitle="Transaction Trend"
-                    totalValue={monthlyTrends.reduce((s, m) => s + m.expenses, 0)}
-                    newValue={monthlyTrends[monthlyTrends.length - 1]?.expenses ?? 0}
-                    totalValueLabel="Total Expenses"
-                    newValueLabel="Last Month"
-                    chartData={monthlyTrends.map(m => ({ month: m.month, value: m.expenses }))}
-                    defaultBarColor="#2A2A2A"
-                    barColor="#CD1C18"
-                    adjacentBarColor="#CD1C1860"
-                    formatValue={(v) => `₹${v.toLocaleString("en-IN")}`}
-                    formatTooltip={(v) => `₹${v.toLocaleString("en-IN")}`}
-                />
-            </div>
-
-            {/* ── Expense by Category ──────────────────────────────────────────── */}
-            {revenueByCategory.length > 0 && (
-                <InteractiveTrendCard
-                    title="Expense by Category"
-                    subtitle="Breakdown of spending"
-                    totalValue={revenueByCategory.reduce((s, c) => s + c.amount, 0)}
-                    newValue={Math.max(...revenueByCategory.map(c => c.amount))}
-                    totalValueLabel="Total Spend"
-                    newValueLabel="Top Category"
-                    chartData={revenueByCategory.map(c => ({ month: c.category.slice(0, 4), value: c.amount }))}
-                    defaultBarColor="#2A2A2A"
-                    barColor="#4CBB17"
-                    adjacentBarColor="#4CBB1760"
-                    formatValue={(v) => `₹${v.toLocaleString("en-IN")}`}
-                    formatTooltip={(v) => `₹${v.toLocaleString("en-IN")}`}
-                />
-            )}
-
-            {/* ── Client Metrics ───────────────────────────────────────────────── */}
-            <div className="mo-card">
-                <h2 className="mo-h2 mb-1">Client Performance Metrics</h2>
-                <p className="mo-text-secondary mb-6">Track your client-related KPIs and targets</p>
-                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-                    {clientMetrics.map((metric, index) => (
-                        <div key={index} className="space-y-3">
-                            <div className="flex items-center justify-between">
-                                <span className="text-sm font-medium text-white">{metric.metric}</span>
-                                <Target className="h-4 w-4 text-[#A0A0A0]" />
-                            </div>
-                            <div className="space-y-1.5">
-                                <div className="flex justify-between text-sm items-end">
-                                    <span className="font-bold text-lg leading-none text-white">
-                                        {metric.value}
-                                        {metric.metric.includes("Rate") ? "%" : ""}
-                                    </span>
-                                    <span className="text-xs text-[#A0A0A0]">
-                                        Target: {metric.target}
-                                        {metric.metric.includes("Rate") ? "%" : ""}
-                                    </span>
-                                </div>
-                                <div className="mo-progress-bg">
-                                    <div
-                                        className="h-full rounded-full transition-all duration-500"
-                                        style={{
-                                            width: `${Math.min(metric.percentage, 100)}%`,
-                                            backgroundColor:
-                                                metric.percentage >= 90
-                                                    ? "#4CBB17"
-                                                    : metric.percentage >= 70
-                                                        ? "#FFB300"
-                                                        : "#CD1C18",
-                                        }}
-                                    />
-                                </div>
-                                <div className="text-xs text-[#A0A0A0]">
-                                    {Math.round(metric.percentage)}% of target achieved
-                                </div>
-                            </div>
+                <div className="mo-card">
+                    <div className="mb-4">
+                        <h2 className="mo-h2">Invoice Status</h2>
+                        <p className="mo-text-secondary mt-1">Breakdown of invoices issued in the selected period.</p>
+                    </div>
+                    <div className="grid gap-3">
+                        <div className="rounded-xl border border-[#2A2A2A] bg-[#111111] p-4">
+                            <div className="text-xs uppercase tracking-wide text-[#A0A0A0]">Draft</div>
+                            <div className="mt-1 text-2xl font-bold text-white">{invoiceBreakdown.draft || 0}</div>
                         </div>
-                    ))}
+                        <div className="rounded-xl border border-[#2A2A2A] bg-[#111111] p-4">
+                            <div className="text-xs uppercase tracking-wide text-[#A0A0A0]">Sent</div>
+                            <div className="mt-1 text-2xl font-bold text-white">{invoiceBreakdown.sent || 0}</div>
+                        </div>
+                        <div className="rounded-xl border border-[#2A2A2A] bg-[#111111] p-4">
+                            <div className="text-xs uppercase tracking-wide text-[#A0A0A0]">Paid</div>
+                            <div className="mt-1 text-2xl font-bold text-[#4CBB17]">{invoiceBreakdown.paid || 0}</div>
+                        </div>
+                        <div className="rounded-xl border border-[#2A2A2A] bg-[#111111] p-4">
+                            <div className="text-xs uppercase tracking-wide text-[#A0A0A0]">Overdue</div>
+                            <div className="mt-1 text-2xl font-bold text-[#CD1C18]">{invoiceBreakdown.overdue || 0}</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* ── AI Insights ─────────────────────────────────────────────────── */}
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                <div className="mo-card">
+                    <div className="mb-4">
+                        <h2 className="mo-h2">Top Clients by Revenue</h2>
+                        <p className="mo-text-secondary mt-1">Live ranking from income transactions matched to clients.</p>
+                    </div>
+                    {topClients.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-[#2A2A2A] bg-[#111111] px-4 py-10 text-center text-sm text-[#A0A0A0]">
+                            No client-linked income transactions in this period.
+                        </div>
+                    ) : (
+                        <>
+                            <div className="mb-5 h-[260px]">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={topClientChartData} layout="vertical" margin={{ left: 24 }}>
+                                        <CartesianGrid stroke="#1F1F1F" horizontal={false} />
+                                        <XAxis type="number" stroke="#8F8F8F" tickLine={false} axisLine={false} tickFormatter={(value) => `₹${Number(value).toLocaleString("en-IN")}`} />
+                                        <YAxis type="category" dataKey="label" stroke="#8F8F8F" tickLine={false} axisLine={false} width={110} />
+                                        <Tooltip content={<ChartTooltip />} />
+                                        <Bar dataKey="Revenue" fill="#4CBB17" radius={[0, 6, 6, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div className="overflow-hidden rounded-xl border border-[#202020]">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-[#161616]">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#8F8F8F]">Client</th>
+                                            <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wide text-[#8F8F8F]">Revenue</th>
+                                            <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wide text-[#8F8F8F]">Transactions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-[#1F1F1F]">
+                                        {topClients.map((client) => (
+                                            <tr key={client.clientId || client.clientName} className="bg-[#101010]">
+                                                <td className="px-4 py-3 text-white">{client.clientName}</td>
+                                                <td className="px-4 py-3 text-right text-white">{formatMoney(client.revenue)}</td>
+                                                <td className="px-4 py-3 text-right text-[#A0A0A0]">{client.transactionCount}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </>
+                    )}
+                </div>
+
+                <div className="mo-card">
+                    <div className="mb-4">
+                        <h2 className="mo-h2">Compliance Summary</h2>
+                        <p className="mo-text-secondary mt-1">Regulatory readiness based on your live organization and invoice data.</p>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                        <div className="rounded-xl border border-[#2A2A2A] bg-[#111111] p-4">
+                            <div className="text-xs uppercase tracking-wide text-[#A0A0A0]">Regulatory Completeness</div>
+                            <div className="mt-1 text-2xl font-bold text-white">{formatPercent(complianceSummary.regulatoryCompletenessPercentage || 0)}</div>
+                        </div>
+                        <div className="rounded-xl border border-[#2A2A2A] bg-[#111111] p-4">
+                            <div className="text-xs uppercase tracking-wide text-[#A0A0A0]">GST Collected</div>
+                            <div className="mt-1 text-2xl font-bold text-white">{formatMoney(complianceSummary.totalGstCollected)}</div>
+                        </div>
+                        <div className="rounded-xl border border-[#2A2A2A] bg-[#111111] p-4">
+                            <div className="text-xs uppercase tracking-wide text-[#A0A0A0]">Paid Invoices</div>
+                            <div className="mt-1 text-2xl font-bold text-[#4CBB17]">{complianceSummary.paidInvoices || 0}</div>
+                        </div>
+                        <div className="rounded-xl border border-[#2A2A2A] bg-[#111111] p-4">
+                            <div className="text-xs uppercase tracking-wide text-[#A0A0A0]">Overdue Invoices</div>
+                            <div className="mt-1 text-2xl font-bold text-[#CD1C18]">{complianceSummary.overdueInvoices || 0}</div>
+                        </div>
+                    </div>
+
+                    <div className="mt-5 rounded-xl border border-[#2A2A2A] bg-[#111111] p-4">
+                        <div className="mb-3 text-sm font-semibold text-white">Missing Compliance Fields</div>
+                        {Array.isArray(complianceSummary.missingComplianceFields) && complianceSummary.missingComplianceFields.length > 0 ? (
+                            <div className="space-y-2">
+                                {complianceSummary.missingComplianceFields.map((item) => (
+                                    <div key={item} className="rounded-lg border border-[#30261B] bg-[#FFB30010] px-3 py-2 text-sm text-[#D6B36A]">
+                                        {item}
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-sm text-[#A0A0A0]">No missing compliance fields detected.</div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
             <div className="mo-card">
-                <h2 className="mo-h2 mb-1">AI Insights & Recommendations</h2>
-                <p className="mo-text-secondary mb-5">Data-driven insights from your live financial data</p>
-                <div className="p-4 bg-[#4CBB1710] border border-[#4CBB1730] rounded-xl flex gap-4 items-start">
-                    <div className="bg-[#4CBB1720] p-2 rounded-lg shrink-0">
-                        <TrendingUp className="h-5 w-5 text-[#4CBB17]" />
-                    </div>
-                    <div>
-                        <h4 className="font-semibold text-[#4CBB17] text-sm">Live Financial Summary</h4>
-                        <p className="text-sm text-[#A0A0A0] mt-1 leading-relaxed">
-                            Your collection rate is <strong className="text-white">{(data?.kpis?.[0]?.change) || "N/A"}</strong>.
-                            {" "}You have <strong className="text-white">{data?.kpis?.[3]?.value || 0} clients</strong> generating
-                            {" "}<strong className="text-white">{data?.kpis?.[0]?.value || "₹0"}</strong> in revenue.
-                            Focus on clearing overdue invoices to improve cashflow.
-                        </p>
-                    </div>
+                <div className="mb-4">
+                    <h2 className="mo-h2">Month-by-Month Comparison Table</h2>
+                    <p className="mo-text-secondary mt-1">Revenue, expense, and net totals by month in the current reporting window.</p>
+                </div>
+                <div className="overflow-hidden rounded-xl border border-[#202020]">
+                    <table className="w-full text-sm">
+                        <thead className="bg-[#161616]">
+                            <tr>
+                                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#8F8F8F]">Month</th>
+                                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wide text-[#8F8F8F]">Revenue</th>
+                                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wide text-[#8F8F8F]">Expenses</th>
+                                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wide text-[#8F8F8F]">Net</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#1F1F1F]">
+                            {monthComparisons.map((row) => (
+                                <tr key={row.label} className="bg-[#101010]">
+                                    <td className="px-4 py-3 text-white">{row.label}</td>
+                                    <td className="px-4 py-3 text-right text-[#4CBB17]">{formatMoney(row.revenue)}</td>
+                                    <td className="px-4 py-3 text-right text-[#CD1C18]">{formatMoney(row.expenses)}</td>
+                                    <td className={`px-4 py-3 text-right font-medium ${Number(row.netProfitLoss) >= 0 ? "text-white" : "text-[#CD1C18]"}`}>
+                                        {formatMoney(row.netProfitLoss)}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>

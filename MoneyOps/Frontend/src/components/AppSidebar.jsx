@@ -118,6 +118,11 @@ export function AppSidebar(props) {
       icon: <Users className="h-4 w-4" />,
     },
     {
+      href: "/expenses",
+      title: "Expenses",
+      icon: <CreditCard className="h-4 w-4" />,
+    },
+    {
       href: "/cashflow",
       title: "Cash Flow",
       icon: <BarChart3 className="h-4 w-4" />,
@@ -157,12 +162,18 @@ export function AppSidebar(props) {
     },
   ];
 
-  const utilityNavItems = [
+    const utilityNavItems = [
     {
       href: "/teams",
       title: "Teams",
       icon: <Users className="h-4 w-4" />,
-    },{
+    },
+    {
+      href: "/audit-logs",
+      title: "Audit Logs",
+      icon: <FileText className="h-4 w-4" />,
+    },
+    {
       href: "/settings",
       title: "Settings",
       icon: <Settings className="h-4 w-4" />,

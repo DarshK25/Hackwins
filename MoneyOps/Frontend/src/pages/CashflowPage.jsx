@@ -1,47 +1,9 @@
-import { TrendingUp, TrendingDown, AlertTriangle, Calendar } from "lucide-react";
-
-const forecastData = [
-    { period: "Next 7 days", inflow: 15000, outflow: 12000, net: 3000, status: "positive" },
-    { period: "Next 30 days", inflow: 65000, outflow: 48000, net: 17000, status: "positive" },
-    { period: "Next 90 days", inflow: 195000, outflow: 165000, net: 30000, status: "positive" },
-];
-
-const upcomingPayments = [
-    { id: 1, description: "Office Rent", amount: 3500, dueDate: "2024-01-25", priority: "high" },
-    { id: 2, description: "Software Subscriptions", amount: 890, dueDate: "2024-01-28", priority: "medium" },
-    { id: 3, description: "Vendor Payment - Acme Corp", amount: 12500, dueDate: "2024-02-01", priority: "high" },
-    { id: 4, description: "Utilities", amount: 450, dueDate: "2024-02-05", priority: "low" },
-];
-
-const expectedIncome = [
-    { id: 1, description: "Client A - Project Payment", amount: 25000, expectedDate: "2024-01-30" },
-    { id: 2, description: "Client B - Monthly Retainer", amount: 8000, expectedDate: "2024-02-01" },
-    { id: 3, description: "Client C - Invoice #1234", amount: 15000, expectedDate: "2024-02-15" },
-];
-
-const insights = [
-    {
-        border: "#4CBB1740",
-        bg: "#4CBB1710",
-        title: "Positive Trend",
-        titleColor: "#4CBB17",
-        body: "Your cashflow is trending positively with a 15% increase over the last quarter.",
-    },
-    {
-        border: "#FFB30040",
-        bg: "#FFB30010",
-        title: "Optimization Opportunity",
-        titleColor: "#FFB300",
-        body: "Consider negotiating extended payment terms with vendors to improve cashflow timing.",
-    },
-    {
-        border: "#60A5FA40",
-        bg: "#60A5FA10",
-        title: "Recommendation",
-        titleColor: "#60A5FA",
-        body: "Set up automatic invoice reminders to reduce payment delays by an estimated 8 days.",
-    },
-];
+import { useState, useEffect } from "react";
+import { TrendingUp, TrendingDown, AlertTriangle, Calendar, Loader2, Plus } from "lucide-react";
+import { useAuth } from "@clerk/clerk-react";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { toast } from "sonner";
 
 const PRIORITY_BADGE = {
     high: "bg-[#CD1C1820] text-[#CD1C18] border-[#CD1C1840]",
@@ -50,6 +12,127 @@ const PRIORITY_BADGE = {
 };
 
 export default function CashflowPage() {
+    const { getToken } = useAuth();
+    const { userId: internalUserId, orgId: internalOrgId, loading: onboardingLoading } = useOnboardingStatus();
+    
+    const [loading, setLoading] = useState(true);
+    const [generatingForecast, setGeneratingForecast] = useState(false);
+    const [schedulingPayment, setSchedulingPayment] = useState(false);
+    const [showModal, setShowModal] = useState(false);
+    
+    const [summary, setSummary] = useState(null);
+    const [chartData, setChartData] = useState([]);
+    
+    const [paymentForm, setPaymentForm] = useState({
+        invoiceId: "",
+        scheduledDate: "",
+        amount: "",
+        paymentMethod: "Bank Transfer",
+        notes: ""
+    });
+
+    useEffect(() => {
+        if (!onboardingLoading && internalUserId && internalOrgId) {
+            fetchSummary();
+        }
+    }, [onboardingLoading, internalUserId, internalOrgId]);
+
+    async function fetchSummary() {
+        setLoading(true);
+        try {
+            const token = await getToken();
+            const res = await fetch(`/api/cashflow/summary?orgId=${internalOrgId}&months=6`, {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId,
+                }
+            });
+            if (!res.ok) throw new Error("Failed to fetch cashflow summary");
+            const data = await res.json();
+            setSummary(data);
+            setChartData(data.monthly);
+        } catch (error) {
+            console.error(error);
+            toast.error("Failed to load cashflow data");
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function handleGenerateForecast() {
+        setGeneratingForecast(true);
+        try {
+            const token = await getToken();
+            const res = await fetch(`/api/cashflow/forecast?orgId=${internalOrgId}&months=3`, {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId,
+                }
+            });
+            if (!res.ok) throw new Error("Failed to generate forecast");
+            const data = await res.json();
+            
+            // Append forecast to chart data
+            const newChartData = [...(summary?.monthly || [])];
+            data.forecast.forEach(f => {
+                newChartData.push({
+                    month: f.month,
+                    predictedIncome: f.predictedIncome,
+                    predictedExpense: f.predictedExpense,
+                    isForecast: true
+                });
+            });
+            setChartData(newChartData);
+            toast.success("Forecast generated based on moving averages & pending invoices");
+        } catch (error) {
+            console.error(error);
+            toast.error("Failed to generate forecast");
+        } finally {
+            setGeneratingForecast(false);
+        }
+    }
+
+    async function handleSchedulePayment(e) {
+        e.preventDefault();
+        setSchedulingPayment(true);
+        try {
+            const token = await getToken();
+            const res = await fetch("/api/payments/schedule", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId,
+                },
+                body: JSON.stringify({
+                    orgId: internalOrgId,
+                    ...paymentForm
+                })
+            });
+            if (!res.ok) throw new Error("Failed to schedule payment");
+            toast.success("Payment scheduled successfully");
+            setShowModal(false);
+            setPaymentForm({ invoiceId: "", scheduledDate: "", amount: "", paymentMethod: "Bank Transfer", notes: "" });
+            fetchSummary(); // refresh data
+        } catch (error) {
+            console.error(error);
+            toast.error("Failed to schedule payment");
+        } finally {
+            setSchedulingPayment(false);
+        }
+    }
+
+    if (loading || onboardingLoading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <Loader2 className="h-8 w-8 animate-spin text-[#4CBB17]" />
+            </div>
+        );
+    }
+
     return (
         <div className="flex flex-col gap-6">
             {/* ── Header ──────────────────────────────────────────────────────── */}
@@ -59,129 +142,159 @@ export default function CashflowPage() {
                     <p className="mo-text-secondary mt-1">Monitor and forecast your business cashflow</p>
                 </div>
                 <div className="flex gap-2">
-                    <button className="mo-btn-secondary flex items-center gap-2">
+                    <button onClick={() => setShowModal(true)} className="mo-btn-secondary flex items-center gap-2">
                         <Calendar className="h-4 w-4" /> Schedule Payments
                     </button>
-                    <button className="mo-btn-primary flex items-center gap-2">
-                        <TrendingUp className="h-4 w-4" /> Generate Forecast
+                    <button onClick={handleGenerateForecast} disabled={generatingForecast} className="mo-btn-primary flex items-center gap-2 disabled:opacity-50">
+                        {generatingForecast ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />} 
+                        Generate Forecast
                     </button>
                 </div>
             </div>
 
-            {/* ── Forecast Cards ─────────────────────────────────────────────── */}
-            <div className="grid gap-4 md:grid-cols-3">
-                {forecastData.map((forecast, index) => (
-                    <div key={index} className="mo-stat-card">
-                        <div className="flex items-center justify-between mb-4">
-                            <span className="text-sm font-semibold text-white">{forecast.period}</span>
-                            <span className="text-xs px-2 py-0.5 rounded-md font-medium bg-[#4CBB1720] text-[#4CBB17] border border-[#4CBB1740]">
-                                {forecast.status}
-                            </span>
-                        </div>
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-sm">
-                                <span className="text-[#A0A0A0]">Inflow</span>
-                                <span className="font-medium text-[#4CBB17]">₹{forecast.inflow.toLocaleString()}</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="text-[#A0A0A0]">Outflow</span>
-                                <span className="font-medium text-[#CD1C18]">₹{forecast.outflow.toLocaleString()}</span>
-                            </div>
-                            <div className="flex justify-between text-base font-bold border-t border-[#2A2A2A] pt-3 mt-1">
-                                <span className="text-white">Net</span>
-                                <span style={{ color: forecast.net >= 0 ? "#4CBB17" : "#CD1C18" }}>
-                                    ₹{forecast.net.toLocaleString()}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                ))}
+            {/* ── Summary Stats ─────────────────────────────────────────────── */}
+            <div className="grid gap-4 md:grid-cols-4">
+                <div className="mo-stat-card border border-[#4CBB1740] bg-[#4CBB1710]">
+                    <span className="text-xs text-[#A0A0A0] uppercase tracking-wide">Net Cashflow</span>
+                    <p className="text-2xl font-bold text-[#4CBB17] mt-1">₹{summary?.netCashflow?.toLocaleString() ?? 0}</p>
+                </div>
+                <div className="mo-stat-card border border-[#2A2A2A]">
+                    <span className="text-xs text-[#A0A0A0] uppercase tracking-wide">Total Income</span>
+                    <p className="text-2xl font-bold text-white mt-1">₹{summary?.totalIncome?.toLocaleString() ?? 0}</p>
+                </div>
+                <div className="mo-stat-card border border-[#2A2A2A]">
+                    <span className="text-xs text-[#A0A0A0] uppercase tracking-wide">Total Expense</span>
+                    <p className="text-2xl font-bold text-[#CD1C18] mt-1">₹{summary?.totalExpense?.toLocaleString() ?? 0}</p>
+                </div>
+                <div className="mo-stat-card border border-[#2A2A2A]">
+                    <span className="text-xs text-[#A0A0A0] uppercase tracking-wide">Running Balance</span>
+                    <p className="text-2xl font-bold text-[#60A5FA] mt-1">₹{summary?.runningBalance?.toLocaleString() ?? 0}</p>
+                </div>
             </div>
 
-            {/* ── Payments & Income ──────────────────────────────────────────── */}
-            <div className="grid gap-6 md:grid-cols-2">
-                {/* Upcoming Payments */}
-                <div className="mo-card">
-                    <div className="flex items-center gap-2 mb-4">
-                        <TrendingDown className="h-5 w-5 text-[#CD1C18]" />
-                        <div>
-                            <h2 className="mo-h2">Upcoming Payments</h2>
-                            <p className="mo-text-secondary">Scheduled outgoing payments</p>
-                        </div>
-                    </div>
-                    <div className="space-y-2">
-                        {upcomingPayments.map((payment) => (
-                            <div
-                                key={payment.id}
-                                className="flex items-center justify-between p-3 rounded-xl border border-[#2A2A2A] bg-[#111111] hover:border-[#3A3A3A] transition-colors"
-                            >
-                                <div className="flex-1 min-w-0 mr-3">
-                                    <p className="font-medium text-white text-sm truncate">{payment.description}</p>
-                                    <p className="text-xs text-[#A0A0A0] mt-0.5">Due: {payment.dueDate}</p>
-                                </div>
-                                <div className="flex items-center gap-2 flex-shrink-0">
-                                    <span className={`text-xs px-2 py-0.5 rounded-md font-medium border ${PRIORITY_BADGE[payment.priority]}`}>
-                                        {payment.priority}
-                                    </span>
-                                    <span className="font-bold text-[#CD1C18] text-sm">
-                                        ₹{payment.amount.toLocaleString()}
-                                    </span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+            {/* ── Chart ───────────────────────────────────────────────────────── */}
+            <div className="mo-card">
+                <h2 className="font-semibold text-white mb-4">Cashflow Trend & Forecast</h2>
+                <div className="h-80 w-full text-xs">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                            <defs>
+                                <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#4CBB17" stopOpacity={0.3}/>
+                                    <stop offset="95%" stopColor="#4CBB17" stopOpacity={0}/>
+                                </linearGradient>
+                                <linearGradient id="colorExpense" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#CD1C18" stopOpacity={0.3}/>
+                                    <stop offset="95%" stopColor="#CD1C18" stopOpacity={0}/>
+                                </linearGradient>
+                                <linearGradient id="colorPredIncome" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#60A5FA" stopOpacity={0.3}/>
+                                    <stop offset="95%" stopColor="#60A5FA" stopOpacity={0}/>
+                                </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2A2A2A" vertical={false} />
+                            <XAxis dataKey="month" stroke="#A0A0A0" tick={{ fill: "#A0A0A0" }} />
+                            <YAxis stroke="#A0A0A0" tick={{ fill: "#A0A0A0" }} />
+                            <Tooltip 
+                                contentStyle={{ backgroundColor: "#111", borderColor: "#2A2A2A", borderRadius: "8px" }}
+                                itemStyle={{ color: "#fff" }}
+                            />
+                            <Legend />
+                            <Area type="monotone" dataKey="income" stroke="#4CBB17" fillOpacity={1} fill="url(#colorIncome)" name="Actual Income" />
+                            <Area type="monotone" dataKey="expense" stroke="#CD1C18" fillOpacity={1} fill="url(#colorExpense)" name="Actual Expense" />
+                            <Area type="monotone" dataKey="predictedIncome" stroke="#60A5FA" strokeDasharray="5 5" fillOpacity={1} fill="url(#colorPredIncome)" name="Predicted Income" />
+                            <Area type="monotone" dataKey="predictedExpense" stroke="#FFB300" strokeDasharray="5 5" fillOpacity={0} name="Predicted Expense" />
+                        </AreaChart>
+                    </ResponsiveContainer>
                 </div>
+            </div>
 
-                {/* Expected Income */}
+            {/* ── Pending Invoices & Alerts ──────────────────────────────────── */}
+            <div className="grid gap-6 md:grid-cols-2">
                 <div className="mo-card">
                     <div className="flex items-center gap-2 mb-4">
                         <TrendingUp className="h-5 w-5 text-[#4CBB17]" />
                         <div>
-                            <h2 className="mo-h2">Expected Income</h2>
-                            <p className="mo-text-secondary">Anticipated incoming payments</p>
+                            <h2 className="mo-h2">Pending Receivables</h2>
+                            <p className="mo-text-secondary">Total amount waiting to be paid to you</p>
                         </div>
                     </div>
-                    <div className="space-y-2">
-                        {expectedIncome.map((income) => (
-                            <div
-                                key={income.id}
-                                className="flex items-center justify-between p-3 rounded-xl border border-[#2A2A2A] bg-[#111111] hover:border-[#3A3A3A] transition-colors"
-                            >
-                                <div className="flex-1 min-w-0 mr-3">
-                                    <p className="font-medium text-white text-sm truncate">{income.description}</p>
-                                    <p className="text-xs text-[#A0A0A0] mt-0.5">Expected: {income.expectedDate}</p>
-                                </div>
-                                <span className="font-bold text-[#4CBB17] text-sm flex-shrink-0">
-                                    ₹{income.amount.toLocaleString()}
-                                </span>
-                            </div>
-                        ))}
+                    <div className="p-4 rounded-xl border border-[#4CBB1740] bg-[#4CBB1710] flex items-center justify-between">
+                        <span className="font-semibold text-white">Pending Invoices</span>
+                        <span className="font-bold text-[#4CBB17] text-xl">₹{summary?.pendingInvoicesTotal?.toLocaleString() ?? 0}</span>
+                    </div>
+                </div>
+
+                <div className="mo-card">
+                    <div className="flex items-center gap-2 mb-4">
+                        <AlertTriangle className="h-5 w-5 text-[#CD1C18]" />
+                        <div>
+                            <h2 className="mo-h2">Overdue Payables</h2>
+                            <p className="mo-text-secondary">Amount that is overdue for collection</p>
+                        </div>
+                    </div>
+                    <div className="p-4 rounded-xl border border-[#CD1C1840] bg-[#CD1C1810] flex items-center justify-between">
+                        <span className="font-semibold text-white">Overdue Invoices</span>
+                        <span className="font-bold text-[#CD1C18] text-xl">₹{summary?.overdueInvoicesTotal?.toLocaleString() ?? 0}</span>
                     </div>
                 </div>
             </div>
 
-            {/* ── AI Insights ──────────────────────────────────────────────────── */}
-            <div className="mo-card">
-                <div className="flex items-center gap-2 mb-5">
-                    <AlertTriangle className="h-5 w-5 text-[#FFB300]" />
-                    <div>
-                        <h2 className="mo-h2">Cashflow Insights</h2>
-                        <p className="mo-text-secondary">AI-powered cashflow analysis and recommendations</p>
+            {/* ── Schedule Payment Modal ──────────────────────────────────────── */}
+            {showModal && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-[#111] border border-[#2A2A2A] rounded-2xl w-full max-w-md p-6">
+                        <h2 className="text-xl font-bold text-white mb-1">Schedule Payment</h2>
+                        <p className="text-sm text-[#A0A0A0] mb-5">Set up an upcoming outgoing payment to update your forecast.</p>
+                        
+                        <form onSubmit={handleSchedulePayment} className="space-y-4">
+                            <div>
+                                <label className="block text-xs text-[#A0A0A0] mb-1.5">Description / Notes</label>
+                                <input 
+                                    required 
+                                    value={paymentForm.notes} 
+                                    onChange={e => setPaymentForm({...paymentForm, notes: e.target.value})}
+                                    className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg px-3 py-2 text-white text-sm focus:border-[#4CBB17] outline-none" 
+                                    placeholder="e.g. Office Rent for May"
+                                />
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs text-[#A0A0A0] mb-1.5">Amount (INR)</label>
+                                    <input 
+                                        required 
+                                        type="number" 
+                                        value={paymentForm.amount} 
+                                        onChange={e => setPaymentForm({...paymentForm, amount: e.target.value})}
+                                        className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg px-3 py-2 text-white text-sm focus:border-[#4CBB17] outline-none" 
+                                        placeholder="5000"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-[#A0A0A0] mb-1.5">Date</label>
+                                    <input 
+                                        required 
+                                        type="date" 
+                                        value={paymentForm.scheduledDate} 
+                                        onChange={e => setPaymentForm({...paymentForm, scheduledDate: e.target.value})}
+                                        className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg px-3 py-2 text-white text-sm focus:border-[#4CBB17] outline-none" 
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3 pt-4">
+                                <button type="button" onClick={() => setShowModal(false)} className="flex-1 mo-btn-secondary">
+                                    Cancel
+                                </button>
+                                <button type="submit" disabled={schedulingPayment} className="flex-1 mo-btn-primary flex justify-center items-center gap-2">
+                                    {schedulingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : "Schedule"}
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
-                <div className="grid gap-4 md:grid-cols-3">
-                    {insights.map(({ border, bg, title, titleColor, body }) => (
-                        <div
-                            key={title}
-                            className="p-4 rounded-xl border"
-                            style={{ borderColor: border, backgroundColor: bg }}
-                        >
-                            <h4 className="font-semibold text-sm mb-1.5" style={{ color: titleColor }}>{title}</h4>
-                            <p className="text-sm text-[#A0A0A0] leading-relaxed">{body}</p>
-                        </div>
-                    ))}
-                </div>
-            </div>
+            )}
         </div>
     );
 }

@@ -30,73 +30,73 @@ public class OrganizationService {
     private final OrganizationValidator validator;
     private final UserRepository userRepository;
 
+    private User resolveActiveUser(String userIdOrClerkId) {
+        return userRepository.findByIdAndDeletedAtIsNull(userIdOrClerkId)
+                .or(() -> userRepository.findByClerkIdAndDeletedAtIsNull(userIdOrClerkId))
+                .orElseThrow(() -> new RuntimeException("User not found"));
+    }
+
     // Helper to verify user belongs to org
     private void verifyAccess(String orgId, String userId) {
-        User user = userRepository.findByIdAndOrgIdAndDeletedAtIsNull(userId, orgId)
-                .orElseThrow(() -> new RuntimeException("User not found or access denied"));
-        
-        // Allow access if they belong to this org
-        if (orgId.equals(user.getOrgId())) {
-            return;
+        User user = resolveActiveUser(userId);
+        if (!orgId.equals(user.getOrgId())) {
+            throw new RuntimeException("User not found or access denied");
         }
-
-        BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(orgId, userId)
-                .orElseThrow(() -> new RuntimeException("Organization not found or access denied"));
     }
 
     // Business Organization operations
     public List<BusinessOrganizationDto> getAllOrganizations(String userId) {
-        return orgRepository.findAllByCreatedByAndDeletedAtIsNull(userId).stream()
+        String resolvedUserId = resolveActiveUser(userId).getId();
+        return orgRepository.findAllByCreatedByAndDeletedAtIsNull(resolvedUserId).stream()
                 .map(mapper::toDto)
                 .collect(Collectors.toList());
     }
 
     public BusinessOrganizationDto getOrganizationById(String id, String userId) {
         verifyAccess(id, userId);
-        BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(id, userId)
-                .orElseThrow(() -> new RuntimeException("Organization not found"));
+        BusinessOrganization org = orgRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> new RuntimeException("Organization not found or access denied"));
         return mapper.toDto(org);
     }
 
     public BusinessOrganizationDto getMyOrganization(String userId) {
-        User user = userRepository.findByIdAndDeletedAtIsNull(userId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        User user = resolveActiveUser(userId);
         
         String orgId = user.getOrgId();
         if (orgId == null) {
-            List<BusinessOrganization> createdOrgs = orgRepository.findAllByCreatedByAndDeletedAtIsNull(userId);
+            List<BusinessOrganization> createdOrgs = orgRepository.findAllByCreatedByAndDeletedAtIsNull(user.getId());
             if (createdOrgs.isEmpty()) throw new RuntimeException("No organization found for user");
             return mapper.toDto(createdOrgs.get(0));
         }
         
-        BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(orgId, userId)
+        BusinessOrganization org = orgRepository.findByIdAndDeletedAtIsNull(orgId)
                 .orElseThrow(() -> new RuntimeException("Organization not found"));
         return mapper.toDto(org);
     }
 
     public BusinessOrganizationDto createOrganization(BusinessOrganizationDto dto, String userId) {
         validator.validate(dto);
+        User user = resolveActiveUser(userId);
 
         BusinessOrganization org = mapper.toEntity(dto);
-        org.setCreatedBy(userId);
+        org.setCreatedBy(user.getId());
 
         BusinessOrganization saved = orgRepository.save(org);
         
         // Update user's orgId if not set
-        userRepository.findByIdAndDeletedAtIsNull(userId).ifPresent(u -> {
-            if (u.getOrgId() == null) {
-                u.setOrgId(saved.getId());
-                u.setRole(User.Role.OWNER);
-                userRepository.save(u);
-            }
-        });
+        if (user.getOrgId() == null) {
+            user.setOrgId(saved.getId());
+            user.setRole(User.Role.OWNER);
+            userRepository.save(user);
+        }
 
         return mapper.toDto(saved);
     }
 
     public BusinessOrganizationDto updateOrganization(String id, BusinessOrganizationDto dto, String userId) {
+        String resolvedUserId = resolveActiveUser(userId).getId();
         verifyAccess(id, userId);
-        BusinessOrganization existing = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(id, userId)
+        BusinessOrganization existing = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(id, resolvedUserId)
                 .orElseThrow(() -> new RuntimeException("Organization not found"));
 
         validator.validate(dto);
@@ -136,6 +136,7 @@ public class OrganizationService {
         existing.setMsmeNumber(dto.getMsmeNumber());
         existing.setIecCode(dto.getIecCode());
         existing.setProfessionalTaxReg(dto.getProfessionalTaxReg());
+        existing.setCurrency(dto.getCurrency());
 
         if (dto.getFinancialYearStartMonth() != null && !dto.getFinancialYearStartMonth().isBlank()) {
             existing.setFyStartMonth(Integer.valueOf(dto.getFinancialYearStartMonth()));
@@ -147,7 +148,8 @@ public class OrganizationService {
     }
 
     public void deleteOrganization(String id, String userId) {
-        BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(id, userId)
+        String resolvedUserId = resolveActiveUser(userId).getId();
+        BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(id, resolvedUserId)
                 .orElseThrow(() -> new RuntimeException("Organization not found"));
         
         org.setDeletedAt(LocalDateTime.now());
@@ -156,10 +158,11 @@ public class OrganizationService {
 
     // Regulatory Profile operations
     public RegulatoryProfileDto getRegulatoryProfile(String orgId, String userId) {
+        String resolvedUserId = resolveActiveUser(userId).getId();
         verifyAccess(orgId, userId);
         RegulatoryProfile profile = regulatoryRepository.findByOrgIdAndDeletedAtIsNull(orgId)
                 .orElseGet(() -> {
-                    BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(orgId, userId).orElseThrow();
+                    BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(orgId, resolvedUserId).orElseThrow();
                     RegulatoryProfile p = new RegulatoryProfile();
                     p.setOrgId(orgId);
                     p.setPanNumber(org.getPanNumber());
@@ -170,8 +173,9 @@ public class OrganizationService {
     }
 
     public RegulatoryProfileDto createRegulatoryProfile(String orgId, RegulatoryProfileDto dto, String userId) {
+        String resolvedUserId = resolveActiveUser(userId).getId();
         verifyAccess(orgId, userId);
-        BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(orgId, userId)
+        BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(orgId, resolvedUserId)
                 .orElseThrow(() -> new RuntimeException("Organization not found"));
 
         validator.validateRegulatory(dto);
@@ -189,8 +193,9 @@ public class OrganizationService {
     }
 
     public RegulatoryProfileDto updateRegulatoryProfile(String orgId, RegulatoryProfileDto dto, String userId) {
+        String resolvedUserId = resolveActiveUser(userId).getId();
         verifyAccess(orgId, userId);
-        BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(orgId, userId)
+        BusinessOrganization org = orgRepository.findByIdAndCreatedByAndDeletedAtIsNull(orgId, resolvedUserId)
                 .orElseThrow(() -> new RuntimeException("Organization not found"));
 
         validator.validateRegulatory(dto);

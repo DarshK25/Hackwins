@@ -54,7 +54,7 @@ function StatCard({ label, value, sub, icon: Icon, iconColor, accent }) {
     );
 }
 
-export function ComplianceDashboard({ businessId, data, onRefresh }) {
+export function ComplianceDashboard({ businessId, data, summaryData, onRefresh }) {
     const { getToken } = useAuth();
     const { userId: internalUserId, orgId: internalOrgId } = useOnboardingStatus();
     const [activeTab, setActiveTab] = useState("overview");
@@ -62,6 +62,15 @@ export function ComplianceDashboard({ businessId, data, onRefresh }) {
     const [deadlines, setDeadlines] = useState([]);
     const [calcResult, setCalcResult] = useState(null);
     const [formData, setFormData] = useState({ amount: "", category: "professional", isIndividual: "true" });
+    const [exportingReport, setExportingReport] = useState(false);
+    const [exportingLedger, setExportingLedger] = useState(false);
+
+    // Date range for exports
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth();
+    const fyStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
+    const [dateFrom, setDateFrom] = useState(new Date(fyStartYear, 3, 1).toISOString().split('T')[0]);
+    const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
 
     useEffect(() => {
         const fetchDeadlines = async () => {
@@ -115,7 +124,9 @@ export function ComplianceDashboard({ businessId, data, onRefresh }) {
         ? recentAlerts
         : [{ id: 1, title: "No immediate compliance risks detected", date: currentDate, type: "info" }];
 
-    const agentSummary = data?.keyRequirements || data?.key_requirements || [
+    const agentSummary = summaryData?.missingComplianceFields?.length 
+        ? summaryData.missingComplianceFields 
+        : data?.keyRequirements || data?.key_requirements || [
         "Review GST and TDS filing deadlines.",
         "Track invoice and payment reconciliation.",
         "Maintain supporting documentation for audits.",
@@ -147,16 +158,39 @@ export function ComplianceDashboard({ businessId, data, onRefresh }) {
         }
     }
 
-    function exportJson(filename, payload) {
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
+    async function exportPdf(endpoint, payload, filename, setExporting) {
+        setExporting(true);
+        try {
+            const token = await getToken();
+            const res = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`,
+                    "X-User-Id": internalUserId,
+                    "X-Org-Id": internalOrgId,
+                },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error(`Failed to export ${filename}`);
+            
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            toast.success(`${filename} exported successfully`);
+        } catch (error) {
+            console.error(error);
+            toast.error(error.message);
+        } finally {
+            setExporting(false);
+        }
     }
 
     const auditData = data?.auditReadiness || data?.audit_readiness || {};
@@ -190,16 +224,21 @@ export function ComplianceDashboard({ businessId, data, onRefresh }) {
                         <RefreshCw className="h-4 w-4" /> Refresh
                     </button>
                     <button
-                        onClick={() => exportJson(`compliance-report-${new Date().toISOString().slice(0, 10)}.json`, {
-                            generatedAt: new Date().toISOString(),
-                            complianceData: data,
-                            deadlines,
-                        })}
-                        className="mo-btn-primary flex items-center gap-2 text-sm"
+                        onClick={() => exportPdf("/api/compliance/export/pdf", { orgId: internalOrgId, reportType: "COMPLIANCE_STATUS", dateFrom, dateTo }, `compliance-report-${new Date().toISOString().slice(0, 10)}.pdf`, setExportingReport)}
+                        disabled={exportingReport}
+                        className="mo-btn-primary flex items-center gap-2 text-sm disabled:opacity-50"
                     >
-                        <Download className="h-4 w-4" /> Export Report
+                        {exportingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} 
+                        Export PDF
                     </button>
                 </div>
+            </div>
+
+            <div className="flex items-center gap-4 bg-[#1A1A1A] p-3 rounded-xl border border-[#2A2A2A]">
+                <span className="text-sm text-[#A0A0A0]">Report Period:</span>
+                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="bg-transparent border border-[#2A2A2A] rounded px-2 py-1 text-sm text-white" />
+                <span className="text-sm text-[#A0A0A0]">to</span>
+                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="bg-transparent border border-[#2A2A2A] rounded px-2 py-1 text-sm text-white" />
             </div>
 
             <div className="grid gap-4 md:grid-cols-4">
@@ -211,9 +250,9 @@ export function ComplianceDashboard({ businessId, data, onRefresh }) {
                     <p className="text-2xl font-bold" style={{ color: healthColor }}>{complianceScore}/100</p>
                     <p className="text-xs text-[#A0A0A0] mt-1">{complianceScore >= 80 ? "Good standing" : "Attention needed"}</p>
                 </div>
-                <StatCard label="Pending Filings" value={data?.pendingFilings ?? effectivePendingTasks.length} sub="Due within 30 days" icon={FileText} iconColor="#A0A0A0" />
-                <StatCard label="Risk Alerts" value={data?.riskAlerts ?? effectiveRecentAlerts.length} sub="Requires attention" icon={AlertTriangle} iconColor="#CD1C18" accent="#CD1C18" />
-                <StatCard label="Next Deadline" value={nextDeadlineValue} sub={nextDeadline?.title || nextDeadline?.filing || "All clear"} icon={CalendarIcon} iconColor="#A0A0A0" />
+                <StatCard label="Total Invoices" value={summaryData?.totalInvoices ?? 0} sub={`${summaryData?.paidInvoices ?? 0} paid, ${summaryData?.overdueInvoices ?? 0} overdue`} icon={FileText} iconColor="#A0A0A0" />
+                <StatCard label="Regulatory Completeness" value={`${summaryData?.regulatoryCompletenessPercentage?.toFixed(0) ?? 0}%`} sub="Profile data" icon={AlertTriangle} iconColor="#CD1C18" accent={summaryData?.regulatoryCompletenessPercentage === 100 ? "#4CBB17" : "#FFB300"} />
+                <StatCard label="GST Collected FY" value={`INR ${(summaryData?.totalGstCollected ?? 0).toFixed(0)}`} sub="Estimated tax" icon={CalendarIcon} iconColor="#A0A0A0" />
             </div>
 
             <div className="mo-card !p-0">
@@ -422,10 +461,11 @@ export function ComplianceDashboard({ businessId, data, onRefresh }) {
                                     <FileText className="h-10 w-10 text-[#2A2A2A] mx-auto mb-3" />
                                     <p className="text-sm text-[#A0A0A0]">Additional Documents</p>
                                     <button
-                                        onClick={() => exportJson(`audit-readiness-${new Date().toISOString().slice(0, 10)}.json`, auditData)}
-                                        className="mo-btn-secondary text-xs mt-3 flex items-center gap-2 mx-auto"
+                                        onClick={() => exportPdf("/api/transactions/export/ledger/pdf", { orgId: internalOrgId, dateFrom, dateTo }, `ledger-${new Date().toISOString().slice(0, 10)}.pdf`, setExportingLedger)}
+                                        disabled={exportingLedger}
+                                        className="mo-btn-secondary text-xs mt-3 flex items-center gap-2 mx-auto disabled:opacity-50"
                                     >
-                                        <Download className="h-3 w-3" /> Export Ledger
+                                        {exportingLedger ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} Export Ledger PDF
                                     </button>
                                 </div>
                             </div>

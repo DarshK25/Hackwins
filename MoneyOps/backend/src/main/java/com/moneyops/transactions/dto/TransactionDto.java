@@ -19,9 +19,11 @@ public class TransactionDto {
     private String category;
     private String description;
     private String paymentMethod;
+    private String receiptUrl;
     private String referenceNumber;
     private String aiCategory;
     private Float aiConfidence;
     private String idempotencyKey;
+    private String status;
     private com.moneyops.transactions.entity.Transaction.VoiceContext voiceContext;
 }

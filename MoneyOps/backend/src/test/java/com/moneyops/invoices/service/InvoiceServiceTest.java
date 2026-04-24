@@ -11,6 +11,9 @@ import com.moneyops.clients.repository.ClientRepository;
 import com.moneyops.clients.mapper.ClientMapper;
 import com.moneyops.audit.service.AuditLogService;
 import com.moneyops.transactions.service.TransactionService;
+import com.moneyops.invites.EmailService;
+import com.moneyops.organizations.repository.BusinessOrganizationRepository;
+import com.moneyops.security.team.TeamActionAuthorizationService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -50,6 +53,15 @@ public class InvoiceServiceTest {
     @Mock
     private TransactionService transactionService;
 
+    @Mock
+    private TeamActionAuthorizationService teamActionAuthorizationService;
+
+    @Mock
+    private EmailService emailService;
+
+    @Mock
+    private BusinessOrganizationRepository orgRepository;
+
     @InjectMocks
     private InvoiceService invoiceService;
 
@@ -67,6 +79,8 @@ public class InvoiceServiceTest {
         when(invoiceMapper.toEntity(dto)).thenReturn(invoice);
         when(invoiceRepository.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(invoiceMapper.toDto(any(Invoice.class))).thenReturn(dto);
+        when(teamActionAuthorizationService.assertUserCanCreateSensitiveAction(any(), any(), any()))
+                .thenReturn(new TeamActionAuthorizationService.CreatorMetadata(userId, "owner@moneyops.test", "OWNER"));
 
         InvoiceDto result = invoiceService.createInvoice(dto, orgId, userId);
 
@@ -95,19 +109,30 @@ public class InvoiceServiceTest {
     public void testSendInvoice() {
         String id = UUID.randomUUID().toString();
         String orgId = UUID.randomUUID().toString();
+        String userId = UUID.randomUUID().toString();
         Invoice invoice = new Invoice();
         invoice.setId(id);
         invoice.setOrgId(orgId);
         invoice.setStatus(InvoiceStatus.DRAFT);
+        invoice.setClientEmail("client@example.com");
+        invoice.setInvoiceNumber("INV-001");
+
+        InvoiceDto snapshot = new InvoiceDto();
+        snapshot.setInvoiceNumber("INV-001");
 
         when(invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)).thenReturn(Optional.of(invoice));
         when(invoiceRepository.save(any(Invoice.class))).thenReturn(invoice);
-        when(invoiceMapper.toDto(invoice)).thenReturn(new InvoiceDto());
+        when(invoiceMapper.toEntity(any(InvoiceDto.class))).thenReturn(new Invoice());
+        when(teamActionAuthorizationService.assertUserCanCreateSensitiveAction(any(), any(), any()))
+                .thenReturn(new TeamActionAuthorizationService.CreatorMetadata(userId, "owner@moneyops.test", "OWNER"));
+        when(invoiceMapper.toDto(any(Invoice.class))).thenReturn(snapshot);
+        when(orgRepository.findByIdAndDeletedAtIsNull(orgId)).thenReturn(Optional.empty());
 
-        InvoiceDto result = invoiceService.sendInvoice(id, orgId);
+        InvoiceDto result = invoiceService.sendInvoice(id, orgId, userId, "123456");
 
         assertNotNull(result);
         assertEquals(InvoiceStatus.SENT, invoice.getStatus());
+        verify(emailService).sendInvoiceEmail(eq("client@example.com"), anyString(), anyString());
     }
 
     @Test

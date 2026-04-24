@@ -6,6 +6,7 @@ import "./index.css";
 import App from "./App.jsx";
 import { ThemeProvider } from "@/components/theme-provider";
 import { OnboardingProvider } from "@/hooks/useOnboardingStatus";
+import { SettingsProvider } from "@/hooks/useSettings";
 
 // Force dark theme always across the whole app
 document.documentElement.classList.add("dark");
@@ -21,7 +22,9 @@ createRoot(document.getElementById("root")).render(
             <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
                 <BrowserRouter>
                     <OnboardingProvider>
-                        <App />
+                        <SettingsProvider>
+                            <App />
+                        </SettingsProvider>
                     </OnboardingProvider>
                 </BrowserRouter>
             </ThemeProvider>

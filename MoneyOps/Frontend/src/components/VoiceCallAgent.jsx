@@ -1,6 +1,14 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useUser } from "@clerk/clerk-react";
 import { Button } from "@/components/ui/button";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import { X, Phone, PhoneOff } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -17,6 +25,141 @@ import { useVoiceEvents } from "@/hooks/useVoiceEvents";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import ClientInputDialog from "./ClientInputDialog";
 
+const PROVIDER_STATUS_LABELS = {
+    missing_api_key: "API key is empty",
+    invalid_api_key: "API key is invalid",
+    limit_reached: "API limit is reached",
+    provider_unreachable: "Provider could not be reached",
+    provider_error: "Provider check failed",
+};
+
+function buildProviderIssue(provider, envVar, status, severity, message) {
+    return {
+        provider,
+        env_var: envVar,
+        status,
+        severity,
+        message,
+    };
+}
+
+function inferProviderStatusFromText(text) {
+    const normalizedText = (text || "").toLowerCase();
+    const issues = [];
+
+    if (normalizedText.includes("groq")) {
+        if (normalizedText.includes("api key") && /(empty|missing|required)/.test(normalizedText)) {
+            issues.push(
+                buildProviderIssue(
+                    "Groq",
+                    "GROQ_API_KEY",
+                    "missing_api_key",
+                    "blocking",
+                    "Groq API key is empty. Add GROQ_API_KEY before starting the voice agent."
+                )
+            );
+        } else if (/(limit|quota|credit|429|rate)/.test(normalizedText)) {
+            issues.push(
+                buildProviderIssue(
+                    "Groq",
+                    "GROQ_API_KEY",
+                    "limit_reached",
+                    "blocking",
+                    "Groq API limit is reached or quota is over."
+                )
+            );
+        }
+    }
+
+    if (normalizedText.includes("cartesia")) {
+        if (normalizedText.includes("api key") && /(empty|missing|required)/.test(normalizedText)) {
+            issues.push(
+                buildProviderIssue(
+                    "Cartesia",
+                    "CARTESIA_API_KEY",
+                    "missing_api_key",
+                    "warning",
+                    "Cartesia API key is empty. Voice will fall back to Groq TTS."
+                )
+            );
+        } else if (/(limit|quota|credit|429|rate)/.test(normalizedText)) {
+            issues.push(
+                buildProviderIssue(
+                    "Cartesia",
+                    "CARTESIA_API_KEY",
+                    "limit_reached",
+                    "warning",
+                    "Cartesia API limit is reached or quota is over. Voice will fall back to Groq TTS."
+                )
+            );
+        }
+    }
+
+    if (!issues.length) {
+        return null;
+    }
+
+    return {
+        blocking: issues.some((issue) => issue.severity === "blocking"),
+        issues,
+    };
+}
+
+function normalizeProviderStatus(rawStatus, fallbackText = "") {
+    const providerStatus = rawStatus?.provider_status ?? rawStatus;
+    const issues = Array.isArray(providerStatus?.issues)
+        ? providerStatus.issues
+        : inferProviderStatusFromText(fallbackText)?.issues;
+
+    if (!issues?.length) {
+        return null;
+    }
+
+    return {
+        blocking:
+            typeof providerStatus?.blocking === "boolean"
+                ? providerStatus.blocking
+                : issues.some((issue) => issue?.severity === "blocking"),
+        issues,
+        message: providerStatus?.message || "",
+    };
+}
+
+function buildStableKey(prefix, ...parts) {
+    const normalizedParts = parts
+        .map((part) => (part == null ? "" : String(part).trim()))
+        .filter(Boolean);
+
+    return [prefix, ...normalizedParts].join("-");
+}
+
+async function parseVoiceTokenFailure(res) {
+    const contentType = res.headers.get("content-type") || "";
+
+    if (contentType.includes("application/json")) {
+        const json = await res.json().catch(() => null);
+        const detail = json?.detail ?? json;
+        const detailMessage = typeof detail === "string"
+            ? detail
+            : detail?.message || detail?.detail || "";
+        const providerStatus = normalizeProviderStatus(
+            detail?.provider_status ? detail : json,
+            detailMessage
+        );
+
+        return {
+            message: detailMessage,
+            providerStatus,
+        };
+    }
+
+    const text = await res.text();
+    return {
+        message: text,
+        providerStatus: normalizeProviderStatus(null, text),
+    };
+}
+
 export function VoiceCallAgent({ agentType = "orchestrator" }) {
     const { user, isLoaded } = useUser();
     const { userId: internalUserId, orgId: internalOrgId, loading: onboardingLoading } = useOnboardingStatus();
@@ -25,11 +168,41 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
     const [url, setUrl] = useState("");
     const [isConnect, setIsConnect] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [isInputLocked, setIsInputLocked] = useState(false);  // ── INPUT RATE LIMITING
     const [activeDialog, setActiveDialog] = useState(null);
     const [activeClientPicker, setActiveClientPicker] = useState(null);
+    const [providerPopup, setProviderPopup] = useState({
+        open: false,
+        blocking: false,
+        issues: [],
+        message: "",
+    });
+
+    const showProviderPopup = useCallback((providerStatus, fallbackMessage = "") => {
+        const normalizedStatus = normalizeProviderStatus(providerStatus, fallbackMessage);
+        if (!normalizedStatus) {
+            return false;
+        }
+
+        setProviderPopup({
+            open: true,
+            blocking: normalizedStatus.blocking,
+            issues: normalizedStatus.issues,
+            message: normalizedStatus.message || fallbackMessage,
+        });
+        return true;
+    }, []);
 
     const handleClientPick = async (client) => {
         if (!activeClientPicker?.session_id) return;
+        
+        // ── PREVENT SIMULTANEOUS INPUT ────────────────────────────────────────────
+        if (isInputLocked) {
+            toast.error("Please wait for the current input to be processed.");
+            return;
+        }
+        
+        setIsInputLocked(true);  // Lock input while processing
         try {
             const res = await fetch("/api/v1/voice/dialog-response", {
                 method: "POST",
@@ -41,6 +214,13 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
                 }),
             });
             const data = await res.json();
+            
+            // ── CHECK FOR PROCESSING LOCK ERROR ───────────────────────────────────
+            if (data?.is_locked) {
+                toast.error("Voice input is currently being processed. Please wait.");
+                return;
+            }
+            
             if (data?.message) {
                 window.dispatchEvent(new CustomEvent("voice:manual_agent_response", {
                     detail: {
@@ -57,6 +237,8 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
         } catch (error) {
             console.error("Failed to select client", error);
             toast.error("Failed to select client");
+        } finally {
+            setIsInputLocked(false);  // Unlock input
         }
     };
 
@@ -69,6 +251,8 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
             toast.error("Voice agent is waiting for your workspace context. Please try again in a moment.");
             return;
         }
+        setActiveDialog(null);
+        setActiveClientPicker(null);
         setIsProcessing(true);
         try {
             const userId = internalUserId;
@@ -89,8 +273,14 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
                 }
             });
             if (!res.ok) {
-                const errText = await res.text();
-                throw new Error(errText || `Failed to fetch token (${res.status})`);
+                const { message, providerStatus } = await parseVoiceTokenFailure(res);
+                if (providerStatus) {
+                    showProviderPopup(providerStatus, message);
+                    setIsProcessing(false);
+                    setIsConnect(false);
+                    return;
+                }
+                throw new Error(message || `Failed to fetch token (${res.status})`);
             }
             const contentType = res.headers.get("content-type");
             if (!contentType?.includes("application/json")) {
@@ -101,6 +291,7 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
             }
             const data = await res.json();
             if (!data.token || !data.url) throw new Error("Invalid token response: missing token or url");
+            showProviderPopup(data.provider_status);
             setToken(data.token);
             setUrl(data.url);
             setIsConnect(true);
@@ -120,19 +311,54 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
         setIsConnect(false);
         setToken("");
         setIsProcessing(false);
+        setIsInputLocked(false);  // ── RESET INPUT LOCK ON DISCONNECT
         setActiveDialog(null);
+        setActiveClientPicker(null);
     }, []);
 
     useEffect(() => {
-        const handleOpenDialog = (e) => setActiveDialog(e.detail);
-        const handleOpenClientPicker = (e) => setActiveClientPicker(e.detail);
+        const clearInteractiveState = () => {
+            setActiveDialog(null);
+            setActiveClientPicker(null);
+        };
+        const handleOpenDialog = (e) => {
+            setActiveClientPicker(null);
+            setActiveDialog(e.detail || null);
+        };
+        const handleOpenClientPicker = (e) => {
+            setActiveDialog(null);
+            setActiveClientPicker(e.detail || null);
+        };
+        const handleConversationUpdate = (e) => {
+            const uiEventType = e?.detail?.ui_event?.type;
+            if (uiEventType !== "open_input_dialog") {
+                setActiveDialog(null);
+            }
+            if (uiEventType !== "open_client_picker") {
+                setActiveClientPicker(null);
+            }
+        };
         window.addEventListener("voice:open_input_dialog", handleOpenDialog);
         window.addEventListener("voice:open_client_picker", handleOpenClientPicker);
+        window.addEventListener("voice:conversation_update", handleConversationUpdate);
+        window.addEventListener("voice:client-created", clearInteractiveState);
+        window.addEventListener("voice:invoice-created", clearInteractiveState);
+        window.addEventListener("voice:expense-created", clearInteractiveState);
         return () => {
             window.removeEventListener("voice:open_input_dialog", handleOpenDialog);
             window.removeEventListener("voice:open_client_picker", handleOpenClientPicker);
+            window.removeEventListener("voice:conversation_update", handleConversationUpdate);
+            window.removeEventListener("voice:client-created", clearInteractiveState);
+            window.removeEventListener("voice:invoice-created", clearInteractiveState);
+            window.removeEventListener("voice:expense-created", clearInteractiveState);
         };
     }, []);
+
+    const missingKeyIssues = providerPopup.issues.filter((issue) => issue.status === "missing_api_key");
+    const limitIssues = providerPopup.issues.filter((issue) => issue.status === "limit_reached");
+    const otherProviderIssues = providerPopup.issues.filter(
+        (issue) => issue.status !== "missing_api_key" && issue.status !== "limit_reached"
+    );
 
     // Collapsed pill button when hidden
     if (!isVisible) {
@@ -152,7 +378,7 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
     }
 
     return (
-        <AnimatePresence>
+        <>
             <motion.div
                 key="voice-panel"
                 initial={{ opacity: 0, y: 24, scale: 0.96 }}
@@ -246,18 +472,20 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
                                 {activeClientPicker.message || "Choose a client or keep speaking."}
                             </p>
                             <div className="max-h-40 overflow-y-auto flex flex-col gap-2">
-                                {(activeClientPicker.clients || []).map((client) => (
+                                {(activeClientPicker.clients || []).map((client, index) => (
                                     <button
-                                        key={client.id}
-                                        className="w-full text-left rounded-lg px-3 py-2 text-sm transition-colors"
+                                        key={buildStableKey("voice-client", client.id, client.name, index)}
+                                        disabled={isInputLocked}  // ── DISABLE WHILE PROCESSING
+                                        className="w-full text-left rounded-lg px-3 py-2 text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                         style={{
-                                            backgroundColor: "rgba(255,255,255,0.05)",
-                                            color: "#fff",
+                                            backgroundColor: isInputLocked ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.05)",
+                                            color: isInputLocked ? "rgba(255,255,255,0.4)" : "#fff",
                                             border: "1px solid rgba(255,255,255,0.08)",
                                         }}
                                         onClick={() => handleClientPick(client)}
                                     >
                                         {client.name}
+                                        {isInputLocked && <span className="text-xs ml-2">⏳</span>}
                                     </button>
                                 ))}
                             </div>
@@ -270,16 +498,115 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
             <AnimatePresence>
                 {activeDialog && (
                     <ClientInputDialog 
+                        key={buildStableKey("voice-dialog", activeDialog.dialog_id, activeDialog.session_id, activeDialog.title)}
                         dialog={activeDialog}
                         onSubmit={(result) => {
-                            toast.success(result.message);
+                            if (result?.message) {
+                                const notify = result?.success === false ? toast.error : toast.success;
+                                notify(result.message);
+                            }
                             setActiveClientPicker(null);
                         }}
                         onClose={() => setActiveDialog(null)}
                     />
                 )}
             </AnimatePresence>
-        </AnimatePresence>
+
+            <Dialog
+                open={providerPopup.open}
+                onOpenChange={(open) => setProviderPopup((current) => ({ ...current, open }))}
+            >
+                <DialogContent className="border-[#2A2A2A] bg-[#111111] text-white sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>
+                            {providerPopup.blocking ? "Voice Agent Setup Needed" : "Voice Provider Warning"}
+                        </DialogTitle>
+                        <DialogDescription className="text-[#A0A0A0]">
+                            {providerPopup.message || (
+                                providerPopup.blocking
+                                    ? "The voice agent cannot start until the blocking provider issues below are fixed."
+                                    : "The voice agent can continue, but some provider settings need attention."
+                            )}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-3">
+                        {missingKeyIssues.length > 0 && (
+                            <div className="rounded-xl border border-[#2A2A2A] bg-black/20 p-3">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#F5C35B]">
+                                    Empty API Keys
+                                </p>
+                                <div className="mt-3 space-y-2">
+                                    {missingKeyIssues.map((issue, index) => (
+                                        <div key={buildStableKey("provider-missing", issue.provider, issue.env_var, issue.status, index)} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <span className="text-sm font-semibold text-white">{issue.provider}</span>
+                                                <span className="text-[10px] uppercase tracking-[0.18em] text-[#A0A0A0]">
+                                                    {issue.env_var}
+                                                </span>
+                                            </div>
+                                            <p className="mt-2 text-sm text-[#D0D0D0]">{issue.message}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {limitIssues.length > 0 && (
+                            <div className="rounded-xl border border-[#2A2A2A] bg-black/20 p-3">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#FF7A7A]">
+                                    Limits Reached
+                                </p>
+                                <div className="mt-3 space-y-2">
+                                    {limitIssues.map((issue, index) => (
+                                        <div key={buildStableKey("provider-limit", issue.provider, issue.env_var, issue.status, index)} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <span className="text-sm font-semibold text-white">{issue.provider}</span>
+                                                <span className="text-[10px] uppercase tracking-[0.18em] text-[#A0A0A0]">
+                                                    {PROVIDER_STATUS_LABELS[issue.status] || issue.status}
+                                                </span>
+                                            </div>
+                                            <p className="mt-2 text-sm text-[#D0D0D0]">{issue.message}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {otherProviderIssues.length > 0 && (
+                            <div className="rounded-xl border border-[#2A2A2A] bg-black/20 p-3">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#8DC9FF]">
+                                    Other Provider Issues
+                                </p>
+                                <div className="mt-3 space-y-2">
+                                    {otherProviderIssues.map((issue, index) => (
+                                        <div key={buildStableKey("provider-other", issue.provider, issue.env_var, issue.status, index)} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <span className="text-sm font-semibold text-white">{issue.provider}</span>
+                                                <span className="text-[10px] uppercase tracking-[0.18em] text-[#A0A0A0]">
+                                                    {PROVIDER_STATUS_LABELS[issue.status] || issue.status}
+                                                </span>
+                                            </div>
+                                            <p className="mt-2 text-sm text-[#D0D0D0]">{issue.message}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            className="bg-white text-black hover:bg-white/90"
+                            onClick={() => setProviderPopup((current) => ({ ...current, open: false }))}
+                        >
+                            {providerPopup.blocking ? "Close" : "Continue"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
     );
 }
 
@@ -404,9 +731,9 @@ function AgentContent({ onDisconnect }) {
                                 Transcript will appear here…
                             </p>
                         ) : (
-                            transcript.map((entry) => (
+                            transcript.map((entry, index) => (
                                 <div
-                                    key={entry.id}
+                                    key={buildStableKey("voice-transcript", entry.id, entry.role, entry.text.slice(0, 24), index)}
                                     className={`flex gap-1.5 ${entry.role === "user" ? "justify-end" : "justify-start"}`}
                                 >
                                     <div

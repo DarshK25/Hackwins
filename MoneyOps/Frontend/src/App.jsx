@@ -23,6 +23,7 @@ import CompliancePage from "@/pages/CompliancePage";
 import { OrchestratorDashboard } from "@/components/OrchestratorDashboard";
 import DashboardLayout from "@/components/DashboardLayout";
 import InviteAcceptPage from "@/pages/InviteAcceptPage";
+import AuditLogPage from "@/pages/AuditLogPage";
 
 export default function App() {
     return (
@@ -66,6 +67,7 @@ export default function App() {
                     <Route path="/clients" element={<ClientsPage />} />
                     <Route path="/cashflow" element={<CashflowPage />} />
                     <Route path="/finances" element={<FinancesPage />} />
+                    <Route path="/expenses" element={<FinancesPage />} />
                     <Route path="/invoices" element={<InvoicesPage />} />
                     <Route path="/invoices/new" element={<NewInvoicePage />} />
                     <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
@@ -81,6 +83,7 @@ export default function App() {
                     <Route path="/compliance" element={<CompliancePage />} />
                     <Route path="/orchestrator" element={<OrchestratorDashboard />} />
                     <Route path="/teams" element={<TeamsPage />} />
+                    <Route path="/audit-logs" element={<AuditLogPage />} />
                 </Route>
             </Routes>
         </>

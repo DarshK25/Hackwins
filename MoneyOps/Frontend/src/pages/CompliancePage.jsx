@@ -11,6 +11,7 @@ export default function CompliancePage() {
     const [businessId] = useState(1);
     const [loading, setLoading] = useState(true);
     const [complianceData, setComplianceData] = useState(null);
+    const [summaryData, setSummaryData] = useState(null);
 
     async function fetchComplianceStatus() {
         if (!internalUserId || !internalOrgId) {
@@ -28,12 +29,21 @@ export default function CompliancePage() {
                 "X-Org-Id": internalOrgId,
             };
 
-            const backendRes = await fetch(`/api/compliance/status?businessId=${businessId}&userId=${internalUserId}`, { headers });
-            if (!backendRes.ok) {
-                throw new Error("Failed to fetch compliance status");
-            }
-            const backendData = await backendRes.json();
-            setComplianceData(backendData);
+            const [statusRes, summaryRes] = await Promise.all([
+                fetch(`/api/compliance/status?businessId=${businessId}&userId=${internalUserId}`, { headers }),
+                fetch(`/api/compliance/summary?orgId=${internalOrgId}`, { headers })
+            ]);
+
+            if (!statusRes.ok) throw new Error("Failed to fetch compliance status");
+            if (!summaryRes.ok) throw new Error("Failed to fetch compliance summary");
+
+            const [statusData, summaryJson] = await Promise.all([
+                statusRes.json(),
+                summaryRes.json()
+            ]);
+
+            setComplianceData(statusData);
+            setSummaryData(summaryJson);
         } catch (error) {
             console.error(error);
         } finally {
@@ -64,6 +74,7 @@ export default function CompliancePage() {
             <ComplianceDashboard
                 businessId={businessId}
                 data={complianceData}
+                summaryData={summaryData}
                 onRefresh={fetchComplianceStatus}
             />
         </div>
