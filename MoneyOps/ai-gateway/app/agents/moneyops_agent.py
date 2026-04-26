@@ -502,6 +502,10 @@ def _fallback_from_tool_results(tool_results: List[Tuple[str, Any]]) -> Optional
             return str(first_result["speech"])
         if first_result.get("_voice_hint"):
             return str(first_result["_voice_hint"])
+        if first_tool == "search_market_intelligence":
+            synthesized_market = _synthesize_market_result(first_result)
+            if synthesized_market:
+                return synthesized_market
 
     if first_tool == "get_invoices" and isinstance(first_result, dict):
         total_count = int(first_result.get("total_count", 0) or 0)
@@ -560,12 +564,18 @@ def _prefer_direct_tool_answer(tool_results: List[Tuple[str, Any]]) -> Optional[
         "get_cash_flow_forecast",
         "get_overdue_action_plan",
         "get_daily_briefing",
+        "search_market_intelligence",
     }
     if tool_name not in direct_tool_names:
         return None
 
     if result.get("status") in {"error", "validation_error"}:
         return None
+
+    if tool_name == "search_market_intelligence":
+        market_answer = _synthesize_market_result(result)
+        if market_answer:
+            return market_answer
 
     return str(result.get("speech") or result.get("_voice_hint") or "").strip() or _fallback_from_tool_results(tool_results)
 
@@ -4121,6 +4131,14 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
                     "raw_snippets": snippets,
                     "business_name": biz_name,
                     "activity": activity,
+                    "_voice_summary": _synthesize_market_result({
+                        "query": query,
+                        "focus": focus,
+                        "activity": activity,
+                        "business_name": biz_name,
+                        "city": city,
+                        "raw_snippets": snippets,
+                    }) or "",
                     "instruction": f"Synthesize these market signals into 3-4 sentences of natural speech. Connect each signal to how it specifically affects {biz_name}'s work in {activity}. Do NOT list article titles or URLs. Speak the insights directly.",
                     "note": "All amounts in INR if mentioned"
                 }
@@ -4134,6 +4152,7 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
                     "activity": activity,
                     "business_name": biz_name,
                     "fallback_text": generic_fallback,
+                    "_voice_summary": generic_fallback,
                     "raw_snippets": [],
                     "instruction": "Speak the fallback_text naturally and connect it directly to the business context."
                 }
@@ -5554,7 +5573,7 @@ async def process(
                     messages=messages,
                     tools=TOOLS,
                     tool_choice="auto",
-                    max_tokens=700,
+                    max_tokens=300,
                     temperature=0.1,
                 )
             except asyncio.TimeoutError:
@@ -5562,7 +5581,7 @@ async def process(
                 break
             except Exception as e:
                 logger.error({"event": "groq_error", "round": round_num, "error": str(e)})
-                final_answer = _groq_rate_limit_message(e) or _fallback_from_tool_results(last_tool_results) or "Could not process that. Please try again."
+                final_answer = _fallback_from_tool_results(last_tool_results) or _groq_rate_limit_message(e) or "Could not process that. Please try again."
                 break
 
             msg = response.choices[0].message
@@ -5619,7 +5638,7 @@ async def process(
                 final_answer = final_r.choices[0].message.content or _fallback_from_tool_results(last_tool_results) or "Done."
             except Exception as e:
                 logger.error({"event": "final_groq_error", "error": str(e)})
-                final_answer = _groq_rate_limit_message(e) or _fallback_from_tool_results(last_tool_results) or "I have processed your request."
+                final_answer = _fallback_from_tool_results(last_tool_results) or _groq_rate_limit_message(e) or "I have processed your request."
     finally:
         await _close_groq_clients(groq_clients)
 
