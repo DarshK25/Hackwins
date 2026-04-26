@@ -89,10 +89,17 @@ export default function NewInvoicePage() {
 
         setFormData((prev) => {
             const next = { ...prev };
+            const clientId = draft.client_id || draft.clientId;
             const clientName = draft.client_name || draft.customerName;
+            if (clientId && canApplyVoice("clientId")) {
+                next.clientId = clientId;
+            }
             if (clientName && canApplyVoice("customerName")) {
                 next.customerName = clientName;
-                const matchedClient = clients.find((client) => (client.name || "").toLowerCase() === clientName.toLowerCase());
+                const matchedClient = clients.find((client) =>
+                    (clientId && client.id === clientId)
+                    || (client.name || "").toLowerCase() === clientName.toLowerCase()
+                );
                 if (matchedClient && canApplyVoice("clientId")) {
                     next.clientId = matchedClient.id;
                 }
@@ -109,7 +116,8 @@ export default function NewInvoicePage() {
                     quantity: Number(item.quantity || 1),
                     rate: Number(item.unit_price || item.rate || 0),
                     gstPercent: Number(item.gst_percent || item.gstPercent || 18),
-                    isService: !item.quantity || Number(item.quantity) <= 1,
+                    isService: String(item.type || "").toUpperCase() === "SERVICE"
+                        || (!item.type && (!item.quantity || Number(item.quantity) <= 1)),
                 }));
             }
             return next;
@@ -139,7 +147,18 @@ export default function NewInvoicePage() {
         }
 
         const handleVoiceDraft = (event) => applyVoiceInvoiceDraft(event.detail);
-        const handleVoiceClientCreated = () => fetchClients();
+        const handleVoiceClientCreated = (event) => {
+            const detail = event?.detail || {};
+            fetchClients();
+            setFormData((prev) => ({
+                ...prev,
+                customerName: detail.client_name || prev.customerName,
+                clientId: detail.client_id || prev.clientId,
+            }));
+            if (detail.invoice_draft) {
+                applyVoiceInvoiceDraft({ draft: detail.invoice_draft });
+            }
+        };
         window.addEventListener("voice:invoice-draft-updated", handleVoiceDraft);
         window.addEventListener("voice:client-created", handleVoiceClientCreated);
         return () => {

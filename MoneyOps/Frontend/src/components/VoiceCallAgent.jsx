@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useVoiceEvents } from "@/hooks/useVoiceEvents";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import ClientInputDialog from "./ClientInputDialog";
+import { saveVoiceSession } from "@/lib/agentWorkspaceStorage";
 
 export function VoiceCallAgent({ agentType = "orchestrator" }) {
     const { user, isLoaded } = useUser();
@@ -27,6 +28,10 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
     const [isProcessing, setIsProcessing] = useState(false);
     const [activeDialog, setActiveDialog] = useState(null);
     const [activeClientPicker, setActiveClientPicker] = useState(null);
+    const transcriptRef = useRef([]);
+    const sessionMetaRef = useRef(null);
+    const actionLogRef = useRef([]);
+    const storageScope = `${internalOrgId || "org"}:${internalUserId || user?.id || "user"}`;
 
     const handleClientPick = async (client) => {
         if (!activeClientPicker?.session_id) return;
@@ -93,6 +98,12 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
             }
             const data = await res.json();
             if (!data.token || !data.url) throw new Error("Invalid token response: missing token or url");
+            sessionMetaRef.current = {
+                id: `voice-${Date.now()}`,
+                startedAt: new Date().toISOString(),
+            };
+            transcriptRef.current = [];
+            actionLogRef.current = [];
             setToken(data.token);
             setUrl(data.url);
             setIsConnect(true);
@@ -109,20 +120,44 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
     };
 
     const disconnect = useCallback(() => {
+        const sessionMeta = sessionMetaRef.current;
+        if (sessionMeta && (transcriptRef.current.length || actionLogRef.current.length)) {
+            const firstUserLine = transcriptRef.current.find((entry) => entry.role === "user")?.text;
+            const firstAgentLine = transcriptRef.current.find((entry) => entry.role === "agent")?.text;
+            saveVoiceSession(storageScope, {
+                id: sessionMeta.id,
+                startedAt: sessionMeta.startedAt,
+                endedAt: new Date().toISOString(),
+                agentType,
+                summary: firstUserLine || firstAgentLine || "Voice session",
+                transcript: transcriptRef.current.slice(-40),
+                actions: actionLogRef.current.slice(-20),
+            });
+        }
+        sessionMetaRef.current = null;
+        transcriptRef.current = [];
+        actionLogRef.current = [];
         setIsConnect(false);
         setToken("");
         setIsProcessing(false);
         setActiveDialog(null);
-    }, []);
+        setActiveClientPicker(null);
+    }, [agentType, storageScope]);
 
     useEffect(() => {
         const handleOpenDialog = (e) => setActiveDialog(e.detail);
         const handleOpenClientPicker = (e) => setActiveClientPicker(e.detail);
+        const handleAgentAction = (e) => {
+            if (!e?.detail) return;
+            actionLogRef.current = [...actionLogRef.current, e.detail].slice(-20);
+        };
         window.addEventListener("voice:open_input_dialog", handleOpenDialog);
         window.addEventListener("voice:open_client_picker", handleOpenClientPicker);
+        window.addEventListener("voice:agent-action", handleAgentAction);
         return () => {
             window.removeEventListener("voice:open_input_dialog", handleOpenDialog);
             window.removeEventListener("voice:open_client_picker", handleOpenClientPicker);
+            window.removeEventListener("voice:agent-action", handleAgentAction);
         };
     }, []);
 
@@ -209,7 +244,12 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
                             data-lk-theme="default"
                             style={{ height: "100%" }}
                         >
-                            <AgentContent onDisconnect={disconnect} />
+                            <AgentContent
+                                onDisconnect={disconnect}
+                                onTranscriptChange={(entries) => {
+                                    transcriptRef.current = entries;
+                                }}
+                            />
                             <RoomAudioRenderer />
                         </LiveKitRoom>
                     ) : (
@@ -275,7 +315,7 @@ export function VoiceCallAgent({ agentType = "orchestrator" }) {
     );
 }
 
-function AgentContent({ onDisconnect }) {
+function AgentContent({ onDisconnect, onTranscriptChange }) {
     useVoiceEvents();
     const { state } = useConnectionState();
     const isConnected = state === ConnectionState.Connected;
@@ -294,14 +334,19 @@ function AgentContent({ onDisconnect }) {
             if (!finalSegments.length) return;
             // Local participant = user speech; remote/agent = agent speech
             const isUserSpeech = participant?.isLocal === true;
-            setTranscript(prev => [
+            setTranscript(prev => {
+                const next = [
                 ...prev.slice(-20), // keep last 20 lines to avoid overflow
                 ...finalSegments.map(s => ({
                     id: s.id,
                     role: isUserSpeech ? "user" : "agent",
                     text: s.text.trim(),
+                    timestamp: new Date().toISOString(),
                 }))
-            ]);
+                ];
+                onTranscriptChange?.(next);
+                return next;
+            });
         };
         room.on("transcriptionReceived", handler);
         return () => room.off("transcriptionReceived", handler);
@@ -312,14 +357,19 @@ function AgentContent({ onDisconnect }) {
             const responseText = event?.detail?.responseText?.trim();
             if (!responseText) return;
 
-            setTranscript((prev) => [
-                ...prev.slice(-20),
-                {
+            setTranscript((prev) => {
+                const next = [
+                    ...prev.slice(-20),
+                    {
                     id: `manual-${Date.now()}`,
                     role: "agent",
                     text: responseText,
-                },
-            ]);
+                    timestamp: new Date().toISOString(),
+                    },
+                ];
+                onTranscriptChange?.(next);
+                return next;
+            });
 
             if (typeof window !== "undefined" && "speechSynthesis" in window) {
                 window.speechSynthesis.cancel();

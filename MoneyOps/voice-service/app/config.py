@@ -58,7 +58,18 @@ class Settings(BaseSettings):
     # External APIs
     ASSEMBLYAI_API_KEY: Optional[str] = None
     CARTESIA_API_KEY: Optional[str] = None
+    DEEPGRAM_API_KEY: Optional[str] = None
+    ELEVENLABS_API_KEY: Optional[str] = None
+    ELEVEN_API_KEY: Optional[str] = None
+    STT_PROVIDER: str = "auto"
     TTS_PROVIDER: str = "auto"
+    STT_FALLBACK_ORDER: str = "deepgram,assemblyai,groq"
+    TTS_FALLBACK_ORDER: str = "elevenlabs,deepgram,cartesia,groq"
+    DEEPGRAM_STT_MODEL: str = "flux-general-en"
+    DEEPGRAM_TTS_MODEL: str = "aura-2-odysseus-en"
+    DEEPGRAM_STT_EAGER_EOT_THRESHOLD: float = 0.4
+    ELEVENLABS_TTS_MODEL: str = "eleven_flash_v2_5"
+    ELEVENLABS_VOICE_ID: str = "EXAVITQu4vr4xnSDxMaL"
 
     # VAD (Voice Activity Detection) — tuned for natural conversation
     # min_speech_duration LOW  → picks up speech quickly (no missed start-of-turn)

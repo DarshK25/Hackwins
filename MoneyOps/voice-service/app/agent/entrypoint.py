@@ -48,6 +48,18 @@ except ImportError:
     HAS_CARTESIA = False
 
 try:
+    from livekit.plugins import deepgram as _deepgram_plugin
+    HAS_DEEPGRAM = True
+except ImportError:
+    HAS_DEEPGRAM = False
+
+try:
+    from livekit.plugins import elevenlabs as _elevenlabs_plugin
+    HAS_ELEVENLABS = True
+except ImportError:
+    HAS_ELEVENLABS = False
+
+try:
     from livekit.plugins import assemblyai as _assemblyai_plugin
     HAS_ASSEMBLYAI = True
 except ImportError:
@@ -482,53 +494,175 @@ def _extract_user_context(ctx: JobContext) -> dict:
 
 
 def _create_tts():
-    """Prefer a working provider. Auto mode should choose the most reliable configured TTS."""
+    """Choose the first working TTS provider from explicit provider or fallback order."""
     provider = (settings.TTS_PROVIDER or "auto").strip().lower()
-
-    can_use_cartesia = HAS_CARTESIA and bool(settings.CARTESIA_API_KEY)
-    if provider in {"cartesia", "auto"} and can_use_cartesia:
-        if can_use_cartesia:
-            try:
-                tts = _cartesia_plugin.TTS(api_key=settings.CARTESIA_API_KEY)
-                logger.info("tts_provider", provider="cartesia")
-                return tts
-            except Exception as e:
-                logger.warning("cartesia_init_failed", error=str(e))
-        if provider == "cartesia":
-            logger.warning(
-                "cartesia_not_available",
-                has_plugin=HAS_CARTESIA,
-                has_api_key=bool(settings.CARTESIA_API_KEY),
-            )
-
-    if provider == "cartesia":
-        logger.warning(
-            "tts_falling_back_to_groq",
-            reason="cartesia was explicitly requested but could not be initialized",
-        )
-
-    logger.info("tts_provider", provider="groq-orpheus")
-    logger.warning(
-        "groq_tts_terms_may_be_required",
-        model="canopylabs/orpheus-v1-english",
-        acceptance_url="https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english",
+    fallback_order = _provider_order(
+        provider,
+        settings.TTS_FALLBACK_ORDER,
+        default_order=["elevenlabs", "deepgram", "cartesia", "groq"],
     )
-    return groq.TTS(model="canopylabs/orpheus-v1-english", voice="autumn")
+
+    for candidate in fallback_order:
+        tts = _build_tts_provider(candidate)
+        if tts is not None:
+            logger.info("tts_provider_selected", provider=candidate, fallback_chain=fallback_order)
+            return tts
+
+    raise RuntimeError(
+        "No working TTS provider is configured. "
+        "Set ELEVENLABS_API_KEY, DEEPGRAM_API_KEY, CARTESIA_API_KEY, or enable Groq fallback."
+    )
 
 
 def _create_stt():
-    """Try AssemblyAI first, fall back to Groq Whisper."""
-    if HAS_ASSEMBLYAI and settings.ASSEMBLYAI_API_KEY:
-        try:
-            # AssemblyAI for low-latency STT
-            stt = _assemblyai_plugin.STT(api_key=settings.ASSEMBLYAI_API_KEY)
-            logger.info("stt_provider", provider="assemblyai")
-            return stt
-        except Exception as e:
-            logger.warning("assemblyai_init_failed", error=str(e))
+    """Choose the first working STT provider from explicit provider or fallback order."""
+    provider = (settings.STT_PROVIDER or "auto").strip().lower()
+    fallback_order = _provider_order(
+        provider,
+        settings.STT_FALLBACK_ORDER,
+        default_order=["deepgram", "assemblyai", "groq"],
+    )
 
-    logger.info("stt_provider", provider="groq-whisper")
-    return groq.STT()
+    for candidate in fallback_order:
+        stt = _build_stt_provider(candidate)
+        if stt is not None:
+            logger.info("stt_provider_selected", provider=candidate, fallback_chain=fallback_order)
+            return stt
+
+    raise RuntimeError(
+        "No working STT provider is configured. "
+        "Set DEEPGRAM_API_KEY, ASSEMBLYAI_API_KEY, or use Groq fallback."
+    )
+
+
+def _provider_order(primary: str, raw_order: str, default_order: list[str]) -> list[str]:
+    if primary and primary != "auto":
+        return [primary]
+
+    providers: list[str] = []
+    for item in (raw_order or "").split(","):
+        normalized = item.strip().lower()
+        if normalized and normalized not in providers:
+            providers.append(normalized)
+
+    for item in default_order:
+        if item not in providers:
+            providers.append(item)
+
+    return providers
+
+
+def _build_tts_provider(provider: str):
+    if provider == "elevenlabs":
+        api_key = settings.ELEVENLABS_API_KEY or settings.ELEVEN_API_KEY
+        if not (HAS_ELEVENLABS and api_key):
+            logger.warning(
+                "tts_provider_unavailable",
+                provider=provider,
+                has_plugin=HAS_ELEVENLABS,
+                has_api_key=bool(api_key),
+            )
+            return None
+        try:
+            return _elevenlabs_plugin.TTS(
+                api_key=api_key,
+                model=settings.ELEVENLABS_TTS_MODEL,
+                voice_id=settings.ELEVENLABS_VOICE_ID,
+            )
+        except Exception as exc:
+            logger.warning("elevenlabs_init_failed", error=str(exc))
+            return None
+
+    if provider == "deepgram":
+        if not (HAS_DEEPGRAM and settings.DEEPGRAM_API_KEY):
+            logger.warning(
+                "tts_provider_unavailable",
+                provider=provider,
+                has_plugin=HAS_DEEPGRAM,
+                has_api_key=bool(settings.DEEPGRAM_API_KEY),
+            )
+            return None
+        try:
+            return _deepgram_plugin.TTS(
+                api_key=settings.DEEPGRAM_API_KEY,
+                model=settings.DEEPGRAM_TTS_MODEL,
+            )
+        except Exception as exc:
+            logger.warning("deepgram_tts_init_failed", error=str(exc))
+            return None
+
+    if provider == "cartesia":
+        if not (HAS_CARTESIA and settings.CARTESIA_API_KEY):
+            logger.warning(
+                "tts_provider_unavailable",
+                provider=provider,
+                has_plugin=HAS_CARTESIA,
+                has_api_key=bool(settings.CARTESIA_API_KEY),
+            )
+            return None
+        try:
+            return _cartesia_plugin.TTS(api_key=settings.CARTESIA_API_KEY)
+        except Exception as exc:
+            logger.warning("cartesia_init_failed", error=str(exc))
+            return None
+
+    if provider == "groq":
+        logger.warning(
+            "tts_provider_degraded_mode",
+            provider="groq",
+            note="Using Groq TTS as last-resort emergency fallback only.",
+        )
+        logger.warning(
+            "groq_tts_terms_may_be_required",
+            model="canopylabs/orpheus-v1-english",
+            acceptance_url="https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english",
+        )
+        return groq.TTS(model="canopylabs/orpheus-v1-english", voice="autumn")
+
+    logger.warning("tts_provider_unknown", provider=provider)
+    return None
+
+
+def _build_stt_provider(provider: str):
+    if provider == "deepgram":
+        if not (HAS_DEEPGRAM and settings.DEEPGRAM_API_KEY):
+            logger.warning(
+                "stt_provider_unavailable",
+                provider=provider,
+                has_plugin=HAS_DEEPGRAM,
+                has_api_key=bool(settings.DEEPGRAM_API_KEY),
+            )
+            return None
+        try:
+            return _deepgram_plugin.STTv2(
+                api_key=settings.DEEPGRAM_API_KEY,
+                model=settings.DEEPGRAM_STT_MODEL,
+                eager_eot_threshold=settings.DEEPGRAM_STT_EAGER_EOT_THRESHOLD,
+            )
+        except Exception as exc:
+            logger.warning("deepgram_stt_init_failed", error=str(exc))
+            return None
+
+    if provider == "assemblyai":
+        if not (HAS_ASSEMBLYAI and settings.ASSEMBLYAI_API_KEY):
+            logger.warning(
+                "stt_provider_unavailable",
+                provider=provider,
+                has_plugin=HAS_ASSEMBLYAI,
+                has_api_key=bool(settings.ASSEMBLYAI_API_KEY),
+            )
+            return None
+        try:
+            return _assemblyai_plugin.STT(api_key=settings.ASSEMBLYAI_API_KEY)
+        except Exception as exc:
+            logger.warning("assemblyai_init_failed", error=str(exc))
+            return None
+
+    if provider == "groq":
+        return groq.STT()
+
+    logger.warning("stt_provider_unknown", provider=provider)
+    return None
 
 
 def prewarm(proc: JobProcess):

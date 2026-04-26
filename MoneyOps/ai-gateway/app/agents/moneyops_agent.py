@@ -540,6 +540,36 @@ def _fallback_from_tool_results(tool_results: List[Tuple[str, Any]]) -> Optional
     return None
 
 
+def _prefer_direct_tool_answer(tool_results: List[Tuple[str, Any]]) -> Optional[str]:
+    if not tool_results:
+        return None
+
+    if len(tool_results) != 1:
+        return None
+
+    tool_name, result = tool_results[0]
+    if not isinstance(result, dict):
+        return None
+
+    direct_tool_names = {
+        "get_financial_summary",
+        "get_invoices",
+        "get_clients",
+        "check_compliance",
+        "get_business_health_score",
+        "get_cash_flow_forecast",
+        "get_overdue_action_plan",
+        "get_daily_briefing",
+    }
+    if tool_name not in direct_tool_names:
+        return None
+
+    if result.get("status") in {"error", "validation_error"}:
+        return None
+
+    return str(result.get("speech") or result.get("_voice_hint") or "").strip() or _fallback_from_tool_results(tool_results)
+
+
 def _groq_rate_limit_message(error: Exception) -> Optional[str]:
     raw = str(error or "")
     lowered = raw.lower()
@@ -747,6 +777,24 @@ def _is_market_action_followup_query(text: str, session: AgentSession) -> bool:
     return session.last_tool_called == "search_market_intelligence" or bool(session.last_market_results)
 
 
+def _is_growth_strategy_query(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(phrase in lowered for phrase in (
+        "scale my business",
+        "scale our business",
+        "generate more revenue",
+        "generate more income",
+        "increase revenue",
+        "increase income",
+        "grow my business",
+        "grow our business",
+        "how do i scale",
+        "how should i scale",
+        "what should i do to scale",
+        "what should i basically do",
+    ))
+
+
 def _is_create_client_query(text: str) -> bool:
     lowered = (text or "").lower()
     return any(phrase in lowered for phrase in (
@@ -772,7 +820,7 @@ def _is_create_invoice_query(text: str) -> bool:
         "make an invoice",
         "raise an invoice",
         "new invoice",
-    ))
+    )) or bool(re.search(r"^(?:an?\s+)?invoice\s+for\s+.+$", lowered.strip()))
 
 
 def _is_delete_invoice_query(text: str) -> bool:
@@ -1070,17 +1118,89 @@ def _extract_quantity_value(text: str) -> Optional[float]:
         if re.search(rf"\b(?:quantity\s+is\s+|make\s+it\s+|keep\s+it\s+at\s+|just\s+)?{token}\b", raw):
             return value
 
+    # Avoid treating a plain spoken amount like "for 5000 rupees" as quantity.
+    if re.search(r"\b(?:rupees?|rs|inr|amount|price|rate)\b", raw) and not re.search(
+        r"\b(?:quantity|qty|units?|items?|chargers?|pieces?)\b",
+        raw,
+    ):
+        return None
+
     match = re.search(
-        r"\b(?:quantity\s+is\s+|qty\s+is\s+|make\s+it\s+|keep\s+it\s+at\s+|set\s+quantity\s+to\s+)?(\d+(?:\.\d+)?)\s*(?:units?|items?|chargers?|pieces?)?\b",
+        r"\b(?:quantity\s+is\s+|qty\s+is\s+|make\s+it\s+|keep\s+it\s+at\s+|set\s+quantity\s+to\s+)(\d+(?:\.\d+)?)\b",
         raw,
     )
-    if not match:
+    if match:
+        try:
+            value = float(match.group(1))
+        except ValueError:
+            return None
+        return value if value > 0 else None
+
+    match = re.search(
+        r"\b(\d+(?:\.\d+)?)\s*(?:units?|items?|chargers?|pieces?)\b",
+        raw,
+    )
+    if match:
+        try:
+            value = float(match.group(1))
+        except ValueError:
+            return None
+        return value if value > 0 else None
+    return None
+
+
+def _normalize_team_code_value(value: Any) -> Optional[str]:
+    extracted = _extract_team_code(str(value or ""))
+    if extracted:
+        return extracted
+    cleaned = str(value or "").strip()
+    return cleaned or None
+
+
+def _extract_invoice_item_rewrite(text: str) -> Optional[Tuple[int, str]]:
+    raw = (text or "").strip()
+    if not raw:
         return None
-    try:
-        value = float(match.group(1))
-    except ValueError:
+    ordinal_map = {
+        "first": 0,
+        "1st": 0,
+        "second": 1,
+        "2nd": 1,
+        "third": 2,
+        "3rd": 2,
+    }
+    patterns = (
+        r"^(?:write|change|update|edit|make)\s+the\s+(first|1st|second|2nd|third|3rd)\s+(?:invoice\s+)?(?:line\s+)?item\s+(?:as|to)\s+(.+)$",
+        r"^(?:write|change|update|edit|make)\s+(first|1st|second|2nd|third|3rd)\s+(?:invoice\s+)?(?:line\s+)?item\s+(?:as|to)\s+(.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, raw, flags=re.I)
+        if not match:
+            continue
+        ordinal = match.group(1).lower()
+        replacement = _clean_name_phrase(match.group(2))
+        index = ordinal_map.get(ordinal)
+        if index is not None and replacement:
+            return index, replacement
+    return None
+
+
+def _extract_invoice_item_replacement_text(text: str) -> Optional[str]:
+    raw = (text or "").strip()
+    if not raw:
         return None
-    return value if value > 0 else None
+    patterns = (
+        r"^(?:replace\s+(?:this|that|it)\s+with)\s+(.+)$",
+        r"^(?:change\s+(?:this|that|it)\s+to)\s+(.+)$",
+        r"^(?:make\s+(?:this|that|it))\s+(.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, raw, flags=re.I)
+        if match:
+            candidate = _clean_invoice_item_followup_text(match.group(1))
+            if candidate:
+                return candidate
+    return None
 
 
 def _next_invoice_missing_prompt(draft: dict) -> str:
@@ -1097,7 +1217,8 @@ def _next_invoice_missing_prompt(draft: dict) -> str:
 def _clean_invoice_item_followup_text(text: str) -> str:
     cleaned = (text or "").strip()
     cleaned = re.sub(r"^(?:add\s+)?(?:another|one\s+more|new)\s+(?:line\s+)?item(?:\s+(?:called|as|is))?\s*", "", cleaned, flags=re.I)
-    cleaned = re.sub(r"^(?:this\s+is|it\s+is|for)\s+", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"^(?:another\s+item\s+name\s+is|item\s+name\s+is|name\s+is)\s+", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"^(?:this\s+is|it\s+is|is|for)\s+", "", cleaned, flags=re.I)
     cleaned = re.sub(r"\b(?:at|for)\s+\d[\d,]*(?:\.\d+)?\s*(?:rupees?|rs|inr)?(?:\s+each)?\b.*$", "", cleaned, flags=re.I)
     cleaned = re.sub(r"\b\d[\d,]*(?:\.\d+)?\b", "", cleaned)
     cleaned = re.sub(r"\b(?:rupees?|rs|inr|each|also|with|a|the)\b", " ", cleaned, flags=re.I)
@@ -1115,14 +1236,118 @@ def _clean_invoice_item_followup_text(text: str) -> str:
         "item",
         "another item",
         "new item",
+        "name is",
+        "for",
     }
     if cleaned.lower() in blocked:
         return ""
     return cleaned
 
 
+def _formalize_invoice_description(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(value or "").strip())
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"^(?:i\s+basically\s+provided\s+them|i\s+provided\s+them|we\s+provided|we\s+did|it\s+was|this\s+was)\s+", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\bwhich\s+costs?\b.*$", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\bcost\s+for\b.*$", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\bfor\s+all\s+the\s+voltnest\s+services\b", "for EV charging services", cleaned, flags=re.I)
+    cleaned = re.sub(r"\binfra(?:structural)?\b", "infrastructure", cleaned, flags=re.I)
+    cleaned = re.sub(r"\bac\s+charger\s+adaption\b", "AC charger adaptation", cleaned, flags=re.I)
+    cleaned = re.sub(r"\belectrical\s+ac\s*dc\s+charges\b", "AC/DC charging infrastructure", cleaned, flags=re.I)
+    cleaned = re.sub(r"\bac\s*dc\s+charges\b", "AC/DC charging infrastructure", cleaned, flags=re.I)
+    cleaned = re.sub(r"\bac\s*dc\s+chargers?\b", "AC/DC charging infrastructure", cleaned, flags=re.I)
+    cleaned = re.sub(r"\badapting\s+to\b", "adaptation for", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,-")
+
+    lowered = cleaned.lower()
+    if "consultation" in lowered and any(token in lowered for token in ("ac/dc", "electrical", "adaptation")):
+        return "AC/DC charging infrastructure adaptation consultation"
+    if "consultation" in lowered and any(token in lowered for token in ("infrastructure", "setup", "charger", "ev", "service")):
+        return "EV charging infrastructure setup consultation"
+    if "site inspection" in lowered and "navi mumbai" in lowered:
+        return "Site inspection at Navi Mumbai"
+    if cleaned:
+        return cleaned[0].upper() + cleaned[1:]
+    return cleaned
+
+
+def _is_invoice_description_help_query(text: str) -> bool:
+    lowered = _normalize_intent_text(text)
+    return _has_any_phrase(
+        lowered,
+        (
+            "what should we include for this description",
+            "what should i include for this description",
+            "what should we write for this description",
+            "what should i write for this description",
+            "what should we put for this description",
+            "what should i put for this description",
+            "what should we include",
+            "what should i include",
+            "what should we write",
+            "what should i write",
+            "how do we word this",
+            "how should we word this",
+            "how do i word this",
+            "how should i word this",
+            "word this in invoice",
+            "word this for invoice",
+            "describe description in invoice",
+            "description in invoice",
+            "help me write this description",
+            "suggest a better description",
+        ),
+    )
+
+
+def _merge_invoice_description_fragments(existing: str, fragment: str) -> str:
+    existing_clean = str(existing or "").strip()
+    fragment_clean = _clean_invoice_item_followup_text(fragment)
+    if not fragment_clean:
+        return existing_clean
+    if not existing_clean:
+        return _formalize_invoice_description(fragment_clean)
+
+    existing_norm = re.sub(r"\s+", " ", existing_clean.lower())
+    fragment_norm = re.sub(r"\s+", " ", fragment_clean.lower())
+    if fragment_norm in existing_norm:
+        return _formalize_invoice_description(existing_clean)
+    if existing_norm in fragment_norm:
+        return _formalize_invoice_description(fragment_clean)
+
+    combined = f"{existing_clean} {fragment_clean}".strip()
+    return _formalize_invoice_description(combined)
+
+
+def _is_cancel_invoice_item_query(text: str) -> bool:
+    lowered = _normalize_intent_text(text)
+    return lowered in {"cancel", "cancel it", "never mind", "skip it", "drop it", "remove it"} or _has_any_phrase(
+        lowered,
+        ("cancel it", "cancel that", "skip this item", "skip that item", "never mind that item"),
+    )
+
+
 def _merge_additional_invoice_item_followup(text: str, draft: Optional[dict]) -> Tuple[dict, str]:
     merged = dict(draft or {})
+    if _is_cancel_invoice_item_query(text):
+        merged.pop("_awaiting_additional_item_description", None)
+        merged.pop("_pending_additional_item_description", None)
+        return merged, "cancelled"
+
+    due_date_phrase = _extract_due_date_phrase(text)
+    if due_date_phrase:
+        merged["due_date"] = due_date_phrase
+        merged.pop("_awaiting_additional_item_description", None)
+        merged.pop("_pending_additional_item_description", None)
+        return merged, "due_date"
+
+    replacement_description = _extract_invoice_item_replacement_text(text)
+    if replacement_description:
+        merged["_pending_additional_item_description"] = _formalize_invoice_description(replacement_description)
+        merged.pop("_awaiting_additional_item_description", None)
+        return merged, "awaiting_amount"
+
     explicit_items = _extract_line_items_from_invoice_text(text)
     if explicit_items:
         existing = [item for item in (merged.get("line_items") or []) if isinstance(item, dict)]
@@ -1132,6 +1357,8 @@ def _merge_additional_invoice_item_followup(text: str, draft: Optional[dict]) ->
         return merged, "completed"
 
     pending_description = str(merged.get("_pending_additional_item_description") or "").strip()
+    if pending_description and _is_invoice_description_help_query(text):
+        return merged, "suggested_description"
     amount = _extract_amount_value(text)
 
     if pending_description and amount:
@@ -1141,6 +1368,7 @@ def _merge_additional_invoice_item_followup(text: str, draft: Optional[dict]) ->
             "quantity": 1,
             "unit_price": float(amount),
             "gst_percent": 18,
+            "type": "SERVICE",
         })
         merged["line_items"] = existing
         merged.pop("_awaiting_additional_item_description", None)
@@ -1149,7 +1377,13 @@ def _merge_additional_invoice_item_followup(text: str, draft: Optional[dict]) ->
 
     description = _clean_invoice_item_followup_text(text)
     if description and not amount:
-        merged["_pending_additional_item_description"] = description
+        if pending_description:
+            merged["_pending_additional_item_description"] = _merge_invoice_description_fragments(
+                pending_description,
+                description,
+            )
+        else:
+            merged["_pending_additional_item_description"] = _formalize_invoice_description(description)
         merged.pop("_awaiting_additional_item_description", None)
         return merged, "awaiting_amount"
 
@@ -1173,6 +1407,12 @@ def _handle_invoice_item_review_followup(text: str, draft: Optional[dict]) -> Tu
     )
 
     if merged.get("_awaiting_invoice_item_review"):
+        if _extract_amount_value(text) and any(token in (text or "").lower() for token in ("rupees", "rs", "inr", "amount", "price", "rate")):
+            line_items[-1]["quantity"] = 1
+            merged["line_items"] = line_items
+            merged.pop("_awaiting_invoice_item_review", None)
+            merged["_awaiting_add_more_items_confirmation"] = True
+            return merged, "Got it. Do you want to add another item?"
         if _is_negative_response_query(text) or semantic_intent == "negative":
             line_items[-1]["quantity"] = 1
             merged["line_items"] = line_items
@@ -1312,6 +1552,7 @@ def _extract_email(text: str) -> Optional[str]:
 
     lowered = (text or "").lower().strip()
     lowered = re.sub(r"^(email\s+(?:is|address\s+is)\s+)", "", lowered, flags=re.I)
+    lowered = re.sub(r"\bact\b", "at", lowered)
     lowered = lowered.replace(" at the ", " @ ")
     lowered = lowered.replace(" at ", " @ ")
     lowered = lowered.replace(" dot ", " . ")
@@ -1354,6 +1595,7 @@ def _looks_like_email_fragment(text: str) -> bool:
 def _try_build_email_from_fragment(fragment: str) -> Optional[str]:
     cleaned = (fragment or "").lower().strip()
     cleaned = re.sub(r"^(email\s+(?:is|address\s+is)\s+)", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\bact\b", "at", cleaned)
     cleaned = cleaned.replace(" at the ", " @ ")
     cleaned = cleaned.replace(" at ", " @ ")
     cleaned = cleaned.replace(" dot ", " . ")
@@ -1367,6 +1609,8 @@ def _try_build_email_from_fragment(fragment: str) -> Optional[str]:
     tokens = [token for token in re.split(r"[\s.]+", cleaned) if token]
     if "@" not in cleaned and len(tokens) >= 2:
         local = tokens[0]
+        if local in {"at", "dot", "underscore", "hyphen"}:
+            return None
         domain = "".join(tokens[1:])
         for suffix in ("com", "in", "org", "net", "co"):
             if domain.endswith(suffix) and len(domain) > len(suffix):
@@ -1407,6 +1651,27 @@ def _extract_phone_fragment(text: str) -> Optional[str]:
     return None
 
 
+def _normalize_spoken_digits(text: str) -> str:
+    lowered = (text or "").lower()
+    token_map = {
+        "zero": "0", "oh": "0", "o": "0",
+        "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+        "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    }
+    tokens = re.findall(r"[a-zA-Z]+|\d+", lowered)
+    if not tokens:
+        return ""
+    converted = []
+    for token in tokens:
+        if token.isdigit():
+            converted.append(token)
+        elif token in token_map:
+            converted.append(token_map[token])
+        else:
+            return ""
+    return "".join(converted)
+
+
 def _extract_team_code(text: str) -> Optional[str]:
     raw_text = (text or "").strip()
     lowered = raw_text.lower()
@@ -1419,14 +1684,21 @@ def _extract_team_code(text: str) -> Optional[str]:
     for pattern in patterns:
         match = re.search(pattern, lowered, flags=re.I)
         if match:
-            candidate = re.sub(r"\s+", "", match.group(1).strip())
+            candidate_raw = match.group(1).strip()
+            candidate = re.sub(r"\s+", "", candidate_raw)
             if re.fullmatch(r"\d{4,8}", candidate):
                 return candidate
             if re.fullmatch(r"(?=.*\d)[A-Za-z0-9\-]{4,20}", candidate):
                 return candidate
+            spoken_candidate = _normalize_spoken_digits(candidate_raw)
+            if re.fullmatch(r"\d{4,8}", spoken_candidate):
+                return spoken_candidate
     compact = re.sub(r"\s+", "", raw_text)
     if re.fullmatch(r"(?:\d{4,8}|(?=.*\d)[A-Za-z0-9\-]{4,20})", compact):
         return compact
+    spoken_digits = _normalize_spoken_digits(raw_text)
+    if re.fullmatch(r"\d{4,8}", spoken_digits):
+        return spoken_digits
     return None
 
 
@@ -1602,6 +1874,7 @@ def _month_bounds_for_query(text: str) -> Tuple[date, date, str]:
 def _extract_due_date_phrase(text: str) -> Optional[str]:
     raw = (text or "").strip()
     lowered = raw.lower()
+    today = date.today()
     if "net30" in lowered or "net 30" in lowered or "30 day" in lowered:
         return "net30"
     if "net15" in lowered or "net 15" in lowered or "15 day" in lowered:
@@ -1636,10 +1909,14 @@ def _extract_due_date_phrase(text: str) -> Optional[str]:
         day_match = re.search(r"\b([12]?\d|3[01])(?:st|nd|rd|th)?\b", lowered)
         year_match = re.search(r"\b(20\d{2})\b", lowered)
         day = int(day_match.group(1)) if day_match else None
-        year = int(year_match.group(1)) if year_match else date.today().year
+        explicit_year = year_match is not None
+        year = int(year_match.group(1)) if year_match else today.year
         if day:
             try:
-                return date(year, month, day).isoformat()
+                candidate = date(year, month, day)
+                if not explicit_year and candidate < today:
+                    candidate = date(year + 1, month, day)
+                return candidate.isoformat()
             except Exception:
                 return None
     return None
@@ -1665,19 +1942,63 @@ def _extract_invoice_service_description(text: str) -> Optional[str]:
         return None
 
     patterns = (
+        r"(?:the\s+first\s+invoice\s+item\s+is|the\s+invoice\s+item\s+is|invoice\s+item\s+is)\s+(.+)$",
+        r"(?:the\s+first\s+line\s+item\s+is|the\s+line\s+item\s+is|line\s+item\s+is)\s+(.+)$",
         r"(?:the\s+service\s+is|service\s+is|item\s+is|description\s+is)\s+(.+)$",
         r"(?:for\s+service\s+of)\s+(.+)$",
+        r"(?:add\s+service\s+as|add\s+item\s+as|add\s+line\s+item\s+as)\s+(.+)$",
+        r"(?:add\s+service|add\s+item|add\s+line\s+item)\s+(.+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, raw, flags=re.I)
         if match:
             candidate = match.group(1).strip(" .,-")
             candidate = re.sub(
-                r"\b(?:at|for)\s+\d[\d,\s]*(?:\.\d+)?\s*(?:rupees?|rs|inr)?\b.*$",
+                r"\b(?:at|for|fall)\s+\d[\d,\s]*(?:\.\d+)?\s*(?:rupees?|rs|inr)?\b.*$",
                 "",
                 candidate,
                 flags=re.I,
             ).strip(" .,-")
+            candidate = re.sub(r"\bwhich\s+costs?\b.*$", "", candidate, flags=re.I).strip(" .,-")
+            candidate = re.sub(r"\bcost\s+for\b.*$", "", candidate, flags=re.I).strip(" .,-")
+            if candidate:
+                return _formalize_invoice_description(candidate)
+    return None
+
+
+def _is_invoice_item_intro_query(text: str) -> bool:
+    lowered = _normalize_intent_text(text)
+    return _has_any_phrase(
+        lowered,
+        (
+            "the item is",
+            "item is",
+            "the first item is",
+            "first item is",
+            "the invoice item is",
+            "invoice item is",
+            "the first invoice item is",
+            "first invoice item is",
+            "the line item is",
+            "line item is",
+            "the first line item is",
+            "first line item is",
+        ),
+    )
+
+
+def _extract_invoice_description_update_target(text: str) -> Optional[str]:
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    patterns = (
+        r"(?:update|change|edit)\s+(.+?)\s+description\b",
+        r"(?:update|change|edit)\s+description\s+(?:for|of)\s+(.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, raw, flags=re.I)
+        if match:
+            candidate = _clean_name_phrase(match.group(1))
             if candidate:
                 return candidate
     return None
@@ -1826,9 +2147,12 @@ def _format_invoice_line_items_text(line_items: List[dict]) -> str:
     for item in line_items or []:
         if not isinstance(item, dict):
             continue
+        item_type = str(item.get("type") or ("SERVICE" if not item.get("quantity") else "PRODUCT")).upper()
         qty = item.get("quantity", 1)
+        if item_type == "SERVICE":
+            qty = 1
         rows.append(
-            f"SERVICE | {item.get('description', '')} | {qty if qty not in (None, '') else '-'} | {item.get('unit_price', 0)} | {item.get('gst_percent', 18)}"
+            f"{item_type} | {item.get('description', '')} | {qty if qty not in (None, '') else '-'} | {item.get('unit_price', item.get('rate', 0))} | {item.get('gst_percent', item.get('gstPercent', 18))}"
         )
     return "\n".join(row for row in rows if row.strip())
 
@@ -1842,19 +2166,27 @@ def _parse_invoice_items_text(raw_text: str) -> List[dict]:
         parts = [part.strip() for part in cleaned.split("|")]
         if len(parts) < 4:
             continue
+        item_type = "SERVICE"
         if len(parts) >= 5:
-            _, description, quantity_text, rate_text, gst_text = parts[:5]
+            item_type, description, quantity_text, rate_text, gst_text = parts[:5]
         else:
             description, quantity_text, rate_text, gst_text = parts[:4]
+        normalized_type = str(item_type or "SERVICE").strip().upper()
+        if normalized_type not in {"SERVICE", "PRODUCT"}:
+            normalized_type = "SERVICE"
         amount_match = re.search(r"\d[\d,]*(?:\.\d+)?", rate_text)
         gst_match = re.search(r"\d[\d,]*(?:\.\d+)?", gst_text)
         if not amount_match:
             continue
         quantity_match = re.search(r"\d+(?:\.\d+)?", quantity_text or "")
+        quantity_value = float(quantity_match.group(0)) if quantity_match else 1
+        if normalized_type == "SERVICE":
+            quantity_value = 1
         items.append(
             {
+                "type": normalized_type,
                 "description": description.strip(),
-                "quantity": float(quantity_match.group(0)) if quantity_match else 1,
+                "quantity": quantity_value,
                 "unit_price": float(amount_match.group(0).replace(",", "")),
                 "gst_percent": float(gst_match.group(0).replace(",", "")) if gst_match else 18,
             }
@@ -1918,7 +2250,7 @@ def _build_invoice_client_picker_ui_event(session_id: str, clients: List[dict]) 
         company = str(client.get("company") or "").strip()
         if not name:
             continue
-        label = f"{name} ({company})" if company else name
+        label = f"{name} ({company})" if company and company.lower() != name.lower() else name
         options.append({"id": client.get("id"), "name": label})
     if not options:
         return None
@@ -1949,6 +2281,21 @@ def _extract_line_items_from_invoice_text(text: str) -> List[dict]:
                 gst_percent = gst_candidate
         except ValueError:
             pass
+
+    def _clean_spoken_invoice_description(value: str) -> str:
+        cleaned = value
+        patterns = (
+            r"^(?:the\s+)?first\s+item\s+is\s+",
+            r"^(?:the\s+)?next\s+item\s+is\s+",
+            r"^(?:the\s+)?item\s+is\s+",
+            r"^(?:the\s+)?service\s+is\s+",
+            r"^(?:please\s+)?add\s+(?:the\s+)?(?:first\s+)?item\s+as\s+",
+            r"^(?:please\s+)?add\s+service\s+as\s+",
+        )
+        for pattern in patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.I)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,-")
+        return cleaned
 
     def build_item(segment: str, inherited_gst: float) -> Optional[dict]:
         cleaned = segment.strip(" ,.;")
@@ -1982,7 +2329,7 @@ def _extract_line_items_from_invoice_text(text: str) -> List[dict]:
         )
         description = re.sub(r"\bwith\s+\d{1,2}(?:\.\d+)?\s*%?\s*gst\b", "", description, flags=re.I)
         description = re.sub(r"\bgst\b", "", description, flags=re.I)
-        description = re.sub(r"\s+", " ", description).strip(" .,-")
+        description = _clean_spoken_invoice_description(re.sub(r"\s+", " ", description).strip(" .,-"))
         if not description:
             return None
 
@@ -2012,6 +2359,7 @@ def _extract_line_items_from_invoice_text(text: str) -> List[dict]:
                 item_gst = inherited_gst
 
         return {
+            "type": "SERVICE",
             "description": description,
             "quantity": quantity,
             "unit_price": amount,
@@ -2031,19 +2379,67 @@ def _extract_line_items_from_invoice_text(text: str) -> List[dict]:
             if item:
                 items.append(item)
         if items:
-            return items
+            deduped: List[dict] = []
+            for item in items:
+                normalized_desc = re.sub(r"\s+", " ", str(item.get("description") or "").strip().lower())
+                duplicate = next((
+                    existing for existing in deduped
+                    if abs(float(existing.get("unit_price", 0) or 0) - float(item.get("unit_price", 0) or 0)) < 0.01
+                    and (
+                        normalized_desc in re.sub(r"\s+", " ", str(existing.get("description") or "").strip().lower())
+                        or re.sub(r"\s+", " ", str(existing.get("description") or "").strip().lower()) in normalized_desc
+                    )
+                ), None)
+                if duplicate:
+                    if len(normalized_desc) > len(str(duplicate.get("description") or "")):
+                        duplicate.update(item)
+                else:
+                    deduped.append(item)
+            return deduped
 
     single_item = build_item(normalized, gst_percent)
     return [single_item] if single_item else []
 
 
+def _is_invoice_draft_status_query(text: str) -> bool:
+    lowered = (text or "").lower().strip()
+    return any(phrase in lowered for phrase in (
+        "did you add",
+        "did you add the first item",
+        "what items",
+        "what did you add",
+        "show the draft",
+        "what is in the invoice",
+        "did you capture",
+    ))
+
+
+def _summarize_invoice_draft(draft: Optional[dict]) -> Optional[str]:
+    line_items = [item for item in ((draft or {}).get("line_items") or []) if isinstance(item, dict)]
+    if not line_items:
+        return None
+    snippets = []
+    for item in line_items[:3]:
+        description = str(item.get("description") or "item").strip()
+        amount = float(item.get("unit_price", 0) or 0)
+        snippets.append(f"{description} for {_inr_words(amount)} rupees")
+    if len(line_items) == 1:
+        return f"Yes. I currently have {snippets[0]} in the invoice draft."
+    return f"Yes. I currently have {', '.join(snippets[:-1])}, and {snippets[-1]} in the invoice draft."
+
+
 def _merge_client_draft_from_text(text: str, draft: Optional[dict]) -> dict:
     merged = dict(draft or {})
+    pending_field = str(merged.get("_pending_field") or "").strip().lower()
     candidate = _clean_name_phrase(text)
-    company_name = _extract_company_name(text)
+    company_name = None if pending_field == "email" else _extract_company_name(text)
     if company_name and not merged.get("company_name"):
         merged["company_name"] = company_name
-    if candidate and not merged.get("name"):
+    elif pending_field == "company_name" and candidate and not merged.get("company_name"):
+        lowered_candidate = candidate.lower()
+        if lowered_candidate not in {"company", "company name", "the company"}:
+            merged["company_name"] = candidate
+    if candidate and not merged.get("name") and pending_field not in {"email", "phone", "team_code"}:
         lowered = candidate.lower()
         blocked = {
             "add a new client", "create a client", "create client", "new client",
@@ -2060,11 +2456,11 @@ def _merge_client_draft_from_text(text: str, draft: Optional[dict]) -> dict:
         ):
             merged["name"] = candidate
 
-    email = _extract_email(text)
+    email = _extract_email(text) if pending_field in {"", "email"} else None
     if email:
         merged["email"] = email
         merged.pop("_email_fragment", None)
-    elif not merged.get("email") and _looks_like_email_fragment(text):
+    elif not merged.get("email") and (pending_field == "email" or _looks_like_email_fragment(text)):
         fragment_parts = [str(merged.get("_email_fragment") or "").strip(), _clean_name_phrase(text)]
         fragment = " ".join(part for part in fragment_parts if part).strip()
         inferred_email = _try_build_email_from_fragment(fragment)
@@ -2074,11 +2470,11 @@ def _merge_client_draft_from_text(text: str, draft: Optional[dict]) -> dict:
         elif fragment:
             merged["_email_fragment"] = fragment
 
-    phone = _extract_phone(text)
+    phone = _extract_phone(text) if pending_field in {"", "phone"} else None
     if phone:
         merged["phone"] = phone
         merged.pop("_phone_fragment", None)
-    elif not merged.get("phone"):
+    elif not merged.get("phone") and pending_field in {"", "phone"}:
         fragment = _extract_phone_fragment(text)
         if fragment:
             prior = re.sub(r"\D", "", str(merged.get("_phone_fragment") or ""))
@@ -2089,7 +2485,7 @@ def _merge_client_draft_from_text(text: str, draft: Optional[dict]) -> dict:
             else:
                 merged["_phone_fragment"] = combined
 
-    team_code = _extract_team_code(text)
+    team_code = _extract_team_code(text) if pending_field in {"", "team_code"} else None
     if team_code:
         merged["team_code"] = team_code
 
@@ -2101,6 +2497,55 @@ def _merge_invoice_draft_from_text(text: str, draft: Optional[dict]) -> dict:
     raw_text = (text or "").strip()
     lowered = raw_text.lower()
     explicit_quantity = _extract_quantity_value(text)
+    if _is_invoice_item_intro_query(text):
+        service_description = _extract_invoice_service_description(text)
+        if service_description:
+            merged["_pending_line_item_description"] = _formalize_invoice_description(service_description)
+            merged.pop("_awaiting_invoice_item_review", None)
+            merged.pop("_awaiting_add_more_items_confirmation", None)
+        else:
+            merged["_awaiting_additional_item_description"] = True
+        return merged
+
+    direct_item_rewrite = _extract_invoice_item_rewrite(text)
+    if direct_item_rewrite:
+        index, replacement = direct_item_rewrite
+        line_items = [item for item in (merged.get("line_items") or []) if isinstance(item, dict)]
+        if 0 <= index < len(line_items):
+            line_items[index]["description"] = _formalize_invoice_description(replacement)
+            merged["line_items"] = line_items
+            merged["_description_update_completed_message"] = (
+                f"Updated the {['first', 'second', 'third'][index]} item to {line_items[index]['description']}."
+            )
+            merged.pop("_awaiting_invoice_item_review", None)
+            merged.pop("_awaiting_add_more_items_confirmation", None)
+            return merged
+
+    if merged.get("_pending_description_update_index") is not None:
+        replacement = _clean_name_phrase(text)
+        if replacement and replacement.lower() not in {"as", "to", "description"}:
+            line_items = [item for item in (merged.get("line_items") or []) if isinstance(item, dict)]
+            update_index = int(merged.get("_pending_description_update_index"))
+            if 0 <= update_index < len(line_items):
+                line_items[update_index]["description"] = replacement
+                merged["line_items"] = line_items
+                merged["_description_update_completed_message"] = f"Updated the description to {replacement}."
+            merged.pop("_pending_description_update_index", None)
+            merged.pop("_pending_description_update_target", None)
+            return merged
+
+    update_target = _extract_invoice_description_update_target(text)
+    if update_target:
+        line_items = [item for item in (merged.get("line_items") or []) if isinstance(item, dict)]
+        normalized_target = update_target.lower().strip()
+        for index, item in enumerate(line_items):
+            description = str(item.get("description") or "").lower()
+            if normalized_target in description:
+                merged["_pending_description_update_index"] = index
+                merged["_pending_description_update_target"] = update_target
+                merged["_description_update_prompt"] = f"What should I change the description to for {update_target}?"
+                return merged
+
     has_client = bool(str(merged.get("client_name") or "").strip())
     client_name = None
     if not has_client:
@@ -2144,6 +2589,25 @@ def _merge_invoice_draft_from_text(text: str, draft: Optional[dict]) -> dict:
         amount_only = _extract_amount_value(text)
         if amount_only and any(token in lowered for token in ("amount", "rupees", "rs", "inr", "rate")):
             merged["_pending_line_item_amount"] = amount_only
+            pending_description = str(merged.get("_pending_line_item_description") or "").strip()
+            if pending_description:
+                pending_fragment = _clean_invoice_item_followup_text(text)
+                merged_description = _merge_invoice_description_fragments(
+                    pending_description,
+                    pending_fragment,
+                ) if pending_fragment else pending_description
+                existing = [item for item in (merged.get("line_items") or []) if isinstance(item, dict)]
+                existing.append({
+                    "description": merged_description,
+                    "quantity": 1,
+                    "unit_price": float(amount_only),
+                    "gst_percent": 18,
+                    "type": "SERVICE",
+                })
+                merged["line_items"] = existing
+                merged.pop("_pending_line_item_amount", None)
+                merged.pop("_pending_line_item_description", None)
+                merged["_awaiting_invoice_item_review"] = True
         elif merged.get("_pending_line_item_amount") and lowered.startswith("for "):
             description = re.sub(r"^for\s+", "", raw_text, flags=re.I).strip(" .,-")
             if description:
@@ -2153,24 +2617,34 @@ def _merge_invoice_draft_from_text(text: str, draft: Optional[dict]) -> dict:
                     "quantity": 1,
                     "unit_price": float(merged["_pending_line_item_amount"]),
                     "gst_percent": 18,
+                    "type": "SERVICE",
                 })
                 merged["line_items"] = existing
                 merged.pop("_pending_line_item_amount", None)
+                merged["_awaiting_invoice_item_review"] = True
 
     service_description = _extract_invoice_service_description(text)
     amount_value = _extract_amount_value(text)
     if service_description and amount_value and any(token in lowered for token in ("amount", "cost", "price", "rupees", "rs", "inr", "rate")):
         existing = [item for item in (merged.get("line_items") or []) if isinstance(item, dict)]
-        candidate_key = re.sub(r"\s+", " ", service_description.strip().lower())
+        normalized_description = re.sub(
+            r"\b(?:at|for|fall)\s+\d[\d,\s]*(?:\.\d+)?\s*(?:rupees?|rs|inr)?\b.*$",
+            "",
+            service_description.strip(),
+            flags=re.I,
+        ).strip(" .,-")
+        normalized_description = _formalize_invoice_description(normalized_description)
+        candidate_key = re.sub(r"\s+", " ", normalized_description.lower())
         duplicate = next((
             item for item in existing
             if re.sub(r"\s+", " ", str(item.get("description") or "").strip().lower()) == candidate_key
         ), None)
         payload = {
-            "description": service_description,
+            "description": normalized_description,
             "quantity": 1,
             "unit_price": float(amount_value),
             "gst_percent": 18,
+            "type": "SERVICE",
         }
         if duplicate:
             duplicate.update(payload)
@@ -2187,11 +2661,14 @@ def _merge_invoice_draft_from_text(text: str, draft: Optional[dict]) -> dict:
             "quantity": 1,
             "unit_price": float(merged["_pending_line_item_amount"]),
             "gst_percent": 18,
+            "type": "SERVICE",
         })
         merged["line_items"] = existing
         merged.pop("_pending_line_item_amount", None)
         merged.pop("_awaiting_add_more_items_confirmation", None)
         merged["_awaiting_invoice_item_review"] = True
+    elif service_description:
+        merged["_pending_line_item_description"] = _formalize_invoice_description(service_description)
 
     due_date = _extract_due_date_phrase(text)
     if due_date:
@@ -2539,6 +3016,77 @@ def _market_action_guidance(
         f"Then escalate the best accounts early when they are large, multi-site, or likely to expand, so pricing, project capacity, and collection terms stay aligned. "
         f"That is how you get the best out of the opportunity without letting execution risk erode margin."
     )
+
+
+def _grounded_growth_plan(session: AgentSession, org_context: Dict[str, Any]) -> Optional[str]:
+    business = org_context.get("business", {}) if isinstance(org_context, dict) else {}
+    snap = session.business_snapshot or {}
+    if not snap:
+        return None
+
+    revenue = float(snap.get("revenue", 0) or 0)
+    expenses = float(snap.get("expenses", 0) or 0)
+    net_profit = float(snap.get("netProfit", 0) or 0)
+    outstanding = float(snap.get("outstanding", 0) or 0)
+    client_count = int(snap.get("clientCount", 0) or 0)
+    margin = (net_profit / revenue * 100) if revenue > 0 else 0.0
+
+    top_client_line = ""
+    concentration_line = ""
+    clients = [client for client in (session.last_client_results or []) if isinstance(client, dict)]
+    if clients:
+        ranked = sorted(clients, key=lambda item: float(item.get("total_revenue_inr", 0) or 0), reverse=True)
+        top = ranked[0]
+        top_name = str(top.get("name") or "your top client").strip()
+        top_revenue = float(top.get("total_revenue_inr", 0) or 0)
+        share = (top_revenue / revenue * 100) if revenue > 0 else 0.0
+        top_client_line = (
+            f"Your strongest account today is {top_name} at about {_inr_words(top_revenue)} rupees of billed revenue."
+        )
+        if share >= 35:
+            concentration_line = (
+                f"That also means client concentration is high at roughly {round(share)} percent, "
+                "so the next revenue move should be winning two or three more accounts in the same buying profile."
+            )
+
+    activity = str(
+        business.get("primaryActivity")
+        or business.get("industry")
+        or "your core business"
+    ).strip()
+    city = str(business.get("city") or "your current market").strip()
+
+    margin_line = (
+        f"Your current margin is about {round(margin)} percent on revenue of {_inr_words(revenue)} rupees."
+        if revenue > 0
+        else "Revenue is still too thin to scale safely, so the next move should be tightening your offer and closing faster."
+    )
+
+    collections_line = (
+        "Collections are under control right now, so you can push growth without cash being locked in receivables."
+        if outstanding <= 0
+        else f"You still have {_inr_words(outstanding)} rupees tied up in receivables, so collect that before pushing hard on volume."
+    )
+
+    if margin < 20:
+        offer_line = (
+            f"For {activity}, scale by standardizing proposals, limiting custom scope, and attaching AMC or service revenue to every installation in {city}."
+        )
+    else:
+        offer_line = (
+            f"For {activity}, the best growth move now is to package installation, electrical readiness, and annual maintenance as one repeatable commercial offer in {city}."
+        )
+
+    pipeline_line = (
+        "This month, prioritize multi-site commercial buyers, repeat business from your strongest client profile, and channel partners who can bring recurring deployments."
+    )
+
+    team_line = (
+        "If you want more income, do not chase every lead equally. Put weekly focus on faster-closing deals, larger ticket sizes, and repeatable rollout work."
+    )
+
+    parts = [margin_line, collections_line, top_client_line, concentration_line, offer_line, pipeline_line, team_line]
+    return " ".join(part for part in parts if part)
 
 
 async def _create_groq_clients(api_keys: List[str]) -> Dict[str, AsyncGroq]:
@@ -2899,6 +3447,13 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
                 )
                 return {"status": "validation_error", "missing_field": "name", "message": prompt}
 
+            if not company_name:
+                return {
+                    "status": "validation_error",
+                    "missing_field": "company_name",
+                    "message": f"What company does {name_val} work at?",
+                }
+
             if not args.get("email"):
                 if args.get("_email_fragment"):
                     return {
@@ -2916,7 +3471,7 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
                 return {"status": "validation_error", "missing_field": "phone",
                         "message": f"What is {name_val}'s phone number?"}
 
-            team_code = args.get("team_code") or session.verified_team_code
+            team_code = _normalize_team_code_value(args.get("team_code") or session.verified_team_code)
             if not team_code:
                 return {"status": "validation_error", "missing_field": "team_code",
                         "message": "What is your team security code?"}
@@ -2956,13 +3511,22 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
                         "missing_field": "team_code",
                         "message": "That team security code was incorrect. Please say it again.",
                     }
+                if "Due date cannot be before issue date" in error_message:
+                    return {
+                        "status": "validation_error",
+                        "missing_field": "due_date",
+                        "message": (
+                            f"The due date cannot be before the issue date. "
+                            f"Please give a date on or after {today.isoformat()}."
+                        ),
+                    }
                 raise
 
             if isinstance(result, dict) and result.get("success") is False:
                 return {"status": "error", "message": result.get("message", "Failed to create client")}
 
             session.pending_client = None
-            session.verified_team_code = team_code
+            session.verified_team_code = _normalize_team_code_value(team_code)
             session.last_client_mentioned = name_val
             _clear_org_cache(org_id)
 
@@ -2981,9 +3545,11 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
         elif name == "create_invoice":
             from datetime import timedelta
             client_name = (args.get("client_name") or "").strip()
+            requested_client_id = str(args.get("client_id") or "").strip()
             line_items = args.get("line_items", [])
             raw_due = args.get("due_date", "")
-            team_code = args.get("team_code") or session.verified_team_code
+            provided_team_code = args.get("team_code")
+            team_code = _normalize_team_code_value(provided_team_code or session.verified_team_code)
 
             if not client_name:
                 return {"status": "validation_error", "missing_field": "client_name",
@@ -2999,7 +3565,17 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
                         "message": "What is your team security code?"}
 
             clients = await _ensure_client_cache(session, org_context, backend)
-            matched_client = _best_client_match(client_name, clients)
+            matched_client = None
+            if requested_client_id:
+                matched_client = next(
+                    (
+                        client for client in clients
+                        if str(client.get("id") or "").strip() == requested_client_id
+                    ),
+                    None,
+                )
+            if matched_client is None:
+                matched_client = _best_client_match(client_name, clients)
             client_id = str((matched_client or {}).get("id") or "").strip()
             resolved_client_name = str((matched_client or {}).get("name") or client_name).strip()
             if matched_client and matched_client.get("name"):
@@ -3025,7 +3601,8 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
             cleaned_items = []
             total = 0
             for item in line_items:
-                qty = float(item.get("quantity", 1))
+                explicit_type = str(item.get("type") or "").strip().upper()
+                qty = float(item.get("quantity", 1) or 1)
                 price = float(item.get("unit_price", 0))
                 if qty > 10000 and abs(qty - price) < 1:
                     qty = 1.0
@@ -3037,11 +3614,11 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
                 gst_amount = subtotal * (gst_pct / 100)
                 item_total = subtotal + gst_amount
                 total += item_total
-                item_type = "SERVICE" if qty <= 1 else "PRODUCT"
+                item_type = explicit_type if explicit_type in {"SERVICE", "PRODUCT"} else ("SERVICE" if qty <= 1 else "PRODUCT")
                 cleaned_items.append({
                     "type": item_type,
                     "description": desc,
-                    "quantity": None if item_type == "SERVICE" else int(qty),
+                    "quantity": None if item_type == "SERVICE" else qty,
                     "rate": round(price, 2),
                     "gstPercent": round(gst_pct, 2),
                 })
@@ -3059,18 +3636,34 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
                 "orgId": org_id
             }
 
-            result = await asyncio.wait_for(
-                backend.post("/api/invoices", payload=payload,
-                             headers={"X-Team-Code": team_code, "X-Org-Id": org_id},
-                             org_id=org_id, user_id=session.user_id),
-                timeout=10.0
-            )
+            try:
+                result = await asyncio.wait_for(
+                    backend.post("/api/invoices", payload=payload,
+                                 headers={"X-Team-Code": team_code, "X-Org-Id": org_id},
+                                 org_id=org_id, user_id=session.user_id),
+                    timeout=10.0
+                )
+            except RuntimeError as exc:
+                error_message = str(exc).strip()
+                if "Team security code is required" in error_message:
+                    return {
+                        "status": "validation_error",
+                        "missing_field": "team_code",
+                        "message": "What is your team security code?",
+                    }
+                if "Invalid team security code" in error_message:
+                    return {
+                        "status": "validation_error",
+                        "missing_field": "team_code",
+                        "message": "That team security code was incorrect. Please say it again.",
+                    }
+                raise
 
             if isinstance(result, dict) and result.get("success") is False:
                 return {"status": "error", "message": result.get("message", "Failed to create invoice")}
 
             session.pending_invoice = None
-            session.verified_team_code = team_code
+            session.verified_team_code = _normalize_team_code_value(team_code)
             _clear_org_cache(org_id)
             inv_data = result.get("data", result) if isinstance(result, dict) else {}
             invoice_id = inv_data.get("id")
@@ -3152,7 +3745,7 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
                 timeout=10.0
             )
 
-            session.verified_team_code = team_code
+            session.verified_team_code = _normalize_team_code_value(team_code)
             _clear_org_cache(org_id)
 
             return {
@@ -3165,7 +3758,7 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
 
         elif name == "record_expense":
             amount = float(args.get("amount", 0))
-            team_code = args.get("team_code") or session.verified_team_code
+            team_code = _normalize_team_code_value(args.get("team_code") or session.verified_team_code)
             if not team_code:
                 return {"status": "validation_error", "missing_field": "team_code",
                         "message": "Team security code required."}
@@ -3195,7 +3788,7 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
                 timeout=10.0
             )
 
-            session.verified_team_code = team_code
+            session.verified_team_code = _normalize_team_code_value(team_code)
             _clear_org_cache(org_id)
 
             return {
@@ -3211,7 +3804,7 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
 
         elif name == "send_invoice_email":
             client_name = args.get("client_name") or session.last_client_mentioned or ""
-            team_code = args.get("team_code") or session.verified_team_code
+            team_code = _normalize_team_code_value(args.get("team_code") or session.verified_team_code)
 
             if not client_name:
                 return {"status": "validation_error", "missing_field": "client_name",
@@ -3283,7 +3876,7 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
                 sent = False
 
             session.last_invoice_mentioned = inv_number
-            session.verified_team_code = team_code
+            session.verified_team_code = _normalize_team_code_value(team_code)
 
             if not sent:
                 unavailable = any(
@@ -3631,7 +4224,7 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
         elif name == "send_collection_reminder":
             client_name = args.get("client_name") or session.last_client_mentioned or ""
             tone = args.get("tone", "firm")
-            team_code = args.get("team_code") or session.verified_team_code
+            team_code = _normalize_team_code_value(args.get("team_code") or session.verified_team_code)
 
             if not client_name:
                 return {"status": "validation_error", "missing_field": "client_name",
@@ -3700,7 +4293,7 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
             except Exception:
                 sent = False
 
-            session.verified_team_code = team_code
+            session.verified_team_code = _normalize_team_code_value(team_code)
             session.last_client_mentioned = client_name
             session.last_invoice_mentioned = inv_num
             session.last_response_context = json.dumps({
@@ -3852,7 +4445,7 @@ async def process(
     if _is_delete_invoice_query(text):
         session.pending_client = None
     if _is_create_client_query(text):
-        session.pending_invoice = None
+        session.last_client_mentioned = None
     if _is_record_payment_query(text):
         session.pending_invoice = None
         session.pending_client = None
@@ -3862,7 +4455,7 @@ async def process(
     if session.pending_client is not None or _is_create_client_query(text):
         merged_client = _merge_client_draft_from_text(text, session.pending_client)
         if session.verified_team_code and not merged_client.get("team_code"):
-            merged_client["team_code"] = session.verified_team_code
+            merged_client["team_code"] = _normalize_team_code_value(session.verified_team_code)
         if _is_create_client_query(text) and session.pending_client is None and not merged_client:
             merged_client = {}
         tool_result = await execute_tool("create_client", json.dumps(merged_client), session, org_context, backend)
@@ -3872,14 +4465,26 @@ async def process(
                 key: value for key, value in merged_client.items()
                 if value not in (None, "", [], {})
             }
+            if tool_result.get("missing_field"):
+                session.pending_client["_pending_field"] = tool_result.get("missing_field")
             ui_event = _build_client_form_ui_event(session.pending_client)
         elif tool_result.get("status") == "created":
+            if session.pending_invoice is not None:
+                session.pending_invoice["client_name"] = tool_result.get("name") or tool_result.get("company") or session.pending_invoice.get("client_name")
+                session.pending_invoice["client_id"] = tool_result.get("id")
             ui_event = {
                 "type": "client_created",
                 "client_id": tool_result.get("id"),
                 "client_name": tool_result.get("name"),
                 "message": tool_result.get("speech"),
             }
+            if session.pending_invoice is not None:
+                ui_event["next_ui_event"] = _build_invoice_preview_dialog_ui_event(session.session_id, session.pending_invoice)
+                ui_event["resume_invoice"] = True
+                ui_event["invoice_draft"] = {
+                    key: value for key, value in session.pending_invoice.items()
+                    if value not in (None, "", [], {})
+                }
         final_answer = tool_result.get("speech") or tool_result.get("message") or "What is the client's actual name?"
         session.last_tool_called = "create_client"
         session.history.append({"role": "user", "content": text})
@@ -3899,6 +4504,61 @@ async def process(
 
     if session.pending_invoice is not None or _is_create_invoice_query(text):
         merged_invoice = _merge_invoice_draft_from_text(text, session.pending_invoice)
+        if session.pending_invoice is not None and _is_invoice_draft_status_query(text):
+            draft_summary = _summarize_invoice_draft(merged_invoice)
+            if draft_summary:
+                session.pending_invoice = merged_invoice
+                session.last_tool_called = "create_invoice"
+                session.history.append({"role": "user", "content": text})
+                session.history.append({"role": "assistant", "content": draft_summary})
+                if len(session.history) > 20:
+                    session.history = session.history[-20:]
+                voice_response = sanitize_for_tts(draft_summary) if is_voice else draft_summary
+                return {
+                    "response_text": voice_response,
+                    "raw_response": draft_summary,
+                    "intent": "INTELLIGENT_QUERY",
+                    "success": True,
+                    "session_id": session.session_id,
+                    "tool_called": session.last_tool_called,
+                    "ui_event": _build_invoice_preview_dialog_ui_event(session.session_id, session.pending_invoice),
+                }
+        if merged_invoice.get("_description_update_prompt"):
+            prompt = str(merged_invoice.pop("_description_update_prompt") or "").strip()
+            session.pending_invoice = merged_invoice
+            session.last_tool_called = "create_invoice"
+            session.history.append({"role": "user", "content": text})
+            session.history.append({"role": "assistant", "content": prompt})
+            if len(session.history) > 20:
+                session.history = session.history[-20:]
+            voice_response = sanitize_for_tts(prompt) if is_voice else prompt
+            return {
+                "response_text": voice_response,
+                "raw_response": prompt,
+                "intent": "INTELLIGENT_QUERY",
+                "success": True,
+                "session_id": session.session_id,
+                "tool_called": session.last_tool_called,
+                "ui_event": _build_invoice_preview_dialog_ui_event(session.session_id, session.pending_invoice),
+            }
+        if merged_invoice.get("_description_update_completed_message"):
+            final_answer = str(merged_invoice.pop("_description_update_completed_message") or "").strip()
+            session.pending_invoice = merged_invoice
+            session.last_tool_called = "create_invoice"
+            session.history.append({"role": "user", "content": text})
+            session.history.append({"role": "assistant", "content": final_answer})
+            if len(session.history) > 20:
+                session.history = session.history[-20:]
+            voice_response = sanitize_for_tts(final_answer) if is_voice else final_answer
+            return {
+                "response_text": voice_response,
+                "raw_response": final_answer,
+                "intent": "INTELLIGENT_QUERY",
+                "success": True,
+                "session_id": session.session_id,
+                "tool_called": session.last_tool_called,
+                "ui_event": _build_invoice_preview_dialog_ui_event(session.session_id, session.pending_invoice),
+            }
         if session.pending_invoice is not None and (
             merged_invoice.get("_awaiting_invoice_item_review")
             or merged_invoice.get("_awaiting_add_more_items_confirmation")
@@ -3941,17 +4601,29 @@ async def process(
                 "ui_event": _build_invoice_preview_dialog_ui_event(session.session_id, session.pending_invoice),
             }
 
+        due_date_supplied = bool(_extract_due_date_phrase(text))
+        if due_date_supplied:
+            merged_invoice.pop("_awaiting_additional_item_description", None)
+            merged_invoice.pop("_pending_additional_item_description", None)
+            session.pending_invoice = merged_invoice
         if session.pending_invoice is not None and (
             merged_invoice.get("_awaiting_additional_item_description")
             or merged_invoice.get("_pending_additional_item_description")
-        ):
+        ) and not due_date_supplied:
             merged_invoice, item_state = _merge_additional_invoice_item_followup(text, merged_invoice)
             session.pending_invoice = merged_invoice
             if item_state == "awaiting_description":
                 final_answer = "Tell me the next item description."
             elif item_state == "awaiting_amount":
                 item_desc = str(merged_invoice.get("_pending_additional_item_description") or "that item").strip()
-                final_answer = f"What price should I use for {item_desc}?"
+                final_answer = f"I can use {item_desc} as the invoice description. What price should I use?"
+            elif item_state == "suggested_description":
+                item_desc = str(merged_invoice.get("_pending_additional_item_description") or "that item").strip()
+                final_answer = f"I suggest {item_desc} as the invoice description. What price should I use?"
+            elif item_state == "cancelled":
+                final_answer = _next_invoice_missing_prompt(merged_invoice)
+            elif item_state == "due_date":
+                final_answer = _next_invoice_missing_prompt(merged_invoice)
             else:
                 final_answer = "Added that item. You can add another one or keep going."
             session.last_tool_called = "create_invoice"
@@ -3971,9 +4643,32 @@ async def process(
             }
 
         clients = await _ensure_client_cache(session, org_context, backend)
+        requested_client_id = str(merged_invoice.get("client_id") or "").strip()
+        if requested_client_id:
+            id_match = next(
+                (
+                    client for client in clients
+                    if str(client.get("id") or "").strip() == requested_client_id
+                ),
+                None,
+            )
+            if id_match:
+                merged_invoice["client_id"] = requested_client_id
+                merged_invoice["client_name"] = id_match.get("name") or merged_invoice.get("client_name")
         if merged_invoice.get("client_name"):
-            match = _best_client_match(str(merged_invoice.get("client_name") or ""), clients)
+            match = None
+            if requested_client_id:
+                match = next(
+                    (
+                        client for client in clients
+                        if str(client.get("id") or "").strip() == requested_client_id
+                    ),
+                    None,
+                )
+            if match is None:
+                match = _best_client_match(str(merged_invoice.get("client_name") or ""), clients)
             if match:
+                merged_invoice["client_id"] = match.get("id") or merged_invoice.get("client_id")
                 merged_invoice["client_name"] = match.get("name") or merged_invoice["client_name"]
                 if match.get("name"):
                     session.last_client_mentioned = match["name"]
@@ -4010,7 +4705,7 @@ async def process(
                     "ui_event": picker_event,
                 }
         if session.verified_team_code and not merged_invoice.get("team_code"):
-            merged_invoice["team_code"] = session.verified_team_code
+            merged_invoice["team_code"] = _normalize_team_code_value(session.verified_team_code)
         if _is_create_invoice_query(text) and session.pending_invoice is None and not merged_invoice:
             merged_invoice = {}
         tool_result = await execute_tool("create_invoice", json.dumps(merged_invoice), session, org_context, backend)
@@ -4296,7 +4991,7 @@ async def process(
                 merged_payment["amount_received"] = outstanding
 
         if session.verified_team_code and not merged_payment.get("team_code"):
-            merged_payment["team_code"] = session.verified_team_code
+            merged_payment["team_code"] = _normalize_team_code_value(session.verified_team_code)
 
         tool_result = await execute_tool("record_payment", json.dumps(merged_payment), session, org_context, backend)
         if tool_result.get("status") == "validation_error":
@@ -4326,7 +5021,7 @@ async def process(
     if session.pending_expense is not None or _is_record_expense_query(text):
         merged_expense = _merge_expense_draft_from_text(text, session.pending_expense)
         if session.verified_team_code and not merged_expense.get("team_code"):
-            merged_expense["team_code"] = session.verified_team_code
+            merged_expense["team_code"] = _normalize_team_code_value(session.verified_team_code)
         if _is_record_expense_query(text) and session.pending_expense is None and not merged_expense:
             merged_expense = {}
         tool_result = await execute_tool("record_expense", json.dumps(merged_expense), session, org_context, backend)
@@ -4722,25 +5417,49 @@ async def process(
             "tool_called": session.last_tool_called,
         }
 
+    if _is_growth_strategy_query(text):
+        direct_growth_answer = _grounded_growth_plan(session, org_context)
+        if direct_growth_answer:
+            session.last_tool_called = "get_business_health_score"
+            session.history.append({"role": "user", "content": text})
+            session.history.append({"role": "assistant", "content": direct_growth_answer})
+            if len(session.history) > 20:
+                session.history = session.history[-20:]
+            voice_response = sanitize_for_tts(direct_growth_answer) if is_voice else direct_growth_answer
+            return {
+                "response_text": voice_response,
+                "raw_response": direct_growth_answer,
+                "intent": "INTELLIGENT_QUERY",
+                "success": True,
+                "session_id": session.session_id,
+                "tool_called": session.last_tool_called,
+            }
+
     if _is_market_scale_followup_query(text, session):
+        final_answer = _grounded_growth_plan(session, org_context)
+        tool_result = None
         market_query = (
             f"{session.last_market_query}. Based on those signals, what concrete steps should this business take this month to scale?"
             if session.last_market_query
             else text
         )
-        args = json.dumps({"query": market_query, "focus": "opportunities"})
-        tool_result = await execute_tool("search_market_intelligence", args, session, org_context, backend)
-        final_answer = (
-            _synthesize_market_scale_followup(tool_result, session, org_context)
-            or _synthesize_market_result(tool_result)
-            or "This month, focus on higher-density commercial corridors, recurring maintenance contracts, and multi-site corporate rollouts."
-        )
-        session.last_tool_called = "search_market_intelligence"
+        if not final_answer:
+            args = json.dumps({"query": market_query, "focus": "opportunities"})
+            tool_result = await execute_tool("search_market_intelligence", args, session, org_context, backend)
+            final_answer = (
+                _synthesize_market_scale_followup(tool_result, session, org_context)
+                or _synthesize_market_result(tool_result)
+                or "This month, focus on higher-density commercial corridors, recurring maintenance contracts, and multi-site corporate rollouts."
+            )
+            session.last_tool_called = "search_market_intelligence"
+        else:
+            session.last_tool_called = "get_business_health_score"
         session.last_market_query = market_query
-        session.last_market_results = list(tool_result.get("raw_snippets", []) or [])
-        fallback_text = str(tool_result.get("fallback_text") or "").strip()
-        if fallback_text:
-            session.last_market_results = (session.last_market_results or []) + [fallback_text]
+        if isinstance(tool_result, dict):
+            session.last_market_results = list(tool_result.get("raw_snippets", []) or [])
+            fallback_text = str(tool_result.get("fallback_text") or "").strip()
+            if fallback_text:
+                session.last_market_results = (session.last_market_results or []) + [fallback_text]
         session.history.append({"role": "user", "content": text})
         session.history.append({"role": "assistant", "content": final_answer})
         if len(session.history) > 20:
@@ -4880,6 +5599,11 @@ async def process(
                 })
 
             session.last_tool_called = msg.tool_calls[-1].function.name if msg.tool_calls else session.last_tool_called
+
+            direct_tool_answer = _prefer_direct_tool_answer(last_tool_results)
+            if direct_tool_answer:
+                final_answer = direct_tool_answer
+                break
 
         if final_answer is None:
             try:

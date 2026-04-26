@@ -18,10 +18,11 @@ function parseInvoiceItemsText(rawText) {
     .filter(Boolean)
     .map((line) => {
       const [type, description, quantity, rate, gst] = line.split('|').map((part) => part.trim());
+      const normalizedType = (type || 'SERVICE').toUpperCase();
       return {
-        type: type || 'SERVICE',
+        type: normalizedType,
         description: description || '',
-        quantity: quantity || '1',
+        quantity: normalizedType === 'SERVICE' ? '1' : (quantity || '1'),
         rate: rate || '',
         gst: gst || '18',
       };
@@ -33,7 +34,7 @@ function formatInvoiceItemsText(rows) {
     .map((row) => {
       const type = String(row.type || 'SERVICE').trim() || 'SERVICE';
       const description = String(row.description || '').trim();
-      const quantity = String(row.quantity || '1').trim() || '1';
+      const quantity = type === 'SERVICE' ? '1' : (String(row.quantity || '1').trim() || '1');
       const rate = String(row.rate || '').trim();
       const gst = String(row.gst || '18').trim() || '18';
       if (!description && !rate) return '';
@@ -49,8 +50,18 @@ export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
   const isInvoicePreview = dialog?.dialog_id === 'invoice_preview_form';
 
   useEffect(() => {
-    setValues({});
-  }, [dialog?.dialog_id, dialog?.session_id]);
+    if (!dialog?.fields?.length) {
+      setValues({});
+      return;
+    }
+    const nextValues = dialog.fields.reduce((acc, field) => {
+      if (field?.id) {
+        acc[field.id] = field.defaultValue ?? '';
+      }
+      return acc;
+    }, {});
+    setValues(nextValues);
+  }, [dialog]);
 
   const invoiceItemsField = useMemo(
     () => dialog?.fields?.find((field) => field.id === 'invoice_items_text'),
@@ -165,6 +176,7 @@ export default function ClientInputDialog({ dialog, onSubmit, onClose }) {
                 updateInvoiceRows(nextRows);
               }}
               placeholder="1"
+              disabled={String(row.type || '').toUpperCase() === 'SERVICE'}
             />
             <input
               type="number"

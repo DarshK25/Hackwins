@@ -3,14 +3,17 @@ import { ComplianceDashboard } from "@/components/ComplianceDashboard";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@clerk/clerk-react";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import { useSearchParams } from "react-router-dom";
 
 export default function CompliancePage() {
+    const [searchParams] = useSearchParams();
     const { getToken } = useAuth();
     const { userId: internalUserId, orgId: internalOrgId, loading: onboardingLoading } = useOnboardingStatus();
     const [isHydrated, setIsHydrated] = useState(false);
     const [businessId] = useState(1);
     const [loading, setLoading] = useState(true);
     const [complianceData, setComplianceData] = useState(null);
+    const initialTab = searchParams.get("tab") || "overview";
 
     async function fetchComplianceStatus() {
         if (!internalUserId || !internalOrgId) {
@@ -65,6 +68,7 @@ export default function CompliancePage() {
                 businessId={businessId}
                 data={complianceData}
                 onRefresh={fetchComplianceStatus}
+                initialTab={initialTab}
             />
         </div>
     );

@@ -76,7 +76,10 @@ public class ClientService {
         }
 
         // ✨ Idempotency check
-        if (dto.getIdempotencyKey() != null && clientRepository.existsByEmailAndDeletedAtIsNull(dto.getEmail())) {
+        if (dto.getIdempotencyKey() != null
+            && dto.getEmail() != null
+            && !dto.getEmail().isBlank()
+            && clientRepository.existsByEmailAndOrgIdAndDeletedAtIsNull(dto.getEmail(), orgId)) {
              // For simplicity, we check email uniqueness but you could check idempotencyKey explicitly if tracked
         }
 
@@ -87,7 +90,7 @@ public class ClientService {
         
         Client client = clientMapper.toEntity(dto);
         if (client.getEmail() != null && !client.getEmail().isBlank() 
-            && clientRepository.existsByEmailAndDeletedAtIsNull(client.getEmail())) {
+            && clientRepository.existsByEmailAndOrgIdAndDeletedAtIsNull(client.getEmail(), orgId)) {
             throw new RuntimeException("Client with this email already exists");
         }
         

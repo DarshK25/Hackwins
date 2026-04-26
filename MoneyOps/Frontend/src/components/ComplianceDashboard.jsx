@@ -3,6 +3,7 @@ import {
     Shield, AlertTriangle, CheckCircle2, FileText, RefreshCw,
     Download, Calendar as CalendarIcon, AlertCircle, Calculator,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Calendar } from "@/components/ui/calendar";
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -54,10 +55,11 @@ function StatCard({ label, value, sub, icon: Icon, iconColor, accent }) {
     );
 }
 
-export function ComplianceDashboard({ businessId, data, onRefresh }) {
+export function ComplianceDashboard({ businessId, data, onRefresh, initialTab = "overview" }) {
     const { getToken } = useAuth();
+    const navigate = useNavigate();
     const { userId: internalUserId, orgId: internalOrgId } = useOnboardingStatus();
-    const [activeTab, setActiveTab] = useState("overview");
+    const [activeTab, setActiveTab] = useState(initialTab);
     const [date, setDate] = useState(new Date());
     const [deadlines, setDeadlines] = useState([]);
     const [calcResult, setCalcResult] = useState(null);
@@ -86,6 +88,10 @@ export function ComplianceDashboard({ businessId, data, onRefresh }) {
 
         fetchDeadlines();
     }, [businessId, internalUserId, internalOrgId, getToken]);
+
+    useEffect(() => {
+        setActiveTab(initialTab || "overview");
+    }, [initialTab]);
 
     const complianceScore = data?.complianceScore ?? data?.compliance_score ?? data?.score ?? 85;
     const rawUpcomingDeadlines = data?.upcomingDeadlines || data?.upcoming_deadlines || [];
@@ -233,6 +239,50 @@ export function ComplianceDashboard({ businessId, data, onRefresh }) {
                     {activeTab === "overview" && (
                         <div className="grid gap-6 lg:grid-cols-7">
                             <div className="lg:col-span-4 flex flex-col gap-3">
+                                <div className="rounded-xl border border-[#2A2A2A] bg-[#151515] p-4">
+                                    <div className="mb-3">
+                                        <h3 className="font-semibold text-white mb-1">Operational Actions</h3>
+                                        <p className="text-sm text-[#A0A0A0]">Use the compliance agent as a working surface, not just a scorecard.</p>
+                                    </div>
+                                    <div className="grid gap-2 sm:grid-cols-2">
+                                        <button
+                                            onClick={() => setActiveTab("calendar")}
+                                            className="rounded-lg border border-[#2A2A2A] bg-[#111111] px-3 py-3 text-left transition-all hover:border-[#4CBB1740]"
+                                        >
+                                            <p className="text-sm font-semibold text-white">Review Filing Calendar</p>
+                                            <p className="mt-1 text-xs text-[#A0A0A0]">Check what is due next and what may slip soon.</p>
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveTab("tds")}
+                                            className="rounded-lg border border-[#2A2A2A] bg-[#111111] px-3 py-3 text-left transition-all hover:border-[#4CBB1740]"
+                                        >
+                                            <p className="text-sm font-semibold text-white">Run TDS Calculation</p>
+                                            <p className="mt-1 text-xs text-[#A0A0A0]">Calculate contractor, rent, commission, or professional-fee deductions.</p>
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveTab("documents")}
+                                            className="rounded-lg border border-[#2A2A2A] bg-[#111111] px-3 py-3 text-left transition-all hover:border-[#4CBB1740]"
+                                        >
+                                            <p className="text-sm font-semibold text-white">Audit Readiness Check</p>
+                                            <p className="mt-1 text-xs text-[#A0A0A0]">Review checklist coverage and export readiness artifacts.</p>
+                                        </button>
+                                        <button
+                                            onClick={() => navigate("/invoices")}
+                                            className="rounded-lg border border-[#2A2A2A] bg-[#111111] px-3 py-3 text-left transition-all hover:border-[#4CBB1740]"
+                                        >
+                                            <p className="text-sm font-semibold text-white">Resolve Overdue Invoices</p>
+                                            <p className="mt-1 text-xs text-[#A0A0A0]">Collections issues often become tax and compliance issues next.</p>
+                                        </button>
+                                        <button
+                                            onClick={() => navigate("/transactions")}
+                                            className="rounded-lg border border-[#2A2A2A] bg-[#111111] px-3 py-3 text-left transition-all hover:border-[#4CBB1740] sm:col-span-2"
+                                        >
+                                            <p className="text-sm font-semibold text-white">Keep Expense Evidence Current</p>
+                                            <p className="mt-1 text-xs text-[#A0A0A0]">Open transactions to backfill documents and supporting records before audit pressure builds up.</p>
+                                        </button>
+                                    </div>
+                                </div>
+
                                 <h3 className="font-semibold text-white mb-1">Compliance Tasks</h3>
                                 {effectivePendingTasks.map((task) => (
                                     <div key={task.id} className="flex items-center justify-between p-4 rounded-xl border border-[#2A2A2A] hover:border-[#3A3A3A] transition-all">

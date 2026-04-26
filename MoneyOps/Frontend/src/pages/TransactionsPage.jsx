@@ -349,7 +349,7 @@ export default function TransactionsPage() {
                     <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
                         <DialogTrigger asChild>
                             <button className="mo-btn-primary flex items-center gap-2">
-                                <Plus className="h-4 w-4" /> + Add Transaction
+                                <Plus className="h-4 w-4" /> Add Transaction
                             </button>
                         </DialogTrigger>
                         <DialogContent className="max-h-[90vh] overflow-y-auto bg-[#111111] border-[#2A2A2A] text-white">

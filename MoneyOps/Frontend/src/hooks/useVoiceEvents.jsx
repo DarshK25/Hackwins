@@ -53,6 +53,15 @@ function dispatchUIEvent(event, navigate) {
   
   // Custom deep-link handler for invoice creation
   if (type === "invoice_created") {
+    window.dispatchEvent(new CustomEvent("voice:agent-action", {
+      detail: {
+        type: "invoice_created",
+        title: "Invoice created",
+        message: `${event.invoice_number} for ${event.client_name}`,
+        timestamp: new Date().toISOString(),
+        path: event.path || `/invoices/${event.invoice_id}`,
+      },
+    }));
     window.dispatchEvent(new CustomEvent("voice:open_input_dialog", { detail: null }));
     window.dispatchEvent(new CustomEvent("voice:open_client_picker", { detail: null }));
     if (event.path) {
@@ -146,7 +155,26 @@ function dispatchUIEvent(event, navigate) {
   }
 
   if (type === "client_created") {
+    window.dispatchEvent(new CustomEvent("voice:agent-action", {
+      detail: {
+        type: "client_created",
+        title: "Client created",
+        message: event.client_name || event.message || "Client created",
+        timestamp: new Date().toISOString(),
+        path: event.path || "/clients",
+      },
+    }));
+    window.dispatchEvent(new CustomEvent("voice:open_input_dialog", { detail: null }));
+    window.dispatchEvent(new CustomEvent("voice:open_client_picker", { detail: null }));
     window.dispatchEvent(new CustomEvent("voice:client-created", { detail: event }));
+    if (event.next_ui_event) {
+      dispatchUIEvent(event.next_ui_event, navigate);
+    }
+    toast.success(title || "Client created", {
+      description: message || event.message || event.client_name,
+      duration: duration ?? 4000,
+      id: "client-created",
+    });
   }
 
   if (event.badge) {

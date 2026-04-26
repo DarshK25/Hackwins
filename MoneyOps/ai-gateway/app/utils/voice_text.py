@@ -100,10 +100,43 @@ def sanitize_for_tts(text: str, tool_names: Optional[Iterable[str]] = None) -> s
         return ""
 
     sanitized = text
+    lowered_full = sanitized.lower()
+    technical_leak_markers = (
+        "request options:",
+        "traceback",
+        "httpstatuserror",
+        "tool_calls",
+        "x-ratelimit-",
+        "send_request_headers.started",
+        "receive_response_headers.complete",
+        "{'role': 'system'",
+        "{\"role\": \"system\"",
+        "\"messages\": [{\"role\":",
+        "'messages': [{'role':",
+        "openai/v1/chat/completions",
+    )
+    if any(marker in lowered_full for marker in technical_leak_markers):
+        return "The voice workflow hit a temporary processing issue. Please repeat that in a moment."
+
     tool_names = tuple(tool_names or DEFAULT_TOOL_NAMES)
 
     for tool_name in tool_names:
         sanitized = re.sub(rf"\b{re.escape(tool_name)}\b", "", sanitized)
+
+    # Remove chain-of-thought/tool narration that sounds broken in voice demos.
+    leak_sentence_patterns = (
+        r"(?:^|[.?!]\s+)let me [^.?!]*(?:check|get|use|fetch|look up|find)[^.?!]*[.?!]?",
+        r"(?:^|[.?!]\s+)i need to [^.?!]*(?:check|get|use|fetch|look up|find|confirm)[^.?!]*[.?!]?",
+        r"(?:^|[.?!]\s+)using\s*,?[^.?!]*[.?!]?",
+        r"(?:^|[.?!]\s+)let me get the [^.?!]*[.?!]?",
+        r"(?:^|[.?!]\s+)function is [^.?!]*[.?!]?",
+    )
+    for pattern in leak_sentence_patterns:
+        sanitized = re.sub(pattern, " ", sanitized, flags=re.IGNORECASE)
+
+    sanitized = re.sub(r"\busing\s*\.\s*", " ", sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"\bfunction\s+is\s+[A-Za-z0-9_/\-]+\b", " ", sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"\bclient ID\s+for\s+([^.?!]+?)\s+is\s+\d+\b", r"\1", sanitized, flags=re.IGNORECASE)
 
     sanitized = re.sub(
         r"\[\s*(?:\d+\s*(?:thousand)?\s*,\s*){2}\d+\s*\]",
