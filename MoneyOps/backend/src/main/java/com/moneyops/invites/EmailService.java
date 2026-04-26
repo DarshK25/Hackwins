@@ -78,8 +78,8 @@ public class EmailService {
     }
 
     private void sendHtmlEmail(String toEmail, String subject, String htmlContent) {
+        String resolvedRecipient = resolveRecipient(toEmail);
         try {
-            String resolvedRecipient = resolveRecipient(toEmail);
             String resolvedHtml = decorateHtmlForOverride(toEmail, resolvedRecipient, htmlContent);
             MimeMessage mimeMessage = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, "UTF-8");
@@ -88,10 +88,10 @@ public class EmailService {
             helper.setSubject(subject);
             helper.setText(resolvedHtml, true);
             mailSender.send(mimeMessage);
-            log.info("SMTP email sent to {} with subject {}", resolvedRecipient, subject);
+            log.info("SMTP email sent from {} to {} with subject {}", fromEmail, resolvedRecipient, subject);
         } catch (Exception e) {
-            log.error("SMTP email send failed for {}", toEmail, e);
-            throw new RuntimeException("Failed to send email to " + toEmail + ": " + e.getMessage(), e);
+            log.error("SMTP email send failed from {} to {} (original recipient {})", fromEmail, resolvedRecipient, toEmail, e);
+            throw new RuntimeException(buildEmailErrorMessage(toEmail, resolvedRecipient, e), e);
         }
     }
 
@@ -133,5 +133,20 @@ public class EmailService {
         } catch (Exception e) {
             return "INR " + amount;
         }
+    }
+
+    private String buildEmailErrorMessage(String intendedRecipient, String resolvedRecipient, Exception error) {
+        String rawMessage = error != null && error.getMessage() != null ? error.getMessage() : "Unknown email delivery error";
+
+        if (rawMessage.contains("You can only send testing emails to your own email address")) {
+            return "Resend is still in sandbox mode for this sender. Current sender: "
+                    + fromEmail
+                    + ". Actual recipient attempted: "
+                    + resolvedRecipient
+                    + ". For local testing, set EMAIL_OVERRIDE_TO to your own inbox and restart the backend. "
+                    + "For real invites, verify a domain in Resend and set EMAIL_FROM_ADDRESS to an address on that verified domain.";
+        }
+
+        return "Failed to send email to " + intendedRecipient + ": " + rawMessage;
     }
 }

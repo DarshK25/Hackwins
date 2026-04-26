@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -42,11 +43,17 @@ public class InviteService {
 
         String normalizedRole = role != null ? role.toUpperCase() : "STAFF";
 
-        Optional<TeamInvite> existing = inviteRepository.findByEmailAndOrgId(email, orgId);
-        if (existing.isPresent() && "PENDING".equals(existing.get().getStatus())) {
-            TeamInvite invite = existing.get();
+        List<TeamInvite> existingInvites = inviteRepository.findAllByEmailAndOrgIdOrderByCreatedAtDesc(email, orgId);
+        Optional<TeamInvite> existingPending = existingInvites.stream()
+                .filter(invite -> "PENDING".equals(invite.getStatus()))
+                .findFirst();
+
+        if (existingPending.isPresent()) {
+            TeamInvite invite = existingPending.get();
             invite.setToken(UUID.randomUUID().toString());
+            invite.setStatus("PENDING");
             invite.setExpiresAt(Instant.now().plus(24, ChronoUnit.HOURS));
+            invite.setCreatedAt(Instant.now());
             inviteRepository.save(invite);
             emailService.sendInviteEmail(email, invite.getToken(), orgName, invite.getRole());
             return invite.getToken();

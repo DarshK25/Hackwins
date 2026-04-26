@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Users, Plus, Mail, UserCheck, Crown, MoreHorizontal, Search, Copy, Check } from "lucide-react";
+import { Users, Plus, Mail, UserCheck, Crown, MoreHorizontal, Search, Copy, Check, Loader2, Send, CheckCircle2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useUser } from "@clerk/clerk-react";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
@@ -32,6 +32,8 @@ export default function TeamsPage() {
     const [teamActionCode, setTeamActionCode] = useState("");
     const [teamCodeToSet, setTeamCodeToSet] = useState("");
     const [oldTeamCode, setOldTeamCode] = useState("");
+    const [sendingInvite, setSendingInvite] = useState(false);
+    const [inviteFeedback, setInviteFeedback] = useState(null);
     const [savingTeamCode, setSavingTeamCode] = useState(false);
     const [currentUserRole, setCurrentUserRole] = useState(null);
     const [teamCodeConfigured, setTeamCodeConfigured] = useState(false);
@@ -96,6 +98,13 @@ export default function TeamsPage() {
             return;
         }
 
+        setSendingInvite(true);
+        setInviteFeedback({
+            tone: "loading",
+            title: "Sending invitation...",
+            message: `Contacting the backend and preparing the invite email for ${inviteEmail}.`,
+        });
+
         try {
             const response = await fetch("/api/invites", {
                 method: "POST",
@@ -111,15 +120,30 @@ export default function TeamsPage() {
                 })
             });
 
-            if (!response.ok) throw new Error("Failed to send invite");
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.message || "Failed to send invite");
+            }
 
-            const data = await response.json();
             setGeneratedCode(data.token);
-            toast.success(`Invitation code generated for ${inviteEmail}`);
+            setInviteFeedback({
+                tone: "success",
+                title: "Invite email prepared",
+                message: `A fresh invite was created for ${inviteEmail}. You can copy the token too, in case they need a fallback.`,
+            });
+            toast.success(`Invite sent to ${inviteEmail}`);
             rememberTeamSecurityCode(internalOrgId, teamActionCode);
             setInviteEmail("");
         } catch (error) {
-            toast.error(error.message);
+            const message = error?.message || "Failed to send invite";
+            setInviteFeedback({
+                tone: "error",
+                title: "Invite failed",
+                message,
+            });
+            toast.error(message);
+        } finally {
+            setSendingInvite(false);
         }
     };
 
@@ -296,34 +320,89 @@ export default function TeamsPage() {
                     <h2 className="mo-h2 mb-4">Invite New Member</h2>
                     
                     {!generatedCode ? (
-                        <div className="flex gap-3">
-                            <input
-                                type="email"
-                                placeholder="colleague@company.com"
-                                value={inviteEmail}
-                                onChange={(e) => setInviteEmail(e.target.value)}
-                                onKeyDown={(e) => e.key === "Enter" && handleInvite()}
-                                className="flex-1 px-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17]"
-                                style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
-                            />
-                            <input
-                                type="password"
-                                placeholder="Team security code"
-                                value={teamActionCode}
-                                onChange={(e) => setTeamActionCode(e.target.value)}
-                                className="flex-1 px-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17]"
-                                style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
-                            />
-                            <button onClick={handleInvite} className="mo-btn-primary flex items-center gap-2">
-                                <Mail className="h-4 w-4" /> Generate Code
-                            </button>
-                            <button onClick={() => setShowInvite(false)} className="mo-btn-secondary">
-                                Cancel
-                            </button>
+                        <div className="space-y-4">
+                            {inviteFeedback && (
+                                <div
+                                    className="flex items-start gap-3 rounded-xl border px-4 py-3"
+                                    style={{
+                                        backgroundColor:
+                                            inviteFeedback.tone === "success"
+                                                ? "#4CBB1710"
+                                                : inviteFeedback.tone === "error"
+                                                    ? "#CD1C1810"
+                                                    : "#60A5FA10",
+                                        borderColor:
+                                            inviteFeedback.tone === "success"
+                                                ? "#4CBB1740"
+                                                : inviteFeedback.tone === "error"
+                                                    ? "#CD1C1840"
+                                                    : "#60A5FA40",
+                                    }}
+                                >
+                                    {inviteFeedback.tone === "success" && <CheckCircle2 className="mt-0.5 h-4 w-4 text-[#4CBB17]" />}
+                                    {inviteFeedback.tone === "error" && <AlertTriangle className="mt-0.5 h-4 w-4 text-[#CD1C18]" />}
+                                    {inviteFeedback.tone === "loading" && <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-[#60A5FA]" />}
+                                    <div>
+                                        <p
+                                            className="text-sm font-semibold"
+                                            style={{
+                                                color:
+                                                    inviteFeedback.tone === "success"
+                                                        ? "#4CBB17"
+                                                        : inviteFeedback.tone === "error"
+                                                            ? "#CD1C18"
+                                                            : "#60A5FA",
+                                            }}
+                                        >
+                                            {inviteFeedback.title}
+                                        </p>
+                                        <p className="mt-1 text-xs text-[#A0A0A0]">{inviteFeedback.message}</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex gap-3">
+                                <input
+                                    type="email"
+                                    placeholder="colleague@company.com"
+                                    value={inviteEmail}
+                                    disabled={sendingInvite}
+                                    onChange={(e) => setInviteEmail(e.target.value)}
+                                    onKeyDown={(e) => e.key === "Enter" && !sendingInvite && handleInvite()}
+                                    className="flex-1 px-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17] disabled:opacity-60"
+                                    style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
+                                />
+                                <input
+                                    type="password"
+                                    placeholder="Team security code"
+                                    value={teamActionCode}
+                                    disabled={sendingInvite}
+                                    onChange={(e) => setTeamActionCode(e.target.value)}
+                                    className="flex-1 px-4 py-2.5 rounded-lg text-sm text-white placeholder-[#A0A0A0] focus:outline-none focus:border-[#4CBB17] focus:ring-1 focus:ring-[#4CBB17] disabled:opacity-60"
+                                    style={{ backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A" }}
+                                />
+                                <button onClick={handleInvite} disabled={sendingInvite} className="mo-btn-primary flex items-center gap-2 disabled:opacity-60">
+                                    {sendingInvite ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                    {sendingInvite ? "Sending..." : "Send Invite"}
+                                </button>
+                                <button onClick={() => setShowInvite(false)} disabled={sendingInvite} className="mo-btn-secondary disabled:opacity-60">
+                                    Cancel
+                                </button>
+                            </div>
                         </div>
                     ) : (
                         <div className="space-y-4">
-                            <p className="text-sm text-[#A0A0A0]">Share this code with your team member. They can enter it during onboarding.</p>
+                            <div className="rounded-xl border border-[#4CBB1740] bg-[#4CBB1710] px-4 py-3">
+                                <div className="flex items-start gap-3">
+                                    <CheckCircle2 className="mt-0.5 h-4 w-4 text-[#4CBB17]" />
+                                    <div>
+                                        <p className="text-sm font-semibold text-[#4CBB17]">Invite ready</p>
+                                        <p className="mt-1 text-xs text-[#A0A0A0]">
+                                            The invite request completed for the selected member. If email delivery is delayed, you can still share the token below as a fallback.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
                             <div className="flex items-center gap-3 p-4 rounded-xl border border-[#2A2A2A] bg-[#111111]">
                                 <code className="flex-1 text-2xl font-mono font-bold tracking-widest text-[#4CBB17] text-center">
                                     {generatedCode}
