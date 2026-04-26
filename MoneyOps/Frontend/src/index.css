@@ -313,3 +313,54 @@
     opacity: 0;
   }
 }
+
+@keyframes moLoaderOrbit {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+
+  50% {
+    transform: rotate(180deg) scale(1.03);
+  }
+
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+@keyframes moLoaderGlow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(76, 187, 23, 0.12) inset,
+      0 0 24px rgba(76, 187, 23, 0.08),
+      0 0 60px rgba(76, 187, 23, 0.05);
+    opacity: 0.7;
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(76, 187, 23, 0.25) inset,
+      0 0 38px rgba(76, 187, 23, 0.12),
+      0 0 84px rgba(76, 187, 23, 0.08);
+    opacity: 1;
+  }
+}
+
+@keyframes moLoaderLetter {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+
+  20% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+
+  40% {
+    opacity: 0.75;
+    transform: translateY(0);
+  }
+}
