@@ -12,6 +12,7 @@ import {
   Shield,
   GitMerge,
   Receipt,
+  MessageSquare,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -32,7 +33,9 @@ function SidebarNav({ items }) {
       {items.map((item) => {
         const isActive =
           pathname === item.href ||
-          (item.href !== "/analytics" && pathname.startsWith(item.href));
+          (item.matchSubpaths !== false &&
+            item.href !== "/analytics" &&
+            pathname.startsWith(`${item.href}/`));
 
         return (
           <Link
@@ -116,11 +119,11 @@ export function AppSidebar(props) {
       title: "Transactions",
       icon: <Receipt className="h-4 w-4" />,
     },
-    {
-      href: "/documents",
-      title: "Documents",
-      icon: <FileText className="h-4 w-4" />,
-    },
+    // {
+    //   href: "/documents",
+    //   title: "Documents",
+    //   icon: <FileText className="h-4 w-4" />,
+    // },
   ];
 
   const agentNavItems = [
@@ -148,10 +151,17 @@ export function AppSidebar(props) {
       href: "/orchestrator",
       title: "Orchestrator",
       icon: <GitMerge className="h-4 w-4" />,
+      matchSubpaths: false,
     },
   ];
 
   const utilityNavItems = [
+    {
+      href: "/orchestrator/chat",
+      title: "Chat Workspace",
+      icon: <MessageSquare className="h-4 w-4" />,
+      matchSubpaths: false,
+    },
     {
       href: "/teams",
       title: "Teams",

@@ -20,7 +20,8 @@ import SalesCRMPage from "@/pages/SalesCRMPage";
 import MarketResearchPage from "@/pages/MarketResearchPage";
 import FinanceIntelligencePage from "@/pages/FinanceIntelligencePage";
 import CompliancePage from "@/pages/CompliancePage";
-import { OrchestratorDashboard } from "@/components/OrchestratorDashboard";
+import OrchestratorPage from "@/pages/OrchestratorPage";
+import OrchestratorChatPage from "@/pages/OrchestratorChatPage";
 import DashboardLayout from "@/components/DashboardLayout";
 import InviteAcceptPage from "@/pages/InviteAcceptPage";
 
@@ -55,6 +56,15 @@ export default function App() {
                     }
                 />
 
+                <Route
+                    path="/orchestrator/chat"
+                    element={
+                        <ProtectedRoute>
+                            <OrchestratorChatPage />
+                        </ProtectedRoute>
+                    }
+                />
+
                 {/* Dashboard Routes (Sidebar + Voice Agent) */}
                 <Route
                     element={
@@ -79,7 +89,7 @@ export default function App() {
                     <Route path="/sales-crm" element={<SalesCRMPage />} />
                     <Route path="/market-intelligence" element={<MarketResearchPage />} />
                     <Route path="/compliance" element={<CompliancePage />} />
-                    <Route path="/orchestrator" element={<OrchestratorDashboard />} />
+                    <Route path="/orchestrator" element={<OrchestratorPage />} />
                     <Route path="/teams" element={<TeamsPage />} />
                 </Route>
             </Routes>
