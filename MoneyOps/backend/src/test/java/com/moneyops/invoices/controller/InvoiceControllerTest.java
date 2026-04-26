@@ -9,6 +9,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
@@ -23,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -38,6 +40,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import com.moneyops.auth.security.JwtProvider;
 
 @WebMvcTest(InvoiceController.class)
+@AutoConfigureMockMvc(addFilters = false)
 @WithMockUser
 public class InvoiceControllerTest {
 
@@ -64,6 +67,9 @@ public class InvoiceControllerTest {
 
     @MockBean
     private org.springframework.security.core.userdetails.UserDetailsService userDetailsService;
+
+    @MockBean(name = "mongoMappingContext")
+    private org.springframework.data.mongodb.core.mapping.MongoMappingContext mongoMappingContext;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -128,7 +134,8 @@ public class InvoiceControllerTest {
         InvoiceDto dto2 = new InvoiceDto();
         dto2.setInvoiceNumber("INV-002");
 
-        when(invoiceService.searchInvoices(eq(orgId), anyString(), anyString(), anyString(), anyInt())).thenReturn(Arrays.asList(dto1, dto2));
+        when(invoiceService.searchInvoices(eq(orgId), nullable(String.class), nullable(String.class), nullable(String.class), anyInt()))
+                .thenReturn(Arrays.asList(dto1, dto2));
 
         mockMvc.perform(get("/api/invoices"))
                 .andExpect(status().isOk())

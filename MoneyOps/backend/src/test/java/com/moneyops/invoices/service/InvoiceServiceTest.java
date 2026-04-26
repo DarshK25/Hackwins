@@ -10,6 +10,9 @@ import com.moneyops.invoices.validator.InvoiceValidator;
 import com.moneyops.clients.repository.ClientRepository;
 import com.moneyops.clients.mapper.ClientMapper;
 import com.moneyops.audit.service.AuditLogService;
+import com.moneyops.invites.EmailService;
+import com.moneyops.organizations.repository.BusinessOrganizationRepository;
+import com.moneyops.security.team.TeamActionAuthorizationService;
 import com.moneyops.transactions.service.TransactionService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -50,6 +53,15 @@ public class InvoiceServiceTest {
     @Mock
     private TransactionService transactionService;
 
+    @Mock
+    private TeamActionAuthorizationService teamActionAuthorizationService;
+
+    @Mock
+    private EmailService emailService;
+
+    @Mock
+    private BusinessOrganizationRepository orgRepository;
+
     @InjectMocks
     private InvoiceService invoiceService;
 
@@ -59,11 +71,14 @@ public class InvoiceServiceTest {
         String userId = UUID.randomUUID().toString();
         InvoiceDto dto = new InvoiceDto();
         dto.setInvoiceNumber("INV-001");
+        dto.setTeamActionCode("123456");
 
         Invoice invoice = new Invoice();
         invoice.setId(UUID.randomUUID().toString());
         invoice.setInvoiceNumber("INV-001");
 
+        when(teamActionAuthorizationService.assertUserCanCreateSensitiveAction(orgId, userId, "123456"))
+                .thenReturn(new TeamActionAuthorizationService.CreatorMetadata(userId, "owner@example.com", "OWNER"));
         when(invoiceMapper.toEntity(dto)).thenReturn(invoice);
         when(invoiceRepository.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(invoiceMapper.toDto(any(Invoice.class))).thenReturn(dto);
@@ -98,16 +113,25 @@ public class InvoiceServiceTest {
         Invoice invoice = new Invoice();
         invoice.setId(id);
         invoice.setOrgId(orgId);
+        invoice.setInvoiceNumber("INV-001");
+        invoice.setClientEmail("client@example.com");
+        invoice.setClientName("Test Client");
+        invoice.setIssueDate(LocalDate.now());
+        invoice.setDueDate(LocalDate.now().plusDays(30));
+        invoice.setTotalAmount(BigDecimal.valueOf(118));
         invoice.setStatus(InvoiceStatus.DRAFT);
 
         when(invoiceRepository.findByIdAndOrgIdAndDeletedAtIsNull(id, orgId)).thenReturn(Optional.of(invoice));
         when(invoiceRepository.save(any(Invoice.class))).thenReturn(invoice);
         when(invoiceMapper.toDto(invoice)).thenReturn(new InvoiceDto());
+        when(invoiceMapper.toEntity(any(InvoiceDto.class))).thenReturn(new Invoice());
+        when(orgRepository.findByIdAndDeletedAtIsNull(orgId)).thenReturn(Optional.empty());
 
         InvoiceDto result = invoiceService.sendInvoice(id, orgId);
 
         assertNotNull(result);
         assertEquals(InvoiceStatus.SENT, invoice.getStatus());
+        verify(emailService).sendInvoiceEmail(eq("client@example.com"), anyString(), anyString());
     }
 
     @Test
