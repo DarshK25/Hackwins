@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
 import { MarketResearchDashboard } from "@/components/MarketResearchDashboard";
 import { toast } from "sonner";
-import { AiLoader } from "@/components/ui/ai-loader";
+import { Loader2 } from "lucide-react";
 
 export default function MarketResearchPage() {
     const [isHydrated, setIsHydrated] = useState(false);
@@ -41,8 +41,8 @@ export default function MarketResearchPage() {
 
     if (!isHydrated || loading) {
         return (
-            <div className="min-h-[420px]">
-                <AiLoader text="Mapping market signals" size={170} />
+            <div className="flex h-64 items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-[#4CBB17]" />
             </div>
         );
     }

@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Clock3,
   X,
+  Loader2,
   MessageSquare,
   PanelLeft,
   Plus,
@@ -42,11 +43,6 @@ function buildSessionTitle(messages) {
   const firstUserMessage = messages.find((message) => message.role === "user")?.text;
   if (!firstUserMessage) return "New conversation";
   return firstUserMessage.length > 42 ? `${firstUserMessage.slice(0, 42)}...` : firstUserMessage;
-}
-
-function estimateThoughtDuration(actions = []) {
-  if (!actions.length) return null;
-  return Math.max(6, Math.min(actions.length * 6, 32));
 }
 
 function extractActions(payload) {
@@ -185,6 +181,7 @@ export default function OrchestratorChatPage() {
   async function handleSend() {
     const text = draft.trim();
     if (!text || sending || onboardingLoading || !internalUserId || !internalOrgId) return;
+    const startedAt = Date.now();
 
     const session = activeSession || createSession();
     const userMessage = {
@@ -237,6 +234,8 @@ export default function OrchestratorChatPage() {
         text: payload.response_text || "I've processed that.",
         timestamp: new Date().toISOString(),
         actions,
+        reasoning_depth: Number(payload.reasoning_depth || (actions.length > 0 ? 1 : 0)),
+        duration_ms: Number(payload.duration_ms || Date.now() - startedAt),
       };
 
       updateSession(session.id, (current) => {
@@ -280,7 +279,9 @@ export default function OrchestratorChatPage() {
   if (!hydrated || onboardingLoading) {
     return (
       <div className="min-h-screen bg-[#0B0B0B]">
-        <AiLoader text="Loading workspace" overlay />
+        <div className="flex min-h-screen items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-[#4CBB17]" />
+        </div>
       </div>
     );
   }
@@ -407,7 +408,7 @@ export default function OrchestratorChatPage() {
                         >
                           <p className="whitespace-pre-wrap text-sm leading-7">{message.text}</p>
                         </div>
-                        {message.role === "agent" && Array.isArray(message.actions) && message.actions.length > 0 && (
+                        {message.role === "agent" && message.reasoning_depth > 0 && message.duration_ms > 2000 && (
                           <button
                             type="button"
                             onClick={() => setActivityOpen(true)}
@@ -415,7 +416,7 @@ export default function OrchestratorChatPage() {
                           >
                             <Clock3 className="h-4 w-4 text-[#A0A0A0]" />
                             <span>
-                              Thought for {estimateThoughtDuration(message.actions)}s
+                              Thought for {(message.duration_ms / 1000).toFixed(1)}s
                               <span className="ml-1 text-[#8A8A8A]">›</span>
                             </span>
                           </button>
