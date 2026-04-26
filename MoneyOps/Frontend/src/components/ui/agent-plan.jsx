@@ -6,7 +6,6 @@ import {
   CircleAlert,
   CircleDotDashed,
   CircleX,
-  TerminalSquare,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 
@@ -205,35 +204,6 @@ export function AgentPlan({ title = "Execution Plan", subtitle, tasks = [] }) {
                                       >
                                         <div className="space-y-3 px-4 py-3">
                                           <p className="text-sm leading-6 text-[#A0A0A0]">{subtask.description}</p>
-                                          {subtask.tools?.length ? (
-                                            <div>
-                                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#777777]">
-                                                Tools
-                                              </p>
-                                              <div className="flex flex-wrap gap-2">
-                                                {subtask.tools.map((tool) => (
-                                                  <span
-                                                    key={tool}
-                                                    className="rounded-full border border-[#2A2A2A] bg-[#181818] px-2.5 py-1 text-[11px] text-[#D8D8D8]"
-                                                  >
-                                                    {tool}
-                                                  </span>
-                                                ))}
-                                              </div>
-                                            </div>
-                                          ) : null}
-
-                                          {subtask.command ? (
-                                            <div className="overflow-hidden rounded-xl border border-[#2A2A2A] bg-[#0A0A0A]">
-                                              <div className="flex items-center gap-2 border-b border-[#1C1C1C] px-3 py-2 text-[11px] uppercase tracking-wide text-[#777777]">
-                                                <TerminalSquare className="h-3.5 w-3.5 text-[#4CBB17]" />
-                                                CLI Command
-                                              </div>
-                                              <pre className="overflow-x-auto px-3 py-3 text-xs leading-6 text-[#D4D4D4]">
-                                                <code>{subtask.command}</code>
-                                              </pre>
-                                            </div>
-                                          ) : null}
                                         </div>
                                       </motion.div>
                                     ) : null}

@@ -437,7 +437,7 @@ export function ComplianceDashboard({ businessId, data, onRefresh, initialTab = 
                                 <div className="flex flex-col items-center justify-center h-48 rounded-xl border border-dashed border-[#2A2A2A] text-center">
                                     <CheckCircle2 className="h-10 w-10 text-[#4CBB17] mb-2" style={{ opacity: 0.4 }} />
                                     <p className="text-[#A0A0A0] text-sm">Use the calculator to estimate current TDS deductions.</p>
-                                    <p className="text-xs text-[#A0A0A0] mt-1">The result updates from live form inputs and backend tax logic.</p>
+                                    <p className="text-xs text-[#A0A0A0] mt-1">The result updates from your current inputs and tax rules.</p>
                                 </div>
                             </div>
                         </div>

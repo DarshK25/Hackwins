@@ -22,7 +22,6 @@ const MANAGED_AGENT_TASKS = [
                 description: "Infer the target URL and extraction goal from each research request, call browser_use_extract first, then submit_extraction exactly once with normalized array output and nulls for missing fields.",
                 status: "completed",
                 priority: "high",
-                tools: ["browser_use_extract", "submit_extraction", "Browser Use Cloud"],
             },
             {
                 id: "scraper-cli",
@@ -30,8 +29,6 @@ const MANAGED_AGENT_TASKS = [
                 description: "Stand up the Web Scraper Agent on claude-sonnet-4-6 so the market workflow can scrape SPA-heavy pages like government tenders, charger maps, and operator portals.",
                 status: "in-progress",
                 priority: "high",
-                tools: ["Anthropic CLI", "Managed Agents"],
-                command: `ant beta:agents create \\\n  --name 'Web Scraper Agent' \\\n  --model '{"id": "claude-sonnet-4-6"}' \\\n  --system 'You are a web scraping agent that extracts structured data from websites using Browser Use Cloud.\n\nFor every scraping request:\n1. Infer the target URL and extraction goal from the user message.\n2. Call browser_use_extract first to fetch the page content.\n3. Call submit_extraction exactly once with the final normalized payload.\n4. Keep prose responses concise — the structured tool result is the source of truth.\n\nRules:\n- Use Browser Use for dynamic and SPA pages; do not rely on simple fetch-only logic.\n- Never invent values. If a field is unavailable, use null.\n- Return data as an array of objects.\n- If blocked by login, captcha, or anti-bot flow, explain clearly in the notes field.' \\\n  --tool '{type: agent_toolset_20260401}'`,
             },
             {
                 id: "scraper-env",
@@ -39,8 +36,6 @@ const MANAGED_AGENT_TASKS = [
                 description: "Create a cloud environment with unrestricted networking, then attach sessions so scraping jobs can run outside the local browser context and feed results into market analysis.",
                 status: "pending",
                 priority: "medium",
-                tools: ["ant beta:environments create", "cloud networking"],
-                command: `ant beta:environments create --name "env" --config '{type: cloud, networking: {type: unrestricted}}'`,
             },
         ],
     },
@@ -58,7 +53,6 @@ const MANAGED_AGENT_TASKS = [
                 description: "Force the agent to decompose questions into three to five sub-questions, prefer primary sources, extract quotes and specific claims, and finish with confidence and gaps.",
                 status: "completed",
                 priority: "high",
-                tools: ["web search", "source synthesis", "citation pipeline"],
             },
             {
                 id: "research-cli",
@@ -66,8 +60,6 @@ const MANAGED_AGENT_TASKS = [
                 description: "Use claude-sonnet-4-6 to create a Deep researcher agent that can answer growth, policy, competitor, and opportunity questions with source-backed structure instead of shallow summaries.",
                 status: "pending",
                 priority: "high",
-                tools: ["Anthropic CLI", "Managed Agents"],
-                command: `ant beta:agents create \\\n  --name 'Deep researcher' \\\n  --model '{"id": "claude-sonnet-4-6"}' \\\n  --system 'You are a research agent. Given a question or topic:\n\n1. Decompose it into 3-5 concrete sub-questions that, answered together, cover the topic.\n2. For each sub-question, run targeted web searches and fetch the most authoritative sources.\n3. Read the sources in full, extract specific claims, data points, and direct quotes with attribution.\n4. Synthesize a report that answers the original question, cite every non-obvious claim inline, and close with a confidence and gaps section.\n\nBe skeptical. If sources conflict, say so and explain which is more credible and why.' \\\n  --tool '{type: agent_toolset_20260401}'`,
             },
             {
                 id: "research-runtime",
@@ -75,7 +67,6 @@ const MANAGED_AGENT_TASKS = [
                 description: "Use the researcher for questions like charger adoption in Maharashtra, subsidy changes, key enterprise buyers, and competitor rollouts, while the scraper supplies structured page evidence.",
                 status: "pending",
                 priority: "medium",
-                tools: ["market agent", "chat workspace", "orchestrator prompts"],
             },
         ],
     },

@@ -63,7 +63,7 @@ function extractActions(payload) {
   if (payload?.tool_called) {
     actions.push({
       type: payload.tool_called,
-      title: `Tool used: ${payload.tool_called}`,
+      title: "Action completed",
       message: payload.intent || "",
       timestamp: new Date().toISOString(),
     });
@@ -363,7 +363,7 @@ export default function OrchestratorChatPage() {
               </button>
               <div>
                 <h2 className="text-lg font-semibold text-white">Orchestrator Chat</h2>
-                <p className="text-sm text-[#A0A0A0]">Chat with the same orchestration layer using a persistent, editable workspace.</p>
+                <p className="text-sm text-[#A0A0A0]">Chat with your MoneyOps assistant in a persistent, editable workspace.</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -427,6 +427,16 @@ export default function OrchestratorChatPage() {
                     </div>
                   ))
                 )}
+                {sending && (
+                  <div className="flex justify-start border-b border-[#161616] py-5">
+                    <div className="max-w-[760px] border-l border-[#4CBB1735] pl-4">
+                      <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7A7A7A]">
+                        Orchestrator
+                      </div>
+                      <AiLoader text="Generating" size={118} className="justify-start py-3" />
+                    </div>
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
                 </div>
               </div>
@@ -441,9 +451,7 @@ export default function OrchestratorChatPage() {
                     className="max-h-[220px] min-h-[72px] w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-sm text-white outline-none placeholder:text-[#666666]"
                   />
                   <div className="mt-3 flex items-center justify-between gap-3">
-                    <p className="text-xs text-[#A0A0A0]">
-                      Chat messages use the same backend action flow as voice, but keep a reusable written history.
-                    </p>
+                    <p className="text-xs text-[#A0A0A0]">Your conversation stays available for follow-up work.</p>
                     <button
                       onClick={handleSend}
                       disabled={!draft.trim() || sending}
@@ -489,7 +497,7 @@ export default function OrchestratorChatPage() {
                 <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
                   {activityFeed.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-[#2A2A2A] px-4 py-5 text-sm text-[#888888]">
-                      Agent activity will appear here as soon as a response uses tools or opens workspace flows.
+                      Agent activity will appear here as soon as a response opens workspace flows.
                     </div>
                   ) : (
                     activityFeed
@@ -556,7 +564,7 @@ export default function OrchestratorChatPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-white">Auto-run UI actions</p>
-                  <p className="mt-1 text-xs text-[#A0A0A0]">Open invoice and client flows automatically when the chat response includes one.</p>
+                  <p className="mt-1 text-xs text-[#A0A0A0]">Open invoice and client flows automatically when the response includes one.</p>
                 </div>
                 <input
                   type="checkbox"

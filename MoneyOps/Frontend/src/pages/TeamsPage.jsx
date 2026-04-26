@@ -102,7 +102,7 @@ export default function TeamsPage() {
         setInviteFeedback({
             tone: "loading",
             title: "Sending invitation...",
-            message: `Contacting the backend and preparing the invite email for ${inviteEmail}.`,
+            message: `Preparing the invite email for ${inviteEmail}.`,
         });
 
         try {

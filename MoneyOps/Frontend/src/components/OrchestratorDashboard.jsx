@@ -461,7 +461,7 @@ export function OrchestratorDashboard({ businessId = 1 }) {
         <StatCard label="Active Agents" value={`${activeAgentCount} / ${agentStatuses.length}`} sub="Based on current signals and saved activity" icon={Users} iconColor="#60A5FA" />
         <StatCard label="Open Receivables" value={formatCurrency(invoiceSummary.outstandingValue)} sub={`${invoiceSummary.overdue} overdue invoices`} icon={AlertTriangle} iconColor="#FFB300" />
         <StatCard label="Cash Position" value={formatCurrency(transactionSummary.netCash)} sub={`This month: in ${formatCurrency(transactionSummary.monthInflow)} / out ${formatCurrency(transactionSummary.monthOutflow)}`} icon={Wallet} iconColor="#4CBB17" />
-        <StatCard label="Voice Workflows" value={String(voiceHistory.length)} sub={backendConversations.length ? "Loaded from backend history" : "Loaded from saved local voice sessions"} icon={Mic} iconColor="#4CBB17" />
+        <StatCard label="Voice Workflows" value={String(voiceHistory.length)} sub="Saved voice sessions and action history" icon={Mic} iconColor="#4CBB17" />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.4fr,0.9fr]">
@@ -582,7 +582,7 @@ export function OrchestratorDashboard({ businessId = 1 }) {
                           <span className="text-sm font-semibold text-white">{conversation.summary || "Voice conversation"}</span>
                         </div>
                         <span className="rounded-full border border-[#A0A0A040] bg-[#A0A0A020] px-2 py-0.5 text-xs text-[#A0A0A0]">
-                          {backendConversations.length ? "backend" : "saved locally"}
+                          saved
                         </span>
                       </div>
                       <div className="flex flex-col gap-3 p-4">
