@@ -3990,7 +3990,14 @@ async def execute_tool(name: str, args_json: str, session: AgentSession, org_con
 
             month_invoices = [i for i in invoices if i.get("createdAt", "")[:7] == today_str[:7]]
             output_tax = sum(float(i.get("gstAmount", float(i.get("totalAmount", 0)) * 18 / 118)) for i in month_invoices)
-            itc = sum(float(e.get("gstAmount", 0)) for e in expenses if e.get("itcEligible"))
+            itc = sum(
+                float(e.get("gstAmount", 0) or 0)
+                for e in expenses
+                if e.get("itcEligible")
+                and e.get("vendorGstin")
+                and str(e.get("category", "")).upper() not in ("SALARIES", "SALARY", "FUEL", "PERSONAL")
+                and float(e.get("gstAmount", 0) or 0) > 0
+            )
             net_gst = max(0, output_tax - itc)
 
             next_month = today.month % 12 + 1

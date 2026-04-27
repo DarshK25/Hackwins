@@ -1,6 +1,7 @@
 // src/main/java/com/moneyops/transactions/service/TransactionService.java
 package com.moneyops.transactions.service;
 
+import com.moneyops.compliance.ComplianceMetadataService;
 import com.moneyops.transactions.dto.TransactionDto;
 import com.moneyops.transactions.entity.Transaction;
 import com.moneyops.transactions.entity.TransactionType;
@@ -16,6 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -29,6 +31,7 @@ public class TransactionService {
     private final TransactionRepository transactionRepository;
     private final TransactionMapper transactionMapper;
     private final TransactionValidator transactionValidator;
+    private final ComplianceMetadataService complianceMetadataService;
 
     public TransactionRepository getTransactionRepository() {
         return transactionRepository;
@@ -75,6 +78,7 @@ public class TransactionService {
         if (transaction.getCurrency() == null) {
             transaction.setCurrency("INR");
         }
+        complianceMetadataService.normalizeTransaction(transaction);
 
         Transaction saved = transactionRepository.save(transaction);
         return transactionMapper.toDto(saved);
@@ -96,6 +100,15 @@ public class TransactionService {
         existing.setDescription(dto.getDescription());
         existing.setPaymentMethod(dto.getPaymentMethod());
         existing.setReferenceNumber(dto.getReferenceNumber());
+        existing.setVendorName(dto.getVendorName());
+        existing.setVendorGstin(dto.getVendorGstin());
+        existing.setVendorPan(dto.getVendorPan());
+        existing.setTaxableAmount(dto.getTaxableAmount());
+        existing.setGstAmount(dto.getGstAmount());
+        existing.setItcEligible(dto.getItcEligible());
+        existing.setHasReceipt(dto.getHasReceipt());
+        existing.setBankMatched(dto.getBankMatched());
+        complianceMetadataService.normalizeTransaction(existing);
 
         Transaction saved = transactionRepository.save(existing);
         return transactionMapper.toDto(saved);
@@ -124,6 +137,44 @@ public class TransactionService {
 
     public List<TransactionDto> getTransactionsByDateRange(String orgId, LocalDate startDate, LocalDate endDate) {
         return transactionRepository.findByOrgIdAndTransactionDateBetweenAndDeletedAtIsNull(orgId, startDate, endDate).stream()
+                .map(transactionMapper::toDto)
+                .collect(Collectors.toList());
+    }
+
+    public List<TransactionDto> getTransactions(String orgId, String type, String month, Integer limit) {
+        List<Transaction> transactions;
+
+        if (type != null && !type.isBlank() && month != null && !month.isBlank()) {
+            YearMonth period = YearMonth.parse(month);
+            transactions = transactionRepository.findByOrgIdAndTypeAndTransactionDateBetweenAndDeletedAtIsNull(
+                    orgId,
+                    TransactionType.valueOf(type.toUpperCase()),
+                    period.atDay(1),
+                    period.atEndOfMonth()
+            );
+        } else if (type != null && !type.isBlank()) {
+            transactions = transactionRepository.findByOrgIdAndTypeAndDeletedAtIsNull(
+                    orgId,
+                    TransactionType.valueOf(type.toUpperCase())
+            );
+        } else if (month != null && !month.isBlank()) {
+            YearMonth period = YearMonth.parse(month);
+            transactions = transactionRepository.findByOrgIdAndTransactionDateBetweenAndDeletedAtIsNull(
+                    orgId,
+                    period.atDay(1),
+                    period.atEndOfMonth()
+            );
+        } else {
+            transactions = transactionRepository.findAllByOrgIdAndDeletedAtIsNull(orgId);
+        }
+
+        return transactions.stream()
+                .sorted((left, right) -> {
+                    LocalDate leftDate = left.getTransactionDate() != null ? left.getTransactionDate() : LocalDate.MIN;
+                    LocalDate rightDate = right.getTransactionDate() != null ? right.getTransactionDate() : LocalDate.MIN;
+                    return rightDate.compareTo(leftDate);
+                })
+                .limit(limit != null && limit > 0 ? limit : Long.MAX_VALUE)
                 .map(transactionMapper::toDto)
                 .collect(Collectors.toList());
     }

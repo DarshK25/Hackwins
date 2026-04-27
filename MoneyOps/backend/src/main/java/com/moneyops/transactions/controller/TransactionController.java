@@ -42,11 +42,14 @@ public class TransactionController {
     }
 
     @GetMapping
-    public ResponseEntity<List<TransactionDto>> getAllTransactions() {
+    public ResponseEntity<List<TransactionDto>> getAllTransactions(
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String month,
+            @RequestParam(required = false) Integer limit) {
         String orgId = OrgContext.getOrgId();
         if (orgId == null) return ResponseEntity.ok(List.of());
 
-        List<TransactionDto> transactions = transactionService.getAllTransactions(orgId);
+        List<TransactionDto> transactions = transactionService.getTransactions(orgId, type, month, limit);
         return ResponseEntity.ok(transactions);
     }
 

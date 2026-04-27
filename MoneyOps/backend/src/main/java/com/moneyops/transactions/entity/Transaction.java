@@ -49,6 +49,14 @@ public class Transaction {
     private String description;
     private String paymentMethod;
     private String referenceNumber;
+    private String vendorName;
+    private String vendorGstin;
+    private String vendorPan;
+    private BigDecimal taxableAmount;
+    private BigDecimal gstAmount;
+    private Boolean itcEligible;
+    private Boolean hasReceipt;
+    private Boolean bankMatched;
 
     // AI classification
     private String aiCategory;

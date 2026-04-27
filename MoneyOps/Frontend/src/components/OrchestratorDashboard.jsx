@@ -120,6 +120,12 @@ function buildDerivedActivities(serverActivities, invoices, transactions, client
     const timestamp = transaction.transactionDate || transaction.date || transaction.createdAt;
     const amount = formatCurrency(transaction.amount || 0);
     const vendor = transaction.vendor || transaction.description || "Unlabeled transaction";
+    const description = String(transaction.description || vendor || "");
+    const genericIncome =
+      type === "INCOME" &&
+      (/^recorded transaction$/i.test(description) || /^unlabeled transaction$/i.test(vendor) || /^[a-z0-9]{12,}$/i.test(String(vendor)));
+
+    if (genericIncome) return;
 
     feed.push({
       id: `txn-${transaction.id || vendor}-${timestamp || "na"}`,
@@ -133,24 +139,11 @@ function buildDerivedActivities(serverActivities, invoices, transactions, client
     });
   });
 
-  clients.forEach((client) => {
-    const timestamp = client.updatedAt || client.createdAt;
-    if (!timestamp) return;
-    feed.push({
-      id: `client-${client.id || client.name}-${timestamp}`,
-      timestamp,
-      status: "completed",
-      agent: "Sales CRM",
-      description: `Client profile updated for ${client.name || "Unnamed client"}`,
-    });
-  });
-
   return feed
     .filter((item) => item.timestamp)
     .sort((a, b) => (toDate(b.timestamp)?.getTime() || 0) - (toDate(a.timestamp)?.getTime() || 0))
     .slice(0, 16);
 }
-
 function inferMemoryAgent(memory) {
   const text = `${memory.type || ""} ${memory.content || ""} ${(memory.tags || []).join(" ")}`.toLowerCase();
   if (["market", "competitor", "opportunity", "growth", "research", "news"].some((token) => text.includes(token))) return "Market Agent";
@@ -195,6 +188,29 @@ function buildMemoryTrail(memories) {
     .slice(0, 18);
 }
 
+function normalizeVoiceSession(session, index) {
+  const rawTranscript = normalizeCollection(session.transcript || session.messages || session.turns);
+  const transcript = rawTranscript.map((message, messageIndex) => ({
+    id: message.id || `message-${index}-${messageIndex}`,
+    role: message.role || message.speaker || (message.isUser ? "user" : "assistant"),
+    content: message.text || message.content || message.message || "",
+    timestamp: message.timestamp || message.createdAt || message.sentAt,
+  }));
+  const actions = normalizeCollection(session.actions || session.agentActions || session.events);
+  const firstUserMessage = transcript.find((message) => String(message.role).toLowerCase().includes("user"));
+  const titleSource = session.summary || firstUserMessage?.content || "Voice conversation";
+  return {
+    id: session.id || `voice-${index}`,
+    title: titleSource.length > 56 ? `${titleSource.slice(0, 56)}...` : titleSource,
+    summary: session.summary || titleSource,
+    startedAt: session.startedAt || session.createdAt || session.timestamp || session.endedAt,
+    endedAt: session.endedAt || session.updatedAt || session.timestamp,
+    transcript,
+    actions,
+    status: session.status || "saved",
+  };
+}
+
 export function OrchestratorDashboard({ businessId = 1 }) {
   const { getToken } = useAuth();
   const { user } = useUser();
@@ -213,6 +229,7 @@ export function OrchestratorDashboard({ businessId = 1 }) {
   const [backendConversations, setBackendConversations] = useState([]);
   const [memories, setMemories] = useState([]);
   const [localVoiceSessions, setLocalVoiceSessions] = useState([]);
+  const [selectedConversationId, setSelectedConversationId] = useState(null);
 
   useEffect(() => {
     if (internalOrgId && user?.id) {
@@ -420,9 +437,26 @@ export function OrchestratorDashboard({ businessId = 1 }) {
   const orgName = orgProfile?.legalName || orgProfile?.tradingName || "MoneyOps Workspace";
   const memoryTrail = useMemo(() => buildMemoryTrail(memories), [memories]);
   const voiceHistory = useMemo(() => {
-    if (backendConversations.length) return backendConversations;
-    return localVoiceSessions;
+    const source = backendConversations.length ? backendConversations : localVoiceSessions;
+    return source.map((session, index) => normalizeVoiceSession(session, index));
   }, [backendConversations, localVoiceSessions]);
+
+  useEffect(() => {
+    if (!voiceHistory.length) {
+      setSelectedConversationId(null);
+      return;
+    }
+    setSelectedConversationId((current) =>
+      current && voiceHistory.some((conversation) => conversation.id === current)
+        ? current
+        : voiceHistory[0].id
+    );
+  }, [voiceHistory]);
+
+  const selectedConversation = useMemo(
+    () => voiceHistory.find((conversation) => conversation.id === selectedConversationId) || null,
+    [selectedConversationId, voiceHistory]
+  );
 
   const tabs = [
     { id: "operations", label: "Operations Feed" },
@@ -493,24 +527,24 @@ export function OrchestratorDashboard({ businessId = 1 }) {
           </div>
           <div className="grid gap-3">
             <div className="rounded-xl border border-[#2A2A2A] bg-[#151515] p-4">
-              <p className="text-xs uppercase tracking-wide text-[#A0A0A0]">Invoice Pipeline</p>
-              <p className="mt-2 text-lg font-semibold text-white">{invoiceSummary.draft} draft, {invoiceSummary.sent} sent, {invoiceSummary.paid} paid</p>
-              <p className="mt-1 text-xs text-[#A0A0A0]">Total billed value {formatCurrency(invoiceSummary.totalValue)}</p>
+              <p className="text-xs uppercase tracking-wide text-[#A0A0A0]">Follow-up Queue</p>
+              <p className="mt-2 text-lg font-semibold text-white">{invoiceSummary.overdue} overdue, {invoiceSummary.sent} sent</p>
+              <p className="mt-1 text-xs text-[#A0A0A0]">{invoiceSummary.draft} drafts still waiting on review</p>
             </div>
             <div className="rounded-xl border border-[#2A2A2A] bg-[#151515] p-4">
-              <p className="text-xs uppercase tracking-wide text-[#A0A0A0]">Client Base</p>
-              <p className="mt-2 text-lg font-semibold text-white">{clientSummary.total} active client records</p>
-              <p className="mt-1 text-xs text-[#A0A0A0]">{clientSummary.newThisMonth} updated or added this month</p>
+              <p className="text-xs uppercase tracking-wide text-[#A0A0A0]">Saved Conversations</p>
+              <p className="mt-2 text-lg font-semibold text-white">{voiceHistory.length} voice sessions</p>
+              <p className="mt-1 text-xs text-[#A0A0A0]">{selectedConversation ? `Latest: ${selectedConversation.title}` : "No saved session yet"}</p>
             </div>
             <div className="rounded-xl border border-[#2A2A2A] bg-[#151515] p-4">
-              <p className="text-xs uppercase tracking-wide text-[#A0A0A0]">Collections</p>
-              <p className="mt-2 text-lg font-semibold text-white">{formatCurrency(metrics?.revenue || 0)}</p>
-              <p className="mt-1 text-xs text-[#A0A0A0]">Collection rate {Number(metrics?.collectionRate || 0).toFixed(0)}%</p>
+              <p className="text-xs uppercase tracking-wide text-[#A0A0A0]">Agent Memory</p>
+              <p className="mt-2 text-lg font-semibold text-white">{memoryTrail.length} stored memories</p>
+              <p className="mt-1 text-xs text-[#A0A0A0]">{marketMemories.length} market-intelligence memory items available</p>
             </div>
             <div className="rounded-xl border border-[#2A2A2A] bg-[#151515] p-4">
-              <p className="text-xs uppercase tracking-wide text-[#A0A0A0]">Cash Movements</p>
-              <p className="mt-2 text-lg font-semibold text-white">{transactions.length} recorded entries</p>
-              <p className="mt-1 text-xs text-[#A0A0A0]">Inflow {formatCurrency(transactionSummary.inflow)} / Outflow {formatCurrency(transactionSummary.outflow)}</p>
+              <p className="text-xs uppercase tracking-wide text-[#A0A0A0]">Automation Feed</p>
+              <p className="mt-2 text-lg font-semibold text-white">{recentActivities.length} recent events</p>
+              <p className="mt-1 text-xs text-[#A0A0A0]">{recentActivities[0] ? `Latest: ${recentActivities[0].agent}` : "No recent automation activity"}</p>
             </div>
           </div>
         </div>
@@ -561,41 +595,75 @@ export function OrchestratorDashboard({ businessId = 1 }) {
             </div>
           )}
 
-          {activeTab === "conversations" && (
-            <div className="flex flex-col gap-4">
+                    {activeTab === "conversations" && (
+            <div className="grid gap-4 xl:grid-cols-[0.95fr,1.45fr]">
               {!voiceHistory.length ? (
-                <div className="flex flex-col items-center py-16 text-center">
+                <div className="col-span-full flex flex-col items-center py-16 text-center">
                   <MessageSquare className="mb-3 h-10 w-10 text-[#2A2A2A]" />
                   <p className="text-sm text-[#A0A0A0]">No saved voice sessions yet.</p>
-                  <p className="mt-1 text-xs text-[#A0A0A0]">New voice calls will appear here with transcript snippets and action history.</p>
+                  <p className="mt-1 text-xs text-[#A0A0A0]">New voice calls will appear here as individual conversations you can reopen.</p>
                 </div>
               ) : (
-                voiceHistory.map((conversation, index) => {
-                  const transcript = normalizeCollection(conversation.transcript || conversation.messages);
-                  const actions = normalizeCollection(conversation.actions);
-                  const startedAt = conversation.startedAt || conversation.createdAt || conversation.timestamp;
-                  return (
-                    <div key={conversation.id || `voice-${index}`} className="overflow-hidden rounded-xl border border-[#2A2A2A]">
-                      <div className="flex items-center justify-between border-b border-[#2A2A2A] p-4">
-                        <div className="flex items-center gap-2">
-                          <Mic className="h-4 w-4 text-[#4CBB17]" />
-                          <span className="text-sm font-semibold text-white">{conversation.summary || "Voice conversation"}</span>
+                <>
+                  <div className="rounded-xl border border-[#2A2A2A] bg-[#111111] p-3">
+                    <div className="mb-3 px-2">
+                      <h3 className="text-base font-semibold text-white">Voice conversations</h3>
+                      <p className="mt-1 text-xs text-[#A0A0A0]">Select a saved session to inspect its transcript and triggered actions.</p>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {voiceHistory.map((conversation) => {
+                        const isActive = conversation.id === selectedConversationId;
+                        return (
+                          <button
+                            key={conversation.id}
+                            type="button"
+                            onClick={() => setSelectedConversationId(conversation.id)}
+                            className={`rounded-xl border p-4 text-left transition-all ${
+                              isActive ? "border-[#4CBB17] bg-[#4CBB1712]" : "border-[#2A2A2A] bg-[#151515] hover:border-[#3A3A3A]"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <Mic className="h-4 w-4 text-[#4CBB17]" />
+                                  <span className="truncate text-sm font-semibold text-white">{conversation.title}</span>
+                                </div>
+                                <p className="mt-2 text-xs text-[#A0A0A0]">{formatDateTime(conversation.startedAt)}</p>
+                              </div>
+                              <span className="rounded-full border border-[#A0A0A040] bg-[#A0A0A020] px-2 py-0.5 text-[11px] text-[#A0A0A0]">
+                                {conversation.transcript.length} messages
+                              </span>
+                            </div>
+                            <p className="mt-3 line-clamp-2 text-sm text-[#D0D0D0]">{conversation.summary}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-[#2A2A2A] bg-[#111111] p-5">
+                    {selectedConversation ? (
+                      <div className="flex flex-col gap-5">
+                        <div className="flex items-start justify-between gap-3 border-b border-[#2A2A2A] pb-4">
+                          <div>
+                            <h3 className="text-lg font-semibold text-white">{selectedConversation.summary}</h3>
+                            <p className="mt-1 text-xs text-[#A0A0A0]">
+                              Started {formatDateTime(selectedConversation.startedAt)}
+                              {selectedConversation.endedAt ? ` • Last activity ${formatDateTime(selectedConversation.endedAt)}` : ""}
+                            </p>
+                          </div>
+                          <span className="rounded-full border border-[#A0A0A040] bg-[#A0A0A020] px-2 py-0.5 text-xs text-[#A0A0A0]">{selectedConversation.status}</span>
                         </div>
-                        <span className="rounded-full border border-[#A0A0A040] bg-[#A0A0A020] px-2 py-0.5 text-xs text-[#A0A0A0]">
-                          saved
-                        </span>
-                      </div>
-                      <div className="flex flex-col gap-3 p-4">
-                        <p className="text-xs text-[#A0A0A0]">{formatDateTime(startedAt)}</p>
-                        {actions.length > 0 && (
-                          <div className="rounded-lg bg-[#151515] p-3">
-                            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#A0A0A0]">Actions triggered</p>
+
+                        {selectedConversation.actions.length > 0 && (
+                          <div className="rounded-xl border border-[#2A2A2A] bg-[#151515] p-4">
+                            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-[#A0A0A0]">Actions triggered</p>
                             <div className="flex flex-col gap-2">
-                              {actions.map((action, actionIndex) => (
-                                <div key={actionIndex} className="flex items-start gap-2 text-sm text-white">
+                              {selectedConversation.actions.map((action, actionIndex) => (
+                                <div key={action.id || actionIndex} className="flex items-start gap-2 rounded-lg bg-[#101010] p-3 text-sm text-white">
                                   <ArrowRight className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-[#4CBB17]" />
                                   <div>
-                                    <p>{action.title || action.type}</p>
+                                    <p>{action.title || action.type || action.name || "Workflow action"}</p>
                                     {action.message && <p className="text-xs text-[#A0A0A0]">{action.message}</p>}
                                   </div>
                                 </div>
@@ -603,23 +671,30 @@ export function OrchestratorDashboard({ businessId = 1 }) {
                             </div>
                           </div>
                         )}
-                        <div className="flex flex-col gap-2">
-                          {transcript.slice(0, 4).map((message, messageIndex) => (
-                            <div
-                              key={message.id || messageIndex}
-                              className={`rounded-lg p-2.5 text-sm ${
-                                message.role === "user" ? "ml-8 bg-[#4CBB1715] text-white" : "mr-8 bg-[#1A1A1A] text-[#A0A0A0]"
-                              }`}
-                            >
-                              <p className="mb-1 text-xs font-semibold text-[#A0A0A0]">{message.role === "user" ? "You" : "Agent"}</p>
-                              <p>{message.text || message.content}</p>
-                            </div>
-                          ))}
+
+                        <div className="flex flex-col gap-3">
+                          {selectedConversation.transcript.map((message) => {
+                            const isUser = String(message.role).toLowerCase().includes("user");
+                            return (
+                              <div key={message.id} className={`max-w-[90%] rounded-xl border p-4 ${isUser ? "ml-auto border-[#4CBB1740] bg-[#4CBB1710]" : "border-[#2A2A2A] bg-[#151515]"}`}>
+                                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[#A0A0A0]">{isUser ? "You" : "Agent"}</p>
+                                <p className="text-sm leading-relaxed text-white">{message.content}</p>
+                                {message.timestamp && <p className="mt-2 text-[11px] text-[#777]">{formatDateTime(message.timestamp)}</p>}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
-                    </div>
-                  );
-                })
+                    ) : (
+                      <div className="flex h-full min-h-[240px] items-center justify-center text-center">
+                        <div>
+                          <MessageSquare className="mx-auto mb-3 h-10 w-10 text-[#2A2A2A]" />
+                          <p className="text-sm text-[#A0A0A0]">Select a conversation to inspect its details.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -693,3 +768,13 @@ export function OrchestratorDashboard({ businessId = 1 }) {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+

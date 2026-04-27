@@ -46,6 +46,7 @@ const INITIAL_FORM = {
     email: "",
     phoneNumber: "",
     company: "",
+    gstin: "",
     notes: "",
     teamActionCode: "",
     source: "MANUAL",
@@ -56,6 +57,7 @@ const CLIENT_FORM_PLACEHOLDERS = {
     email: "name@company.com",
     phone: "Contact phone number",
     company: "Client company name",
+    gstin: "22AAAAA0000A1Z5",
     notes: "Optional notes",
     teamActionCode: "Enter team security code",
 };
@@ -65,6 +67,7 @@ const CLIENT_PREVIEW_EMPTY_STATE = {
     email: "Not added yet",
     phone: "Not added yet",
     company: "Not added yet",
+    gstin: "Not added yet",
 };
 
 export default function ClientsPage() {
@@ -118,6 +121,7 @@ export default function ClientsPage() {
                 phoneNumber: "phoneNumber",
                 company: "company",
                 company_name: "company",
+                gstin: "gstin",
                 city: "notes",
                 team_code: "teamActionCode",
             };
@@ -127,9 +131,6 @@ export default function ClientsPage() {
                     next[target] = value;
                 }
             });
-            if (draft.gstin && canApplyVoice("notes")) {
-                next.notes = prev.notes?.includes("GSTIN") ? prev.notes : `${prev.notes ? `${prev.notes}\n` : ""}GSTIN: ${draft.gstin}`;
-            }
             return next;
         });
     };
@@ -339,6 +340,17 @@ export default function ClientsPage() {
                                             />
                                         </div>
                                         <div className="grid gap-2">
+                                            <Label htmlFor="gstin" className="text-white">GSTIN</Label>
+                                            <input
+                                                id="gstin"
+                                                className="mo-input px-3 py-2"
+                                                value={formData.gstin}
+                                                onChange={(e) => { markTouched("gstin"); setFormData({ ...formData, gstin: e.target.value.toUpperCase() }); }}
+                                                placeholder={CLIENT_FORM_PLACEHOLDERS.gstin}
+                                                maxLength={15}
+                                            />
+                                        </div>
+                                        <div className="grid gap-2">
                                             <Label htmlFor="notes" className="text-white">Notes</Label>
                                             <Textarea
                                                 id="notes"
@@ -381,6 +393,10 @@ export default function ClientsPage() {
                                             <div className="min-w-0">
                                                 <div className="text-[#A0A0A0] mb-1">Company</div>
                                                 <div className="text-white break-words">{formData.company || CLIENT_PREVIEW_EMPTY_STATE.company}</div>
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="text-[#A0A0A0] mb-1">GSTIN</div>
+                                                <div className="text-white break-words">{formData.gstin || CLIENT_PREVIEW_EMPTY_STATE.gstin}</div>
                                             </div>
                                         </div>
                                     </div>

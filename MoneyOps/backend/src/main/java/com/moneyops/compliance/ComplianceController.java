@@ -20,9 +20,36 @@ public class ComplianceController {
         return ResponseEntity.ok(complianceService.getComplianceStatus(orgId, businessId, userId));
     }
 
+    @GetMapping("/compliance/gst/summary")
+    public ResponseEntity<ComplianceService.GstSummaryResponse> getGstSummary(
+            @RequestParam(required = false) String period) {
+        String orgId = OrgContext.getOrgId();
+        return ResponseEntity.ok(complianceService.getGstSummary(orgId, period));
+    }
+
+    @GetMapping("/compliance/tds/obligations")
+    public ResponseEntity<ComplianceService.TdsObligationsResponse> getTdsObligations(
+            @RequestParam(required = false) String fy) {
+        String orgId = OrgContext.getOrgId();
+        return ResponseEntity.ok(complianceService.getTdsObligations(orgId, fy));
+    }
+
+    @GetMapping("/compliance/audit/readiness")
+    public ResponseEntity<ComplianceService.AuditReadinessResponse> getAuditReadiness() {
+        String orgId = OrgContext.getOrgId();
+        return ResponseEntity.ok(complianceService.getAuditReadiness(orgId));
+    }
+
+    @GetMapping("/compliance/issues")
+    public ResponseEntity<?> getComplianceIssues(@RequestParam(required = false) String period) {
+        String orgId = OrgContext.getOrgId();
+        return ResponseEntity.ok(complianceService.getComplianceIssues(orgId, period));
+    }
+
     @GetMapping("/deadlines")
     public ResponseEntity<ComplianceService.DeadlinesResponse> getDeadlines(@RequestParam(required = false) String businessId) {
-        return ResponseEntity.ok(complianceService.getDeadlines(businessId));
+        String orgId = OrgContext.getOrgId();
+        return ResponseEntity.ok(complianceService.getDeadlines(orgId, businessId));
     }
 
     @PostMapping("/tds/calc")

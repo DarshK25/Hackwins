@@ -29,6 +29,13 @@ public interface TransactionRepository extends MongoRepository<Transaction, Stri
 
     List<Transaction> findByOrgIdAndTypeAndDeletedAtIsNull(String orgId, TransactionType type);
 
+    List<Transaction> findByOrgIdAndTypeAndTransactionDateBetweenAndDeletedAtIsNull(
+            String orgId,
+            TransactionType type,
+            LocalDate startDate,
+            LocalDate endDate
+    );
+
     List<Transaction> findByOrgIdAndTransactionDateBetweenAndDeletedAtIsNull(String orgId, LocalDate startDate, LocalDate endDate);
 
     @org.springframework.data.mongodb.repository.Aggregation(pipeline = {

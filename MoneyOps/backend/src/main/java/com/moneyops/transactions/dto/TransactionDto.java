@@ -1,6 +1,7 @@
 // src/main/java/com/moneyops/transactions/dto/TransactionDto.java
 package com.moneyops.transactions.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -20,6 +21,15 @@ public class TransactionDto {
     private String description;
     private String paymentMethod;
     private String referenceNumber;
+    @JsonAlias("vendor")
+    private String vendorName;
+    private String vendorGstin;
+    private String vendorPan;
+    private BigDecimal taxableAmount;
+    private BigDecimal gstAmount;
+    private Boolean itcEligible;
+    private Boolean hasReceipt;
+    private Boolean bankMatched;
     private String aiCategory;
     private Float aiConfidence;
     private String idempotencyKey;

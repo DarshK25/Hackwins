@@ -1,5 +1,19 @@
-import { RefreshCw, TrendingUp, TrendingDown, AlertCircle, Wifi, WifiOff } from "lucide-react";
-import { AgentPlan } from "@/components/ui/agent-plan";
+import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+    RefreshCw,
+    TrendingUp,
+    AlertCircle,
+    Wifi,
+    WifiOff,
+    Newspaper,
+    Radar,
+    Building2,
+    BriefcaseBusiness,
+    ExternalLink,
+    ChevronDown,
+    ChevronUp,
+} from "lucide-react";
 
 const PRIORITY_BADGE = {
     high: "bg-[#CD1C1820] text-[#CD1C18] border-[#CD1C1840]",
@@ -7,241 +21,360 @@ const PRIORITY_BADGE = {
     low: "bg-[#4CBB1720] text-[#4CBB17] border-[#4CBB1740]",
 };
 
-const MANAGED_AGENT_TASKS = [
-    {
-        id: "scraper-agent",
-        title: "Launch Web Scraper Agent",
-        description: "Create a managed browser-use agent for pulling structured data from EV infra portals, RFP pages, and dynamic market listings without depending on brittle fetch-only scraping.",
-        status: "in-progress",
-        priority: "high",
-        dependencies: [],
-        subtasks: [
-            {
-                id: "scraper-brief",
-                title: "Define the scraping contract",
-                description: "Infer the target URL and extraction goal from each research request, call browser_use_extract first, then submit_extraction exactly once with normalized array output and nulls for missing fields.",
-                status: "completed",
-                priority: "high",
-            },
-            {
-                id: "scraper-cli",
-                title: "Create the Anthropic managed agent",
-                description: "Stand up the Web Scraper Agent on claude-sonnet-4-6 so the market workflow can scrape SPA-heavy pages like government tenders, charger maps, and operator portals.",
-                status: "in-progress",
-                priority: "high",
-            },
-            {
-                id: "scraper-env",
-                title: "Provision environment access",
-                description: "Create a cloud environment with unrestricted networking, then attach sessions so scraping jobs can run outside the local browser context and feed results into market analysis.",
-                status: "pending",
-                priority: "medium",
-            },
-        ],
-    },
-    {
-        id: "deep-researcher",
-        title: "Deploy Deep Researcher",
-        description: "Add a source-synthesis agent that breaks market questions into sub-questions, searches authoritative sources, and returns cited reasoning for partnerships, competitors, incentives, and regulatory shifts.",
-        status: "pending",
-        priority: "high",
-        dependencies: ["Launch Web Scraper Agent"],
-        subtasks: [
-            {
-                id: "research-brief",
-                title: "Set research standards",
-                description: "Force the agent to decompose questions into three to five sub-questions, prefer primary sources, extract quotes and specific claims, and finish with confidence and gaps.",
-                status: "completed",
-                priority: "high",
-            },
-            {
-                id: "research-cli",
-                title: "Create the managed researcher",
-                description: "Use claude-sonnet-4-6 to create a Deep researcher agent that can answer growth, policy, competitor, and opportunity questions with source-backed structure instead of shallow summaries.",
-                status: "pending",
-                priority: "high",
-            },
-            {
-                id: "research-runtime",
-                title: "Thread into market workflows",
-                description: "Use the researcher for questions like charger adoption in Maharashtra, subsidy changes, key enterprise buyers, and competitor rollouts, while the scraper supplies structured page evidence.",
-                status: "pending",
-                priority: "medium",
-            },
-        ],
-    },
+const BLOCKED_DOMAINS = [
+    "linkedin.com",
+    "facebook.com",
+    "instagram.com",
+    "twitter.com",
+    "x.com",
+    "pinterest.com",
+    "revenueml.com",
 ];
 
-function StatCard({ label, value, sub, accent }) {
-    return (
-        <div className="mo-card">
-            <p className="text-xs text-[#A0A0A0] font-medium uppercase tracking-wide mb-2">{label}</p>
-            <p className="text-2xl font-bold" style={{ color: accent || "#ffffff" }}>{value}</p>
-            {sub && <p className="text-xs text-[#A0A0A0] mt-1">{sub}</p>}
-        </div>
-    );
+const NOISE_PATTERNS = [
+    /join now/i,
+    /sign in/i,
+    /report this article/i,
+    /report this comment/i,
+    /see more comments/i,
+    /like\]/i,
+    /reply\]/i,
+    /comment\]/i,
+    /cold-join/i,
+    /guest-reporting/i,
+];
+
+function toArray(value) {
+    return Array.isArray(value) ? value : [];
 }
 
-function deriveMetrics(snapshot) {
-    if (!snapshot) return { revenueGrowth: 0, marketShare: 0, opportunityScore: 0, competitiveRank: "N/A" };
-    const clientCount = snapshot?.client_count || snapshot?.totalClients || snapshot?.active_clients || snapshot?.total_clients || 0;
-    const overdueCount = snapshot?.overdue_count || snapshot?.overdueCount || 0;
-    const margin = snapshot.profit_margin || 0;
-    const opportunityScore = Math.min(100, Math.max(0, Math.round(
-        (margin > 50 ? 80 : margin > 30 ? 65 : margin > 10 ? 50 : 35)
-        + (clientCount > 5 ? 10 : 5)
-        + (overdueCount === 0 ? 10 : overdueCount < 3 ? 5 : 0)
-    )));
-    const revenueGrowth = margin > 60 ? 18 : margin > 40 ? 12 : margin > 20 ? 7 : 3;
-    const marketShare = clientCount > 10 ? 18 : clientCount > 5 ? 12 : 6;
-    const competitiveRank = opportunityScore > 75 ? "#2" : opportunityScore > 55 ? "#3" : "#5";
-    return { revenueGrowth, marketShare, opportunityScore, competitiveRank };
+function domainFromUrl(url) {
+    try {
+        return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+        return "source";
+    }
 }
 
-function deriveTrends(snapshot, marketData) {
-    const trends = [];
-    const revenue = snapshot?.revenue || 0;
+function buildBusinessKeywords(profile) {
+    const source = [
+        profile?.industry_label,
+        profile?.activity_label,
+        ...(profile?.services || []),
+        profile?.target_market,
+        profile?.state,
+        profile?.city,
+    ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
 
-    // From actual invoice/client data
-    if (snapshot?.paid_count > 0) {
-        trends.push({
-            category: "professional_services",
-            description: `${snapshot.paid_count} invoices paid, ${snapshot.pending_count} pending`,
-            amount: Math.round(revenue * 0.6),
-            direction: "up",
-            change: Math.round(snapshot.profit_margin || 10),
-        });
-    }
-    if (snapshot?.overdue_count > 0) {
-        trends.push({
-            category: "overdue_recovery",
-            description: `₹${snapshot.overdue_amount?.toLocaleString('en-IN')} at risk — immediate follow-up needed`,
-            amount: Math.round(snapshot.overdue_amount || 0),
-            direction: "down",
-            change: Math.round((snapshot.overdue_amount / (revenue || 1)) * 100),
-        });
-    }
-    if (snapshot?.total_clients > 0) {
-        trends.push({
-            category: "client_expansion",
-            description: `${snapshot.total_clients} active clients — ${snapshot.total_clients < 5 ? "scale up client acquisition" : "healthy client base"}`,
-            amount: Math.round(revenue / (snapshot.total_clients || 1)),
-            direction: snapshot.total_clients >= 5 ? "up" : "down",
-            change: snapshot.total_clients >= 5 ? 15 : 5,
-        });
-    }
-
-    // From Tavily news — extract top headlines as trend signals
-    const news = marketData?.news?.news || [];
-    if (news.length > 0) {
-        trends.push({
-            category: "live_market_signal",
-            description: news[0]?.split("(")[0]?.trim() || "Market intelligence updated",
-            amount: 0,
-            direction: "up",
-            change: null,
-            isLive: true,
-        });
-    }
-
-    return trends;
+    return [...new Set(
+        source
+            .split(/[^a-z0-9]+/i)
+            .map((token) => token.trim())
+            .filter((token) => token.length > 3)
+            .filter((token) => !["with", "from", "that", "this", "across", "design", "supply", "annual", "india"].includes(token))
+    )];
 }
 
-function deriveInsights(snapshot, marketData) {
+function isRelevantText(text, keywords) {
+    const haystack = String(text || "").toLowerCase();
+    if (!haystack) return false;
+    const hits = keywords.filter((keyword) => haystack.includes(keyword));
+    return hits.length >= 2 || (hits.length >= 1 && /ev|charging|fleet|subsidy|audit|infra|infrastructure|mobility|energy|utilities|charger/.test(haystack));
+}
+
+function cleanSnippet(text) {
+    if (!text) return "";
+    return String(text)
+        .replace(/\[[^\]]+\]\(([^)]+)\)/g, " ")
+        .replace(/https?:\/\/\S+/g, " ")
+        .replace(/[#*_`>]/g, " ")
+        .replace(/\s+/g, " ")
+        .replace(/\b(Like|Reply|Comment|Follow|Report this article|Report this comment|See more comments|Skip to content|Table of Contents|Receive Pricing Insights Direct to Your Inbox|We value your privacy|Accept All)\b/gi, " ")
+        .trim();
+}
+
+function summarizeSnippet(text, maxLength = 220) {
+    const cleaned = cleanSnippet(text);
+    if (!cleaned) return "";
+    const firstSentence = cleaned.split(/(?<=[.!?])\s+/)[0] || cleaned;
+    const candidate = firstSentence.length > 80 ? firstSentence : cleaned;
+    if (candidate.length <= maxLength) return candidate;
+    return `${candidate.slice(0, maxLength).trim()}...`;
+}
+
+function isUsableCitation(item) {
+    const domain = domainFromUrl(item.url || "");
+    const text = `${item.title || ""} ${item.snippet || ""}`;
+    if (!item.url || !item.title) return false;
+    if (BLOCKED_DOMAINS.some((blocked) => domain.includes(blocked))) return false;
+    if (NOISE_PATTERNS.some((pattern) => pattern.test(text))) return false;
+    return true;
+}
+
+function sourceWeight(domain) {
+    if (/\.gov|\.nic\.in|ibef\.org|livemint\.com|forbesindia\.com|business-standard\.com|thehindu\.com|mint\.com/.test(domain)) return 3;
+    if (/\.org|\.edu|\.com/.test(domain)) return 2;
+    return 1;
+}
+
+function collectCitations(marketData, profile) {
+    const keywords = buildBusinessKeywords(profile);
+    const citations = [];
+
+    toArray(marketData?.opportunities?.results).forEach((item) => {
+        const snippet = cleanSnippet(item.content || "");
+        const text = `${item.title || ""} ${snippet}`;
+        if (!isRelevantText(text, keywords)) return;
+        citations.push({
+            type: "opportunity",
+            title: item.title || "Opportunity source",
+            snippet,
+            url: item.url || "",
+            source: domainFromUrl(item.url),
+        });
+    });
+
+    toArray(marketData?.competitors?.moves_results).forEach((item) => {
+        const snippet = cleanSnippet(item.content || "");
+        const text = `${item.title || ""} ${snippet}`;
+        if (!isRelevantText(text, keywords)) return;
+        citations.push({
+            type: "competitor",
+            title: item.title || "Competitor source",
+            snippet,
+            url: item.url || "",
+            source: domainFromUrl(item.url),
+        });
+    });
+
+    toArray(marketData?.news?.raw_results).forEach((item) => {
+        const snippet = cleanSnippet(item.content || "");
+        const text = `${item.title || ""} ${snippet}`;
+        if (!isRelevantText(text, keywords)) return;
+        citations.push({
+            type: "news",
+            title: item.title || "News source",
+            snippet,
+            url: item.url || "",
+            source: domainFromUrl(item.url),
+        });
+    });
+
+    toArray(marketData?.news?.news_items).forEach((item) => {
+        const snippet = cleanSnippet(item.description || "");
+        const text = `${item.title || ""} ${snippet}`;
+        if (!isRelevantText(text, keywords)) return;
+        citations.push({
+            type: "news",
+            title: item.title || "News source",
+            snippet,
+            url: item.url || "",
+            source: item.source || domainFromUrl(item.url),
+            publishedAt: item.published_at || "",
+        });
+    });
+
+    const deduped = [];
+    const seen = new Set();
+    citations.forEach((item) => {
+        const key = `${item.title}|${item.url}`;
+        if (seen.has(key) || !isUsableCitation(item)) return;
+        seen.add(key);
+        deduped.push(item);
+    });
+
+    return deduped
+        .sort((a, b) => sourceWeight(b.source) - sourceWeight(a.source))
+        .slice(0, 8);
+}
+
+function deriveSignals(citations) {
+    const grouped = {
+        opportunity: citations.filter((item) => item.type === "opportunity"),
+        competitor: citations.filter((item) => item.type === "competitor"),
+        news: citations.filter((item) => item.type === "news"),
+    };
+
+    const signals = [];
+
+    if (grouped.opportunity[0]) {
+        signals.push({
+            label: "Demand signal",
+            text: summarizeSnippet(grouped.opportunity[0].snippet || grouped.opportunity[0].title, 180),
+            icon: TrendingUp,
+            accent: "#4CBB17",
+            citation: grouped.opportunity[0],
+        });
+    }
+
+    if (grouped.competitor[0]) {
+        signals.push({
+            label: "Competitor watch",
+            text: summarizeSnippet(grouped.competitor[0].snippet || grouped.competitor[0].title, 180),
+            icon: Radar,
+            accent: "#FFB300",
+            citation: grouped.competitor[0],
+        });
+    }
+
+    grouped.news.slice(0, 2).forEach((item) => {
+        signals.push({
+            label: "Market headline",
+            text: item.title,
+            icon: Newspaper,
+            accent: "#60A5FA",
+            citation: item,
+        });
+    });
+
+    return signals.slice(0, 4);
+}
+
+function deriveInsights(snapshot, profile, citations) {
     const insights = [];
-    const newsAnswer = marketData?.news?.answer || "";
-    const competitorAnswer = marketData?.competitors?.competitors_answer || "";
-    const competitorMoves = marketData?.competitors?.recent_moves || "";
-    const opportunitiesAnswer = marketData?.opportunities?.opportunities || "";
+    const topService = profile?.services?.[0] || profile?.activity_label || "your core service";
+    const region = profile?.state || profile?.region || "your main region";
+    const opportunity = citations.find((item) => item.type === "opportunity");
+    const competitor = citations.find((item) => item.type === "competitor");
+    const news = citations.find((item) => item.type === "news");
 
-    // Critical: overdue invoices
-    if (snapshot?.overdue_count > 0) {
+    if (opportunity) {
         insights.push({
             priority: "high",
-            title: "Cash Flow Risk",
-            message: `You have ${snapshot.overdue_count} overdue invoice${snapshot.overdue_count > 1 ? "s" : ""} totaling ₹${snapshot.overdue_amount?.toLocaleString('en-IN')}. Follow up immediately to protect your ₹${snapshot.net_profit?.toLocaleString('en-IN')} net profit.`,
-            action: "View Overdue Invoices",
+            title: `Where demand looks strongest for ${topService}`,
+            message: summarizeSnippet(opportunity.snippet || opportunity.title, 220),
+            action: "Open source",
+            url: opportunity.url,
+            source: opportunity.source,
+        });
+    }
+
+    if (competitor) {
+        insights.push({
+            priority: "medium",
+            title: "Competitive movement to track",
+            message: summarizeSnippet(competitor.snippet || competitor.title, 220),
+            action: "Open source",
+            url: competitor.url,
+            source: competitor.source,
+        });
+    }
+
+    if (news) {
+        insights.push({
+            priority: "medium",
+            title: `Relevant live signal in ${region}`,
+            message: news.title,
+            action: "Open article",
+            url: news.url,
+            source: news.source,
+        });
+    }
+
+    if ((snapshot?.overdue_count || 0) > 0) {
+        insights.push({
+            priority: "low",
+            title: "Collections are limiting market moves",
+            message: `${snapshot.overdue_count} overdue invoice${snapshot.overdue_count > 1 ? "s are" : " is"} tying up ₹${Number(snapshot?.overdue_amount || 0).toLocaleString("en-IN")}. Close those collections before pushing hard on new acquisition.`,
+            action: "View overdue invoices",
             link: "/invoices?filter=overdue",
         });
     }
 
-    // Live competitor intelligence from Tavily
-    if (competitorMoves && competitorMoves.length > 50) {
+    if (!insights.length) {
         insights.push({
             priority: "medium",
-            title: "Competitor Movement Detected",
-            message: competitorMoves.slice(0, 180) + (competitorMoves.length > 180 ? "..." : ""),
-            action: "Analyze Competitors",
-        });
-    } else if (competitorAnswer && competitorAnswer.length > 50) {
-        insights.push({
-            priority: "medium",
-            title: "Competitive Landscape",
-            message: competitorAnswer.slice(0, 180) + (competitorAnswer.length > 180 ? "..." : ""),
-            action: "View Details",
+            title: "No strong market matches yet",
+            message: `Live research did not return enough high-confidence signals for ${profile?.business_name || "this business"} yet. The next pass should widen the buyer search around ${topService} in ${region}.`,
         });
     }
 
-    // Live growth opportunity from Tavily
-    if (opportunitiesAnswer && opportunitiesAnswer.length > 50) {
-        insights.push({
-            priority: "low",
-            title: "Growth Opportunity",
-            message: opportunitiesAnswer.slice(0, 200) + (opportunitiesAnswer.length > 200 ? "..." : ""),
-            action: "Explore Opportunity",
-        });
-    }
+    return insights.slice(0, 4);
+}
 
-    // Live news signal
-    if (newsAnswer && newsAnswer.length > 50) {
-        insights.push({
-            priority: "medium",
-            title: "Market Intelligence",
-            message: newsAnswer.slice(0, 200) + (newsAnswer.length > 200 ? "..." : ""),
-            action: "View Full Report",
-        });
-    }
+function deriveBuyerTargets(profile) {
+    const serviceLabels = (profile?.services || []).slice(0, 3);
+    const region = profile?.state || profile?.region || "your core market";
 
-    // Positive signal: strong margin
-    if ((snapshot?.profit_margin || 0) > 50) {
-        insights.push({
-            priority: "low",
-            title: "Strong Profitability Signal",
-            message: `Your ${snapshot.profit_margin}% profit margin is significantly above industry average. This is the right time to reinvest in client acquisition or service expansion.`,
-            action: "Plan Expansion",
-        });
-    }
+    const defaults = [
+        `Commercial real-estate portfolios expanding EV parking in ${region}`,
+        `Hotels, campuses, and institutions evaluating charger deployment or AMC coverage`,
+        `Fleet-led operators needing readiness audits, subsidy guidance, or charging uptime support`,
+    ];
 
-    // Fallback if no real data yet
-    if (insights.length === 0) {
-        insights.push({
-            priority: "medium",
-            title: "Market Analysis Loading",
-            message: "Live market intelligence is being gathered. Ask the voice agent 'What are my growth opportunities?' to trigger analysis.",
-            action: null,
-        });
-    }
+    if (!serviceLabels.length) return defaults;
 
-    return insights;
+    return serviceLabels.map((service) => `${service} buyers across ${region}`);
+}
+
+function SourceLink({ item, label = "Open source" }) {
+    if (!item?.url) return null;
+    return (
+        <a
+            href={item.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-[#4CBB17] hover:underline font-medium"
+        >
+            {label}
+            <ExternalLink className="h-3 w-3" />
+        </a>
+    );
+}
+
+function CitationCard({ item }) {
+    const [expanded, setExpanded] = useState(false);
+    const preview = summarizeSnippet(item.snippet || item.title, 170);
+
+    return (
+        <div className="rounded-xl border border-[#2A2A2A] bg-[#151515] p-4">
+            <div className="flex items-start justify-between gap-3">
+                <div>
+                    <p className="text-sm font-semibold text-white">{item.title}</p>
+                    <p className="mt-1 text-xs text-[#A0A0A0]">
+                        {item.source}
+                        {item.publishedAt ? ` • ${new Date(item.publishedAt).toLocaleDateString()}` : ""}
+                    </p>
+                </div>
+                <span className="rounded-md bg-[#1F1F1F] px-2 py-1 text-[10px] uppercase tracking-wide text-[#A0A0A0]">{item.type}</span>
+            </div>
+            <p className="mt-3 text-sm leading-relaxed text-[#D0D0D0]">{expanded ? item.snippet || item.title : preview}</p>
+            <div className="mt-3 flex items-center justify-between gap-3">
+                <button
+                    type="button"
+                    onClick={() => setExpanded((value) => !value)}
+                    className="inline-flex items-center gap-1 text-xs text-[#A0A0A0] hover:text-white"
+                >
+                    {expanded ? "Collapse" : "Expand"}
+                    {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                </button>
+                <SourceLink item={item} label="Explore source" />
+            </div>
+        </div>
+    );
 }
 
 export function MarketResearchDashboard({ businessId, data, onRefresh }) {
+    const navigate = useNavigate();
+    const [showAllSources, setShowAllSources] = useState(false);
     const snapshot = data?.snapshot || null;
     const marketData = data?.market || null;
+    const profile = data?.profile || null;
     const isLive = !!data && !!snapshot;
     const isCached = data?.cached;
     const timestamp = data?.timestamp;
 
-    const metrics = deriveMetrics(snapshot);
-    const trends = deriveTrends(snapshot, marketData);
-    const insights = deriveInsights(snapshot, marketData);
-
-    const formatIndustryName = (industry) =>
-        industry.split("_").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" & ");
+    const citations = useMemo(() => collectCitations(marketData, profile), [marketData, profile]);
+    const signals = useMemo(() => deriveSignals(citations), [citations]);
+    const insights = useMemo(() => deriveInsights(snapshot, profile, citations), [snapshot, profile, citations]);
+    const buyerTargets = useMemo(() => deriveBuyerTargets(profile), [profile]);
+    const visibleCitations = showAllSources ? citations : citations.slice(0, 4);
 
     return (
         <div className="flex flex-col gap-6">
-            {/* Header */}
             <div className="flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-4">
                     <div className="rounded-xl p-3" style={{ backgroundColor: "#FFB30020", border: "1px solid #FFB30040" }}>
@@ -250,7 +383,7 @@ export function MarketResearchDashboard({ businessId, data, onRefresh }) {
                     <div>
                         <h1 className="mo-h1">Market Research Intelligence</h1>
                         <div className="flex items-center gap-2 mt-0.5">
-                            <p className="mo-text-secondary">AI-powered market analysis & growth opportunities</p>
+                            <p className="mo-text-secondary">Live opportunities, competitor moves, and cited headlines filtered for your business.</p>
                             {isLive ? (
                                 <span className="flex items-center gap-1 text-xs text-[#4CBB17]">
                                     <Wifi className="h-3 w-3" />
@@ -262,11 +395,7 @@ export function MarketResearchDashboard({ businessId, data, onRefresh }) {
                                 </span>
                             )}
                         </div>
-                        {timestamp && (
-                            <p className="text-[10px] text-[#555] mt-0.5">
-                                Last updated: {new Date(timestamp).toLocaleTimeString()}
-                            </p>
-                        )}
+                        {timestamp && <p className="text-[10px] text-[#555] mt-0.5">Last updated: {new Date(timestamp).toLocaleTimeString()}</p>}
                     </div>
                 </div>
                 <button onClick={onRefresh} className="mo-btn-secondary flex items-center gap-2 text-sm">
@@ -274,146 +403,120 @@ export function MarketResearchDashboard({ businessId, data, onRefresh }) {
                 </button>
             </div>
 
-            {/* Key Metrics — derived from real snapshot */}
-            <div className="grid gap-4 md:grid-cols-4">
-                <StatCard
-                    label="Revenue Growth"
-                    value={`+${metrics.revenueGrowth}%`}
-                    sub={isLive ? `₹${(snapshot?.revenue || 0).toLocaleString('en-IN')} revenue` : "vs last quarter"}
-                    accent="#4CBB17"
-                />
-                <StatCard
-                    label="Profit Margin"
-                    value={isLive ? `${snapshot?.profit_margin || 0}%` : `${metrics.marketShare}%`}
-                    sub={isLive ? `₹${(snapshot?.net_profit || 0).toLocaleString('en-IN')} net profit` : "Estimated"}
-                    accent={isLive && (snapshot?.profit_margin || 0) > 40 ? "#4CBB17" : "#ffffff"}
-                />
-                <StatCard
-                    label="Growth Opportunity"
-                    value={`${metrics.opportunityScore}/100`}
-                    sub={isLive ? `${snapshot?.client_count || snapshot?.totalClients || snapshot?.active_clients || snapshot?.total_clients || 0} active clients` : "Potential score"}
-                    accent="#60A5FA"
-                />
-                <StatCard
-                    label="Competitive Position"
-                    value={metrics.competitiveRank}
-                    sub={isLive
-                        ? `${snapshot?.overdue_count || 0} overdue invoices`
-                        : "In your sector"
-                    }
-                    accent={isLive && (snapshot?.overdue_count || 0) > 0 ? "#CD1C18" : "#ffffff"}
-                />
-            </div>
-
-            {/* Transaction Pattern Analysis — from real invoice data */}
-            <div className="mo-card">
-                <h2 className="mo-h2 mb-1">Transaction Pattern Analysis</h2>
-                <p className="mo-text-secondary mb-4">
-                    {isLive
-                        ? `Derived from ${snapshot?.total_invoices || 0} invoices across ${snapshot?.total_clients || 0} clients`
-                        : "Market trends derived from your business transactions"
-                    }
-                </p>
-                <div className="flex flex-col gap-3">
-                    {trends.length > 0 ? trends.map((trend, i) => (
-                        <div key={i} className="flex items-center justify-between p-3 rounded-xl border border-[#2A2A2A] hover:border-[#3A3A3A] transition-all">
-                            <div className="flex items-center gap-3">
-                                <div className="h-2 w-2 rounded-full flex-shrink-0"
-                                    style={{ backgroundColor: trend.isLive ? "#FFB300" : trend.direction === "up" ? "#4CBB17" : "#CD1C18" }}
-                                />
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <p className="font-semibold text-white text-sm">{formatIndustryName(trend.category)}</p>
-                                        {trend.isLive && (
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#FFB30020] text-[#FFB300] border border-[#FFB30040]">LIVE</span>
-                                        )}
-                                    </div>
-                                    <p className="text-xs text-[#A0A0A0]">{trend.description}</p>
-                                </div>
-                            </div>
-                            <div className="text-right flex-shrink-0">
-                                {trend.amount > 0 && (
-                                    <p className="font-semibold text-white text-sm">₹{trend.amount.toLocaleString('en-IN')}</p>
-                                )}
-                                {trend.change !== null && trend.change !== undefined && (
-                                    <div className={`text-xs flex items-center justify-end gap-1 ${trend.direction === "up" ? "text-[#4CBB17]" : "text-[#CD1C18]"}`}>
-                                        {trend.direction === "up" ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                                        {trend.change}%
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )) : (
-                        <p className="text-sm text-[#A0A0A0] text-center py-4">No transaction data yet</p>
-                    )}
-                </div>
-            </div>
-
-            {/* AI Insights — from real Tavily data */}
-            <div className="mo-card">
-                <div className="flex items-center justify-between mb-1">
-                    <h2 className="mo-h2">AI Market Insights & Recommendations</h2>
-                    {isLive && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#4CBB1720] text-[#4CBB17] border border-[#4CBB1740]">
-                            Powered by Live Data
-                        </span>
-                    )}
-                </div>
-                <p className="mo-text-secondary mb-4">
-                    {isLive ? "Real-time analysis from Tavily + your business metrics" : "AI-powered analysis of your market position"}
-                </p>
-                <div className="flex flex-col gap-3">
-                    {insights.map((insight, i) => (
-                        <div key={i} className="p-4 rounded-xl border transition-all" style={{
-                            backgroundColor: insight.priority === "high" ? "#CD1C1810" : insight.priority === "medium" ? "#FFB30010" : "#4CBB1710",
-                            borderColor: insight.priority === "high" ? "#CD1C1840" : insight.priority === "medium" ? "#FFB30040" : "#4CBB1740",
-                        }}>
-                            <div className="flex items-start gap-3">
-                                {insight.priority === "high" && <AlertCircle className="h-4 w-4 text-[#CD1C18] mt-0.5 flex-shrink-0" />}
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                        <span className={`text-xs px-2 py-0.5 rounded-md font-medium border ${PRIORITY_BADGE[insight.priority] || PRIORITY_BADGE.low}`}>
-                                            {insight.priority}
-                                        </span>
-                                        <span className="font-semibold text-white text-sm">{insight.title}</span>
-                                    </div>
-                                    <p className="text-sm text-[#A0A0A0]">{insight.message}</p>
-                                    {insight.action && (
-                                        <button
-                                            className="mt-2 text-xs text-[#4CBB17] hover:underline font-medium"
-                                            onClick={() => insight.link && window.location.assign(insight.link)}
-                                        >
-                                            {insight.action} →
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            {/* Live News Feed — only when real data available */}
-            {isLive && marketData?.news?.news?.length > 0 && (
+            <div className="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
                 <div className="mo-card">
-                    <h2 className="mo-h2 mb-1">Live Market News</h2>
-                    <p className="mo-text-secondary mb-4">Latest headlines affecting your business sector</p>
-                    <div className="flex flex-col gap-2">
-                        {marketData.news.news.slice(0, 5).map((headline, i) => (
-                            <div key={i} className="flex items-start gap-2 p-2 rounded-lg hover:bg-[#1A1A1A] transition-all">
-                                <span className="text-[#FFB300] text-xs mt-0.5 flex-shrink-0">●</span>
-                                <p className="text-xs text-[#A0A0A0] leading-relaxed">{headline}</p>
+                    <div className="flex items-center justify-between mb-1">
+                        <h2 className="mo-h2">AI Market Insights & Recommendations</h2>
+                        {isLive && <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#4CBB1720] text-[#4CBB17] border border-[#4CBB1740]">Live context</span>}
+                    </div>
+                    <p className="mo-text-secondary mb-4">Each recommendation is tied to a usable source when one is available.</p>
+                    <div className="flex flex-col gap-3">
+                        {insights.map((insight, i) => (
+                            <div key={i} className="p-4 rounded-xl border transition-all" style={{
+                                backgroundColor: insight.priority === "high" ? "#CD1C1810" : insight.priority === "medium" ? "#FFB30010" : "#4CBB1710",
+                                borderColor: insight.priority === "high" ? "#CD1C1840" : insight.priority === "medium" ? "#FFB30040" : "#4CBB1740",
+                            }}>
+                                <div className="flex items-start gap-3">
+                                    {insight.priority === "high" && <AlertCircle className="h-4 w-4 text-[#CD1C18] mt-0.5 flex-shrink-0" />}
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                            <span className={`text-xs px-2 py-0.5 rounded-md font-medium border ${PRIORITY_BADGE[insight.priority] || PRIORITY_BADGE.low}`}>{insight.priority}</span>
+                                            <span className="font-semibold text-white text-sm">{insight.title}</span>
+                                        </div>
+                                        <p className="text-sm text-[#A0A0A0]">{insight.message}</p>
+                                        <div className="mt-2 flex items-center gap-3">
+                                            {insight.action && insight.url && <SourceLink item={{ url: insight.url }} label={insight.action} />}
+                                            {insight.action && insight.link && (
+                                                <button className="text-xs text-[#4CBB17] hover:underline font-medium" onClick={() => navigate(insight.link)}>
+                                                    {insight.action} →
+                                                </button>
+                                            )}
+                                        </div>
+                                        {insight.source && <p className="mt-2 text-[11px] text-[#777]">Source: {insight.source}</p>}
+                                    </div>
+                                </div>
                             </div>
                         ))}
                     </div>
                 </div>
-            )}
 
-            <AgentPlan
-                title="Managed Agent Expansion"
-                subtitle="A platform-aligned rollout plan for turning the Market Agent into a stronger research stack with Anthropic Managed Agents for structured scraping and source-backed analysis."
-                tasks={MANAGED_AGENT_TASKS}
-            />
+                <div className="mo-card">
+                    <div className="flex items-center justify-between mb-1">
+                        <h2 className="mo-h2">Where to Focus</h2>
+                        <BriefcaseBusiness className="h-5 w-5 text-[#60A5FA]" />
+                    </div>
+                    <p className="mo-text-secondary mb-4">Suggested buyer lanes based on your services and geography.</p>
+                    <div className="flex flex-col gap-3">
+                        {buyerTargets.map((target, index) => (
+                            <div key={index} className="rounded-xl border border-[#2A2A2A] bg-[#151515] p-4">
+                                <div className="flex items-start gap-3">
+                                    <Building2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-[#60A5FA]" />
+                                    <p className="text-sm text-white">{target}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+
+            <div className="mo-card">
+                <div className="flex items-center justify-between mb-1">
+                    <h2 className="mo-h2">Relevant Signals</h2>
+                    <Radar className="h-5 w-5 text-[#60A5FA]" />
+                </div>
+                <p className="mo-text-secondary mb-4">Filtered live signals that match your business closely.</p>
+                {signals.length > 0 ? (
+                    <div className="grid gap-3 lg:grid-cols-2">
+                        {signals.map((signal, index) => {
+                            const Icon = signal.icon;
+                            return (
+                                <div key={index} className="rounded-xl border border-[#2A2A2A] bg-[#151515] p-4">
+                                    <div className="mb-2 flex items-center gap-2">
+                                        <Icon className="h-4 w-4" style={{ color: signal.accent }} />
+                                        <span className="text-xs font-semibold uppercase tracking-wide text-[#A0A0A0]">{signal.label}</span>
+                                    </div>
+                                    <p className="text-sm leading-relaxed text-white">{signal.text}</p>
+                                    <div className="mt-2">
+                                        <SourceLink item={signal.citation} label="Explore source" />
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : (
+                    <div className="rounded-xl border border-dashed border-[#2A2A2A] p-8 text-center">
+                        <p className="text-sm text-[#A0A0A0]">No strong live signals matched your business profile yet.</p>
+                    </div>
+                )}
+            </div>
+
+            <div className="mo-card">
+                <div className="flex items-center justify-between mb-1">
+                    <h2 className="mo-h2">Cited Sources</h2>
+                    <button
+                        type="button"
+                        onClick={() => setShowAllSources((value) => !value)}
+                        className="inline-flex items-center gap-1 text-xs text-[#A0A0A0] hover:text-white"
+                    >
+                        {showAllSources ? "Show fewer" : `Show all ${citations.length}`}
+                        {showAllSources ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    </button>
+                </div>
+                <p className="mo-text-secondary mb-4">Expand a source for detail or open it directly.</p>
+                {visibleCitations.length > 0 ? (
+                    <div className="grid gap-3 lg:grid-cols-2">
+                        {visibleCitations.map((item, i) => (
+                            <CitationCard key={`${item.url}-${i}`} item={item} />
+                        ))}
+                    </div>
+                ) : (
+                    <div className="rounded-xl border border-dashed border-[#2A2A2A] p-8 text-center">
+                        <p className="text-sm text-[#A0A0A0]">No strongly relevant cited sources matched this business profile yet.</p>
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
+
+

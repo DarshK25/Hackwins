@@ -4,6 +4,7 @@ Handles compliance queries, tax calculations, filing reminders, audit readiness
 """
 from typing import Dict, Any, List, Optional
 from datetime import datetime, date
+from urllib.parse import urlencode
 
 from app.agents.base_agent import BaseAgent, AgentResponse, ToolDefinition
 from app.schemas.intents import Intent, AgentType
@@ -108,68 +109,59 @@ class ComplianceAgent(BaseAgent):
             handler=self._handle_audit_readiness
         )
 
+        tds_obligations_tool = Tool(
+            name="calculate_tds_obligations",
+            description="Calculate vendor-side TDS obligations and client-side TDS credits",
+            category="compliance",
+            mvp_ready=True,
+            parameters=[
+                ToolParameters(name="financial_year", type="string", description="Financial year like 2026-27", required=False)
+            ],
+            handler=self._handle_tds_obligations
+        )
+
         tool_registry.register_tools([
             gst_calculator_tool,
             compliance_check_tool,
             audit_readiness_tool,
+            tds_obligations_tool,
         ])
+
+    def _context_identity(self, context: Optional[Dict[str, Any]]) -> Dict[str, Optional[str]]:
+        return {
+            "org_id": context.get("org_id", "default_org") if context else "default_org",
+            "user_id": context.get("user_id") if context else None,
+        }
+
+    async def _backend_get(self, path: str, context: Optional[Dict[str, Any]] = None) -> Any:
+        identity = self._context_identity(context)
+        return await self.backend.get(
+            path,
+            org_id=identity["org_id"],
+            user_id=identity["user_id"],
+        )
 
     async def _handle_gst_calculation(
         self,
         params: Dict[str, Any],
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Calculate GST from actual invoice data"""
-        org_id = context.get("org_id", "default_org") if context else "default_org"
-
-        invoices_resp = await self.backend.get_invoices(org_id=org_id, limit=100)
-        invoices = []
-        if invoices_resp.success and invoices_resp.data:
-            invoices = invoices_resp.data if isinstance(invoices_resp.data, list) else []
-
-        # Calculate GST from paid invoices
-        paid_invoices = [i for i in invoices if i.get("status") == "PAID"]
-        total_taxable = sum(i.get("subtotal", 0) for i in paid_invoices)
-        total_gst_collected = sum(i.get("gstTotal", 0) or i.get("tax", 0) for i in paid_invoices)
-        total_revenue = sum(i.get("totalAmount", 0) for i in paid_invoices)
-
-        # Input tax credit (estimated at 30% of output GST)
-        itc_estimate = total_gst_collected * 0.30
-        net_gst_payable = max(0, total_gst_collected - itc_estimate)
-
-        # Filing deadlines
-        today = date.today()
-        if today.day <= 20:
-            gstr1_deadline = f"20th {today.strftime('%B %Y')}"
-            gstr3b_deadline = f"20th {today.strftime('%B %Y')}"
-        else:
-            # Move to next month
-            next_month_val = (today.month % 12) + 1
-            year_val = today.year + (1 if today.month == 12 else 0)
-            next_month_date = date(year_val, next_month_val, 20)
-            gstr1_deadline = next_month_date.strftime("20th %B %Y")
-            gstr3b_deadline = next_month_date.strftime("20th %B %Y")
+        """Calculate GST from the backend compliance engine."""
+        period = params.get("period")
+        query = f"?{urlencode({'period': period})}" if period else ""
+        gst_summary = await self._backend_get(f"/api/compliance/gst/summary{query}", context)
 
         return {
-            "gst_summary": {
-                "total_taxable_revenue": round(total_taxable),
-                "output_gst_collected": round(total_gst_collected),
-                "estimated_itc": round(itc_estimate),
-                "net_gst_payable": round(net_gst_payable),
-                "effective_gst_rate": f"{(total_gst_collected/total_taxable*100):.1f}%" if total_taxable > 0 else "N/A",
-            },
-            "deadlines": {
-                "GSTR-1": gstr1_deadline,
-                "GSTR-3B": gstr3b_deadline,
-                "annual_return": "31st March",
-            },
+            "gst_summary": gst_summary,
             "recommendations": [
-                f"Net GST payable this period: ₹{net_gst_payable:,.0f}",
-                "Collect all purchase invoices for ITC claims before filing",
-                "File GSTR-1 before GSTR-3B for reconciliation",
-                "Ensure invoice GST numbers are valid for ITC eligibility",
+                f"GSTR-1 should include all {gst_summary.get('invoicesReported', 0)} invoices raised in the period.",
+                "Use claimable ITC only from expenses with GST amount, vendor GSTIN, and eligible category.",
+                "Resolve ITC-risk items before filing GSTR-3B to avoid overstating net GST payable.",
             ],
-            "message": f"GST Summary: ₹{total_gst_collected:,.0f} collected, ₹{net_gst_payable:,.0f} net payable"
+            "message": (
+                f"GSTR-3B net GST payable is ₹{float(gst_summary.get('netGstPayable', 0) or 0):,.0f} "
+                f"for {gst_summary.get('period', 'this period')}."
+            )
         }
 
     async def _handle_compliance_check(
@@ -177,58 +169,17 @@ class ComplianceAgent(BaseAgent):
         params: Dict[str, Any],
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Check compliance status and deadlines"""
-        org_id = context.get("org_id", "default_org") if context else "default_org"
-        today = date.today()
-        month = today.month
-
-        # 1. Fetch real data to make it dynamic
-        invoices_resp = await self.backend.get_invoices(org_id=org_id, limit=50)
-        invoices = invoices_resp.data if invoices_resp.success and isinstance(invoices_resp.data, list) else []
-        
-        # Check for overdue items
-        overdue_invoices = [i for i in invoices if i.get("status") == "OVERDUE"]
-        
-        # 2. Upcoming compliance deadlines
-        deadlines = []
-        # GST deadlines are usually 11th (GSTR1) and 20th (GSTR3B)
-        if today.day <= 20:
-            deadlines.append({
-                "filing": "GSTR-3B Monthly Return",
-                "due_date": date(today.year, today.month, 20).strftime("%Y-%m-%d"),
-                "status": "upcoming" if today.day < 15 else "urgent"
-            })
-        
-        # 3. Dynamic Score
-        compliance_score = 95
-        alerts = []
-        key_reqs = [
-            "GST Registration must be active",
-            "Maintain digital copies of all invoices",
-            "Reconcile monthly bank statements"
-        ]
-
-        if overdue_invoices:
-            compliance_score -= (len(overdue_invoices) * 2)
-            alerts.append(f"⚠️ {len(overdue_invoices)} Overdue invoices may impact liquidity/tax reconciliation")
-            key_reqs.append(f"Follow up on {len(overdue_invoices)} overdue payments")
-
-        # GST Specific Logic
-        unpaid_gst = sum(i.get("gstTotal", 0) or i.get("tax", 0) for i in invoices if i.get("status") == "SENT")
-        if unpaid_gst > 0:
-            alerts.append(f"🚨 ₹{unpaid_gst:,.0f} in pending GST from sent invoices")
-            compliance_score -= 5
-
-        if not alerts:
-            alerts.append("✅ No immediate compliance risks detected")
-
+        """Fetch compliance status and filing issues from backend."""
+        status = await self._backend_get("/api/compliance/status", context)
+        next_deadline = status.get("nextDeadline") or {}
+        gst_summary = status.get("gstSummary") or {}
         return {
-            "compliance_score": max(0, compliance_score),
-            "status": "compliant" if compliance_score >= 80 else "at_risk" if compliance_score >= 60 else "critical",
-            "upcoming_deadlines": deadlines,
-            "alerts": alerts,
-            "key_requirements": key_reqs,
-            "message": f"Compliance Health: {compliance_score}/100"
+            **status,
+            "message": (
+                f"Compliance score {status.get('complianceScore', 0)}/100. "
+                f"{next_deadline.get('title', 'Next filing')} is due in {next_deadline.get('daysRemaining', '-') } days. "
+                f"Net GST payable is ₹{float(gst_summary.get('netGstPayable', 0) or 0):,.0f}."
+            )
         }
 
     async def _handle_audit_readiness(
@@ -236,43 +187,30 @@ class ComplianceAgent(BaseAgent):
         params: Dict[str, Any],
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Check audit readiness"""
-        org_id = context.get("org_id", "default_org") if context else "default_org"
-
-        invoices_resp = await self.backend.get_invoices(org_id=org_id, limit=100)
-        invoices = []
-        if invoices_resp.success and invoices_resp.data:
-            invoices = invoices_resp.data if isinstance(invoices_resp.data, list) else []
-
-        # Check documentation completeness
-        invoices_with_gst = [i for i in invoices if i.get("gstTotal") or i.get("tax")]
-        invoices_with_client = [i for i in invoices if i.get("clientId")]
-
-        gst_compliance = len(invoices_with_gst) / len(invoices) * 100 if invoices else 0
-        client_records = len(invoices_with_client) / len(invoices) * 100 if invoices else 0
-
-        readiness_score = round((gst_compliance * 0.4 + client_records * 0.6))
-
-        checklist = [
-            {"item": "GST on all invoices", "status": "pass" if gst_compliance > 90 else "fail", "completion": f"{gst_compliance:.0f}%"},
-            {"item": "Client records maintained", "status": "pass" if client_records > 95 else "warn", "completion": f"{client_records:.0f}%"},
-            {"item": "Invoice numbering sequential", "status": "pass", "completion": "100%"},
-            {"item": "Payment records linked", "status": "warn", "completion": "75%"},
-            {"item": "Expense receipts uploaded", "status": "fail", "completion": "45%"},
-        ]
-
+        """Get audit readiness from backend."""
+        audit = await self._backend_get("/api/compliance/audit/readiness", context)
         return {
-            "audit_readiness_score": readiness_score,
-            "status": "ready" if readiness_score >= 80 else "needs_attention",
-            "checklist": checklist,
-            "total_invoices": len(invoices),
-            "recommendations": [
-                "Upload all expense receipts to document management",
-                "Ensure all vendor invoices have GST numbers",
-                "Reconcile payment records with bank statements",
-                "Maintain digital copies of all compliance filings",
-            ],
-            "message": f"Audit Readiness: {readiness_score}/100 — {'Ready for audit' if readiness_score >= 80 else 'Action required before audit'}"
+            **audit,
+            "message": (
+                f"Audit readiness is {audit.get('auditReadinessScore', 0)}/100. "
+                f"{audit.get('message', 'Review the checklist before filing.')}"
+            )
+        }
+
+    async def _handle_tds_obligations(
+        self,
+        params: Dict[str, Any],
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        financial_year = params.get("financial_year")
+        query = f"?{urlencode({'fy': financial_year})}" if financial_year else ""
+        obligations = await self._backend_get(f"/api/compliance/tds/obligations{query}", context)
+        return {
+            **obligations,
+            "message": (
+                f"TDS to deduct is ₹{float(obligations.get('totalTdsToDeduct', 0) or 0):,.0f}. "
+                f"Form 26AS-style credits identified: ₹{float(obligations.get('totalTdsCredits', 0) or 0):,.0f}."
+            )
         }
 
     async def process(
