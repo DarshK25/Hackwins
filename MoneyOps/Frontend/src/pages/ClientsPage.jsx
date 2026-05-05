@@ -82,6 +82,7 @@ export default function ClientsPage() {
     const [formData, setFormData] = useState(INITIAL_FORM);
     const [selectedClient, setSelectedClient] = useState(null);
     const [voiceDraftActive, setVoiceDraftActive] = useState(false);
+    const [voiceDraftMeta, setVoiceDraftMeta] = useState(null);
     const touchedFieldsRef = useRef({});
 
     useEffect(() => {
@@ -111,6 +112,13 @@ export default function ClientsPage() {
         const draft = eventDetail?.draft || {};
         if (!draft || typeof draft !== "object") return;
         setVoiceDraftActive(true);
+        if (eventDetail?.session_id) {
+            setVoiceDraftMeta({
+                session_id: eventDetail.session_id,
+                dialog_id: eventDetail.dialog_id || "client_preview_form",
+                submit_endpoint: eventDetail.submit_endpoint || "/api/v1/voice/dialog-response",
+            });
+        }
         setDialogOpen(true);
         setFormData((prev) => {
             const next = { ...prev };
@@ -136,6 +144,34 @@ export default function ClientsPage() {
     };
 
     useEffect(() => {
+        if (!dialogOpen || !voiceDraftActive || !voiceDraftMeta?.session_id) return;
+        const timeout = setTimeout(async () => {
+            try {
+                await fetch(voiceDraftMeta.submit_endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        session_id: voiceDraftMeta.session_id,
+                        dialog_id: voiceDraftMeta.dialog_id,
+                        fields: {
+                            name: formData.name,
+                            email: formData.email,
+                            phoneNumber: formData.phoneNumber,
+                            company: formData.company,
+                            gstin: formData.gstin,
+                            notes: formData.notes,
+                        },
+                    }),
+                });
+            } catch (error) {
+                console.error("Failed to sync voice client draft", error);
+            }
+        }, 350);
+
+        return () => clearTimeout(timeout);
+    }, [dialogOpen, formData, voiceDraftActive, voiceDraftMeta]);
+
+    useEffect(() => {
         const handleVoiceAction = () => {
             console.log("Refetching clients due to voice action");
             fetchClients();
@@ -143,7 +179,8 @@ export default function ClientsPage() {
         const storedDraft = sessionStorage.getItem("voice_client_draft");
         if (storedDraft) {
             try {
-                applyVoiceClientDraft({ draft: JSON.parse(storedDraft) });
+                const parsedDraft = JSON.parse(storedDraft);
+                applyVoiceClientDraft(parsedDraft?.draft ? parsedDraft : { draft: parsedDraft });
             } catch {}
             sessionStorage.removeItem("voice_client_draft");
         }
@@ -208,6 +245,8 @@ export default function ClientsPage() {
             toast.success("Client created successfully");
             rememberTeamSecurityCode(internalOrgId, formData.teamActionCode);
             setDialogOpen(false);
+            setVoiceDraftActive(false);
+            setVoiceDraftMeta(null);
             setFormData({
                 ...INITIAL_FORM,
                 teamActionCode: getRememberedTeamSecurityCode(internalOrgId),
@@ -403,7 +442,7 @@ export default function ClientsPage() {
                                 </div>
                             </div>
                             <DialogFooter className="border-t border-[#2A2A2A] px-6 py-4 sm:justify-between">
-                                <button className="mo-btn-secondary" onClick={() => setDialogOpen(false)}>Cancel</button>
+                                <button className="mo-btn-secondary" onClick={() => { setDialogOpen(false); setVoiceDraftActive(false); setVoiceDraftMeta(null); }}>Cancel</button>
                                 <button className="mo-btn-primary flex items-center gap-2" onClick={handleCreateClient} disabled={saving}>
                                     {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                                     Create Client

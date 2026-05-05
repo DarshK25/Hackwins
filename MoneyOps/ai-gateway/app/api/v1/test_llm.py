@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.llm.groq_client import groq_client
+from app.llm.multi_provider import llm_client as groq_client
 from app.orchestration.intent_classifier import IntentClassifier
 from app.orchestration.entity_extractor import EntityExtractor
 from app.schemas.intents import Intent

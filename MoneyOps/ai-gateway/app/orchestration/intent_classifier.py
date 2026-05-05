@@ -8,7 +8,7 @@ import time
 import re
 import hashlib
 
-from app.llm.groq_client import groq_client
+from app.llm.multi_provider import llm_client as groq_client
 from app.schemas.intents import (
     Intent,
     IntentClassification,

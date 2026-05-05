@@ -233,12 +233,12 @@ export default function CashflowPage() {
                     <p className="mo-text-secondary mt-1">Monitor and forecast your business cashflow</p>
                 </div>
                 <div className="flex gap-2">
-                    <button className="mo-btn-secondary flex items-center gap-2" disabled>
+                    {/* <button className="mo-btn-secondary flex items-center gap-2" disabled>
                         <Calendar className="h-4 w-4" /> Schedule Payments
                     </button>
                     <button className="mo-btn-primary flex items-center gap-2" onClick={fetchCashFlow}>
                         <TrendingUp className="h-4 w-4" /> Refresh Forecast
-                    </button>
+                    </button> */}
                 </div>
             </div>
 

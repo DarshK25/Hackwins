@@ -227,9 +227,9 @@ export default function AnalyticsPage() {
                     <button onClick={fetchAnalytics} className="mo-btn-secondary flex items-center gap-2">
                         <RefreshCw className="h-4 w-4" /> Refresh
                     </button>
-                    <button className="mo-btn-primary flex items-center gap-2">
+                    {/* <button className="mo-btn-primary flex items-center gap-2">
                         <BarChart3 className="h-4 w-4" /> Export Report
-                    </button>
+                    </button> */}
                 </div>
             </div>
 

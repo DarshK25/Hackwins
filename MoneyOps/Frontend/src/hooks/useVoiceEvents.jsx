@@ -127,7 +127,7 @@ function dispatchUIEvent(event, navigate) {
 
   if (type === "open_invoice_form") {
     try {
-      sessionStorage.setItem("voice_invoice_draft", JSON.stringify(event.draft || {}));
+      sessionStorage.setItem("voice_invoice_draft", JSON.stringify(event));
     } catch {}
     if (event.path) navigate(event.path);
     setTimeout(() => {
@@ -137,7 +137,7 @@ function dispatchUIEvent(event, navigate) {
 
   if (type === "open_client_form") {
     try {
-      sessionStorage.setItem("voice_client_draft", JSON.stringify(event.draft || {}));
+      sessionStorage.setItem("voice_client_draft", JSON.stringify(event));
     } catch {}
     if (event.path) navigate(event.path);
     setTimeout(() => {

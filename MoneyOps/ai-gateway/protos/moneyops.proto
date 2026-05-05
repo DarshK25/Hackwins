@@ -1,0 +1,358 @@
+syntax = "proto3";
+
+package moneyops;
+
+option java_package = "com.moneyops.grpc";
+option java_multiple_files = true;
+
+// ==================== INVOICE SERVICE ====================
+service InvoiceService {
+  rpc GetInvoices(GetInvoicesRequest) returns (GetInvoicesResponse);
+  rpc CreateInvoice(CreateInvoiceRequest) returns (CreateInvoiceResponse);
+  rpc UpdateInvoice(UpdateInvoiceRequest) returns (UpdateInvoiceResponse);
+  rpc MarkPaid(MarkPaidRequest) returns (MarkPaidResponse);
+  rpc GetInvoiceById(GetInvoiceByIdRequest) returns (GetInvoiceByIdResponse);
+}
+
+message GetInvoicesRequest {
+  string org_id = 1;
+  string user_id = 2;
+  string status = 3; // SENT, PAID, OVERDUE
+  int32 limit = 4;
+  int32 offset = 5;
+}
+
+message GetInvoicesResponse {
+  repeated Invoice invoices = 1;
+  int32 total_count = 2;
+}
+
+message CreateInvoiceRequest {
+  string org_id = 1;
+  string user_id = 2;
+  string client_id = 3;
+  string client_name = 4;
+  double total_amount = 5;
+  string due_date = 6; // YYYY-MM-DD
+  string description = 7;
+  string status = 8; // SENT, DRAFT
+}
+
+message CreateInvoiceResponse {
+  bool success = 1;
+  string invoice_id = 2;
+  string error = 3;
+}
+
+message UpdateInvoiceRequest {
+  string invoice_id = 1;
+  string org_id = 2;
+  string status = 3;
+  double total_amount = 4;
+}
+
+message UpdateInvoiceResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message MarkPaidRequest {
+  string invoice_id = 1;
+  string org_id = 2;
+  string user_id = 3;
+  double amount = 4;
+  string description = 5;
+  string payment_date = 6;
+}
+
+message MarkPaidResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message GetInvoiceByIdRequest {
+  string invoice_id = 1;
+  string org_id = 2;
+}
+
+message GetInvoiceByIdResponse {
+  Invoice invoice = 1;
+}
+
+message Invoice {
+  string id = 1;
+  string client_id = 2;
+  string client_name = 3;
+  double total_amount = 4;
+  string due_date = 5;
+  string status = 6; // DRAFT, SENT, PAID, OVERDUE
+  string description = 7;
+  string created_at = 8;
+  string paid_at = 9;
+}
+
+// ==================== COMPLIANCE SERVICE ====================
+service ComplianceService {
+  rpc GetComplianceDeadlines(GetComplianceDeadlinesRequest) returns (GetComplianceDeadlinesResponse);
+  rpc CalculateGST(CalculateGSTRequest) returns (CalculateGSTResponse);
+  rpc GetGSTStatus(GetGSTStatusRequest) returns (GetGSTStatusResponse);
+  rpc ReconcileGST(ReconcileGSTRequest) returns (ReconcileGSTResponse);
+}
+
+message GetComplianceDeadlinesRequest {
+  string org_id = 1;
+  string user_id = 2;
+}
+
+message GetComplianceDeadlinesResponse {
+  repeated ComplianceDeadline deadlines = 1;
+}
+
+message ComplianceDeadline {
+  string name = 1;
+  string due_date = 2;
+  string type = 3; // GST, TDS, INCOME_TAX
+}
+
+message CalculateGSTRequest {
+  double amount = 1;
+  double gst_rate = 2; // 5, 12, 18, 28
+}
+
+message CalculateGSTResponse {
+  double base_amount = 1;
+  double gst_amount = 2;
+  double total_amount = 3;
+  double gst_rate = 4;
+}
+
+message GetGSTStatusRequest {
+  string org_id = 1;
+}
+
+message GetGSTStatusResponse {
+  string status = 1; // ACTIVE, INACTIVE
+  string gstin = 2;
+}
+
+message ReconcileGSTRequest {
+  string org_id = 1;
+  string period = 2; // 2024-01
+}
+
+message ReconcileGSTResponse {
+  bool success = 1;
+  string message = 2;
+  int32 mismatches = 3;
+}
+
+// ==================== COLLECTIONS SERVICE ====================
+service CollectionsService {
+  rpc SendReminders(SendRemindersRequest) returns (SendRemindersResponse);
+  rpc EscalateOverdue(EscalateOverdueRequest) returns (EscalateOverdueResponse);
+  rpc GetAgingReport(GetAgingReportRequest) returns (GetAgingReportResponse);
+  rpc GetCollectionsDashboard(GetCollectionsDashboardRequest) returns (GetCollectionsDashboardResponse);
+}
+
+message SendRemindersRequest {
+  string org_id = 1;
+  string user_id = 2;
+  repeated string invoice_ids = 3; // Empty = all overdue
+  string channel = 4; // WHATSAPP, EMAIL, BOTH
+}
+
+message SendRemindersResponse {
+  int32 reminders_sent = 1;
+  int32 reminders_failed = 2;
+  repeated string failed_invoice_ids = 3;
+}
+
+message EscalateOverdueRequest {
+  string org_id = 1;
+  int32 min_days_overdue = 2; // Default 30
+}
+
+message EscalateOverdueResponse {
+  int32 escalated_count = 1;
+  double total_amount_at_risk = 2;
+  repeated string escalated_invoice_ids = 3;
+}
+
+message GetAgingReportRequest {
+  string org_id = 1;
+}
+
+message GetAgingReportResponse {
+  map<string, int32> aging_buckets = 1; // {"0-30": 5, "31-60": 3, ...}
+  double total_overdue = 2;
+}
+
+message GetCollectionsDashboardRequest {
+  string org_id = 1;
+}
+
+message GetCollectionsDashboardResponse {
+  int32 total_overdue_count = 1;
+  double total_overdue_amount = 2;
+  map<string, int32> aging_buckets = 3;
+  repeated OverdueInvoice overdue_invoices = 4;
+}
+
+message OverdueInvoice {
+  string invoice_id = 1;
+  string client_name = 2;
+  double amount = 3;
+  int32 days_overdue = 4;
+}
+
+// ==================== TReDS SERVICE (Working Capital) ====================
+service TreDSService {
+  rpc GetEligibleInvoices(GetEligibleInvoicesRequest) returns (GetEligibleInvoicesResponse);
+  rpc DiscountInvoice(DiscountInvoiceRequest) returns (DiscountInvoiceResponse);
+  rpc GetDiscountingRates(GetDiscountingRatesRequest) returns (GetDiscountingRatesResponse);
+  rpc GetTReDSStatus(GetTReDSStatusRequest) returns (GetTReDSStatusResponse);
+}
+
+message GetEligibleInvoicesRequest {
+  string org_id = 1;
+  double min_amount = 2; // Minimum invoice amount for discounting
+}
+
+message GetEligibleInvoicesResponse {
+  repeated TreDSInvoice eligible_invoices = 1;
+  double total_eligible_amount = 2;
+}
+
+message TreDSInvoice {
+  string invoice_id = 1;
+  string client_name = 2;
+  double amount = 3;
+  string due_date = 4;
+  int32 days_until_due = 5;
+  double estimated_discount_rate = 6; // Annualized
+}
+
+message DiscountInvoiceRequest {
+  string org_id = 1;
+  string invoice_id = 2;
+  double discount_rate = 3; // Negotiated rate
+}
+
+message DiscountInvoiceResponse {
+  bool success = 1;
+  string transaction_id = 2;
+  double original_amount = 3;
+  double discounted_amount = 4; // Amount received after discount
+  double fee = 5; // Discounting fee
+  string error = 6;
+}
+
+message GetDiscountingRatesRequest {
+  string org_id = 1;
+}
+
+message GetDiscountingRatesResponse {
+  double min_rate = 1; // 8-12% typically
+  double max_rate = 2;
+  string provider = 3; // "TReDS", "RXIL", "M1xchange"
+}
+
+message GetTReDSStatusRequest {
+  string org_id = 1;
+}
+
+message GetTReDSStatusResponse {
+  bool enrolled = 1;
+  string treds_id = 2;
+  double credit_limit = 3;
+  double available_credit = 4;
+}
+
+// ==================== ACCOUNT AGGREGATION SERVICE ====================
+service AccountAggregatorService {
+  rpc GetAccountBalances(GetAccountBalancesRequest) returns (GetAccountBalancesResponse);
+  rpc GetTransactions(GetTransactionsRequest) returns (GetTransactionsResponse);
+  rpc LinkAccount(LinkAccountRequest) returns (LinkAccountResponse);
+}
+
+message GetAccountBalancesRequest {
+  string org_id = 1;
+  repeated string account_ids = 2; // Empty = all accounts
+}
+
+message GetAccountBalancesResponse {
+  repeated AccountBalance balances = 1;
+  double total_balance = 2;
+}
+
+message AccountBalance {
+  string account_id = 1;
+  string bank_name = 2;
+  string account_number_last4 = 3;
+  double balance = 4;
+  string currency = 5; // INR
+  string last_updated = 6;
+}
+
+message GetTransactionsRequest {
+  string org_id = 1;
+  string start_date = 2; // YYYY-MM-DD
+  string end_date = 3;
+  int32 limit = 4;
+}
+
+message GetTransactionsResponse {
+  repeated Transaction transactions = 1;
+}
+
+message Transaction {
+  string transaction_id = 1;
+  string account_id = 2;
+  double amount = 3;
+  string type = 4; // CREDIT, DEBIT
+  string description = 5;
+  string date = 6;
+}
+
+message LinkAccountRequest {
+  string org_id = 1;
+  string bank_name = 2;
+  string account_type = 3; // SAVINGS, CURRENT
+}
+
+message LinkAccountResponse {
+  bool success = 1;
+  string redirect_url = 2; // AA consent flow URL
+  string error = 3;
+}
+
+// ==================== FINANCE METRICS SERVICE ====================
+service FinanceMetricsService {
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+  rpc GetTransactionHistory(GetTransactionHistoryRequest) returns (GetTransactionHistoryResponse);
+}
+
+message GetMetricsRequest {
+  string org_id = 1;
+  string business_id = 2;
+  string user_id = 3;
+}
+
+message GetMetricsResponse {
+  double revenue = 1;
+  double expenses = 2;
+  double net_profit = 3;
+  double cash_balance = 4;
+  double accounts_receivable = 5;
+}
+
+message GetTransactionHistoryRequest {
+  string org_id = 1;
+  string business_id = 2;
+  string user_id = 3;
+  int32 limit = 4;
+}
+
+message GetTransactionHistoryResponse {
+  repeated Transaction transactions = 1;
+}

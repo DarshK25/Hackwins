@@ -36,6 +36,7 @@ from livekit.agents import (
     RoomInputOptions,
     WorkerOptions,
     cli,
+    tts as livekit_tts,
 )
 from livekit.plugins import silero, groq
 
@@ -494,7 +495,7 @@ def _extract_user_context(ctx: JobContext) -> dict:
 
 
 def _create_tts():
-    """Choose the first working TTS provider from explicit provider or fallback order."""
+    """Build a TTS provider, preferring a LiveKit fallback adapter when possible."""
     provider = (settings.TTS_PROVIDER or "auto").strip().lower()
     fallback_order = _provider_order(
         provider,
@@ -502,16 +503,30 @@ def _create_tts():
         default_order=["elevenlabs", "deepgram", "cartesia", "groq"],
     )
 
+    providers = []
     for candidate in fallback_order:
         tts = _build_tts_provider(candidate)
         if tts is not None:
-            logger.info("tts_provider_selected", provider=candidate, fallback_chain=fallback_order)
-            return tts
+            providers.append((candidate, tts))
 
-    raise RuntimeError(
-        "No working TTS provider is configured. "
-        "Set ELEVENLABS_API_KEY, DEEPGRAM_API_KEY, CARTESIA_API_KEY, or enable Groq fallback."
+    if not providers:
+        raise RuntimeError(
+            "No working TTS provider is configured. "
+            "Set ELEVENLABS_API_KEY, DEEPGRAM_API_KEY, CARTESIA_API_KEY, or enable Groq fallback."
+        )
+
+    if len(providers) == 1:
+        selected_provider, selected_tts = providers[0]
+        logger.info("tts_provider_selected", provider=selected_provider, fallback_chain=fallback_order)
+        return selected_tts
+
+    selected_names = [name for name, _ in providers]
+    logger.info(
+        "tts_fallback_adapter_selected",
+        providers=selected_names,
+        fallback_chain=fallback_order,
     )
+    return livekit_tts.FallbackAdapter(tts=[provider_tts for _, provider_tts in providers])
 
 
 def _create_stt():

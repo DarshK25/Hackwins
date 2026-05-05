@@ -180,10 +180,10 @@ async def process_voice(request: VoiceProcessRequest, fastapi_request: Request):
 async def process_voice_dialog_response(request: VoiceDialogResponseRequest):
     try:
         session = session_manager.get_session(request.session_id)
-        draft = dict(session.invoice_draft_data or {})
         fields = dict(request.fields or {})
 
         if request.dialog_id == "invoice_preview_form":
+            draft = dict(session.invoice_draft_data or {})
             if fields.get("client_name"):
                 draft["client_name"] = str(fields.get("client_name")).strip()
             if fields.get("client_id"):
@@ -207,6 +207,40 @@ async def process_voice_dialog_response(request: VoiceDialogResponseRequest):
                 "success": True,
                 "message": "Invoice draft updated. You can keep editing it or continue by voice.",
                 "ui_event": _build_invoice_preview_dialog_ui_event(request.session_id, draft),
+            }
+
+        if request.dialog_id == "client_preview_form":
+            draft = dict(session.client_draft or {})
+            if fields.get("name") is not None:
+                draft["name"] = str(fields.get("name") or "").strip()
+            if fields.get("email") is not None:
+                draft["email"] = str(fields.get("email") or "").strip()
+            phone_value = fields.get("phoneNumber", fields.get("phone"))
+            if phone_value is not None:
+                draft["phone"] = str(phone_value or "").strip()
+            company_value = fields.get("company_name", fields.get("company"))
+            if company_value is not None:
+                draft["company_name"] = str(company_value or "").strip()
+            if fields.get("gstin") is not None:
+                gstin = str(fields.get("gstin") or "").strip().upper()
+                if gstin:
+                    draft["gstin"] = gstin
+                    draft.pop("_gstin_skipped", None)
+                else:
+                    draft.pop("gstin", None)
+            if fields.get("notes") is not None:
+                draft["notes"] = str(fields.get("notes") or "").strip()
+            team_code_value = fields.get("team_code", fields.get("teamActionCode"))
+            if team_code_value is not None:
+                draft["team_code"] = str(team_code_value or "").strip()
+
+            session.client_draft = draft
+            session_manager.save_session(session)
+            from app.agents.moneyops_agent import _build_client_form_ui_event
+            return {
+                "success": True,
+                "message": "Client draft updated. Your typed corrections will be used for the next voice step.",
+                "ui_event": _build_client_form_ui_event(draft),
             }
 
         return {

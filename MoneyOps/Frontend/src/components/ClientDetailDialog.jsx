@@ -199,6 +199,13 @@ export default function ClientDetailDialog({ client, onClose, onUpdate, onDelete
                   onChange={v => setFormData({ ...formData, company: v })} 
                   icon={Building} 
                 />
+                <Field 
+                  label="GSTIN" 
+                  value={formData.gstin} 
+                  edit={isEditMode} 
+                  onChange={v => setFormData({ ...formData, gstin: String(v || '').toUpperCase() })} 
+                  icon={Hash} 
+                />
               </div>
             </Section>
 

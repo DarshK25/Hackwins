@@ -698,6 +698,34 @@ class TestClientCreateVoiceMapping:
         assert items[0]["unit_price"] == 50000
         assert "ac ev charger" in items[0]["description"].lower()
 
+    def test_spoken_invoice_amount_words_are_parsed(self):
+        from app.agents.moneyops_agent import _extract_amount_value
+
+        assert _extract_amount_value("five thousand rupees") == 5000.0
+
+    def test_unknown_company_name_does_not_fuzzy_match_wrong_existing_client(self):
+        from app.agents.moneyops_agent import _best_client_match
+
+        clients = [
+            {"id": "1", "name": "ajay singh", "company": "Ajay Traders"},
+            {"id": "2", "name": "arjun desai", "company": "Prestige Tech Park"},
+            {"id": "3", "name": "vikram nair", "company": "BlueDart Express Limited"},
+        ]
+
+        assert _best_client_match("Vedanta Solutions", clients) is None
+
+    def test_call_prefix_is_treated_as_client_name_hint(self):
+        from app.agents.moneyops_agent import _extract_client_name_for_invoice
+
+        assert _extract_client_name_for_invoice("call Vedanta solutions") == "Vedanta solutions"
+
+    def test_replace_invoice_item_with_phrase_is_parsed(self):
+        from app.agents.moneyops_agent import _extract_invoice_item_replacement_text
+
+        assert _extract_invoice_item_replacement_text(
+            "Replace the invoice item with solar monitoring system setup."
+        ) == "solar monitoring system setup"
+
     def test_invoice_items_text_parser_supports_preview_dialog_format(self):
         from app.agents.moneyops_agent import _parse_invoice_items_text
 

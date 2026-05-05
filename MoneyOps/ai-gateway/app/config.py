@@ -33,11 +33,14 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8001
 
-    # LLM Providers
+    # LLM Providers (Multi-provider support)
     GROQ_API_KEY: str
     GROQ_API_KEY_FAST: Optional[str] = None
     GROQ_API_KEY_FALLBACK_1: Optional[str] = None
     GROQ_API_KEY_FALLBACK_2: Optional[str] = None
+    CEREBRAS_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
+    GITHUB_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
     TAVILY_API_KEY: Optional[str] = None
     NEWS_API_KEY: Optional[str] = None

@@ -123,6 +123,214 @@ def test_finance_agent_parses_multi_item_invoice_text():
     assert items[1]["quantity"] is None
 
 
+def test_client_draft_accepts_gstin_skip_and_explicit_override():
+    from app.agents.moneyops_agent import _merge_client_draft_from_text
+
+    skipped = _merge_client_draft_from_text(
+        "not registered",
+        {"name": "J Singh", "company_name": "Solar Nest Infra Private Limited", "_pending_field": "gstin"},
+    )
+    corrected = _merge_client_draft_from_text(
+        "Solar Nestcom Private Limited",
+        {"company_name": "Solar Nest Infra Private Limited", "_pending_field": "company_name"},
+    )
+
+    assert skipped.get("_gstin_skipped") is True
+    assert corrected.get("company_name") == "Solar Nestcom Private Limited"
+
+
+@pytest.mark.asyncio
+async def test_create_client_prompts_for_gstin_before_team_code():
+    from app.agents.moneyops_agent import AgentSession, execute_tool
+
+    session = AgentSession(session_id="sess-gstin", user_id="user-1", org_uuid="org-1")
+    result = await execute_tool(
+        "create_client",
+        '{"name":"J Singh","company_name":"Solar Nest Infra Private Limited","email":"j@solarnest.com","phone":"9876543210"}',
+        session,
+        {"org_id": "org-1", "business_id": "1"},
+        backend=None,
+    )
+
+    assert result["status"] == "validation_error"
+    assert result["missing_field"] == "gstin"
+
+
+@pytest.mark.asyncio
+async def test_create_invoice_ignores_hallucinated_team_code_on_due_date_turn():
+    from app.agents.moneyops_agent import AgentSession, execute_tool
+
+    class FakeBackend:
+        async def get(self, endpoint, org_id=None, user_id=None, headers=None):
+            assert endpoint == "/api/clients?limit=200"
+            return [{"id": "client-1", "name": "Ajay Singh"}]
+
+        async def post(self, *args, **kwargs):
+            raise AssertionError("create_invoice should not call backend when team code was not actually provided")
+
+    session = AgentSession(
+        session_id="sess-team-guard",
+        user_id="user-1",
+        org_uuid="org-1",
+        pending_invoice={
+            "client_name": "Ajay Singh",
+            "line_items": [{"description": "Solar setup", "unit_price": 29500}],
+        },
+        current_user_text="20th may",
+    )
+
+    result = await execute_tool(
+        "create_invoice",
+        '{"client_name":"Ajay Singh","due_date":"2026-05-20","line_items":[{"description":"Solar setup","unit_price":29500}],"team_code":"VNES001"}',
+        session,
+        {"org_id": "org-1", "business_id": "1"},
+        backend=FakeBackend(),
+    )
+
+    assert result["status"] == "validation_error"
+    assert result["missing_field"] == "team_code"
+
+
+def test_invoice_draft_reuses_last_client_for_same_client_phrase():
+    from app.agents.moneyops_agent import _merge_invoice_draft_from_text
+
+    draft = _merge_invoice_draft_from_text(
+        "create an invoice for the same client",
+        {"_last_client_name": "J Singh"},
+    )
+
+    assert draft.get("client_name") == "J Singh"
+
+
+def test_invoice_draft_keeps_bare_service_description_for_followup_amount():
+    from app.agents.moneyops_agent import _merge_invoice_draft_from_text
+
+    draft = _merge_invoice_draft_from_text(
+        "solar monitoring system setup",
+        {"client_name": "J Singh"},
+    )
+
+    assert draft.get("_pending_line_item_description") == "Solar monitoring system setup"
+
+
+def test_invoice_draft_preserves_pending_description_for_add_this_item_followup():
+    from app.agents.moneyops_agent import _merge_invoice_draft_from_text
+
+    draft = _merge_invoice_draft_from_text(
+        "add this as item of the invoice",
+        {
+            "client_name": "J Singh",
+            "_pending_line_item_description": "Solar monitoring system setup",
+        },
+    )
+
+    assert draft.get("_pending_line_item_description") == "Solar monitoring system setup"
+
+
+def test_invoice_description_strips_sentence_scaffolding():
+    from app.agents.moneyops_agent import _extract_invoice_service_description, _clean_invoice_item_followup_text
+
+    extracted = _extract_invoice_service_description(
+        "and invoice item as setup and deployment of solar energy monitoring dashboard"
+    )
+    cleaned = _clean_invoice_item_followup_text("as iot sensor calibration and site audit")
+
+    assert extracted == "Setup and deployment of solar energy monitoring dashboard"
+    assert cleaned == "iot sensor calibration and site audit"
+
+
+def test_due_date_prompt_fragment_is_not_treated_as_description():
+    from app.agents.moneyops_agent import _merge_invoice_draft_from_text
+
+    draft = _merge_invoice_draft_from_text(
+        "the payment due date is",
+        {"client_name": "Client Alpha"},
+    )
+
+    assert draft.get("_pending_line_item_description") is None
+
+
+def test_create_invoice_query_accepts_a_invoice_grammar_and_trailing_for():
+    from app.agents.moneyops_agent import _is_create_invoice_query
+
+    assert _is_create_invoice_query("i'd like to create a invoice for")
+    assert _is_create_invoice_query("create a invoice")
+
+
+def test_session_context_does_not_answer_top_client_for_invoice_request():
+    from app.agents.moneyops_agent import AgentSession, _answer_from_session_context
+
+    session = AgentSession(
+        session_id="sess-invoice-guard",
+        user_id="user-1",
+        org_uuid="org-1",
+        last_client_results=[
+            {
+                "name": "Client Alpha",
+                "company": "Example Logistics Private Limited",
+                "total_revenue_inr": 849600,
+            }
+        ],
+    )
+
+    answer = _answer_from_session_context("i'd like to create a invoice for", session)
+
+    assert answer is None
+
+
+@pytest.mark.asyncio
+async def test_send_invoice_email_uses_invoice_send_endpoint():
+    from app.agents.moneyops_agent import AgentSession, execute_tool
+
+    class FakeSendResponse:
+        success = True
+        error = None
+
+    class FakeBackend:
+        def __init__(self):
+            self.patch_calls = []
+
+        async def get(self, endpoint, org_id=None, user_id=None, headers=None):
+            assert endpoint == "/api/invoices?limit=100"
+            return [
+                {
+                    "id": "inv-1",
+                    "invoiceNumber": "INV-001",
+                    "clientName": "Ajay Singh",
+                    "clientEmail": "ajay@example.com",
+                    "status": "DRAFT",
+                    "totalAmount": 29500,
+                }
+            ]
+
+        async def _request(self, method, endpoint, data=None, params=None, headers=None, org_id=None, user_id=None):
+            self.patch_calls.append((method, endpoint, headers, org_id, user_id))
+            return FakeSendResponse()
+
+    backend = FakeBackend()
+    session = AgentSession(
+        session_id="sess-send",
+        user_id="user-1",
+        org_uuid="org-1",
+        verified_team_code="1234",
+        last_invoice_mentioned="INV-001",
+        current_user_text="send the invoice now",
+    )
+
+    result = await execute_tool(
+        "send_invoice_email",
+        '{"client_name":"Ajay Singh","invoice_number":"INV-001"}',
+        session,
+        {"org_id": "org-1", "business_id": "1"},
+        backend=backend,
+    )
+
+    assert result["status"] == "sent"
+    assert backend.patch_calls == [
+        ("PATCH", "/api/invoices/inv-1/send", {"X-Team-Code": "1234", "X-Org-Id": "org-1"}, "org-1", "user-1")
+    ]
+
+
 @pytest.mark.asyncio
 async def test_business_context_avoids_not_set_placeholders(monkeypatch):
     agent = IntelligentAgent()

@@ -1,15 +1,13 @@
 """
 Voice processor for the live voice path.
-Builds a persistent AgentSession and delegates reasoning to moneyops_agent.
+Uses intelligent_orchestrator for processing voice input.
 """
-
 import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from app.adapters.backend_adapter import get_backend_adapter, normalize_business_id
-from app.agents.moneyops_agent import AgentSession, process as agent_process
-from app.config import settings
+from app.agents.intelligent_orchestrator import intelligent_agent
 from app.state.session_manager import session_manager
 from app.utils.logger import get_logger
 
@@ -68,85 +66,50 @@ class VoiceProcessor:
             if context.history:
                 session_record.history = _sanitize_history_messages(context.history[-20:])
 
-            session = AgentSession(
-                session_id=context.session_id,
-                user_id=context.user_id,
-                org_uuid=context.org_uuid,
-                business_id=normalize_business_id(context.business_id),
-                clerk_org_id=context.clerk_org_id,
-                history=_sanitize_history_messages(list(session_record.history or [])),
-                pending_invoice=(
-                    dict(session_record.invoice_draft_data)
-                    if session_record.invoice_draft_data is not None
-                    else (session_record.invoice_draft.model_dump() if session_record.invoice_draft else None)
-                ),
-                pending_client=(dict(session_record.client_draft) if session_record.client_draft is not None else None),
-                pending_expense=dict(session_record.expense_draft or {}) or None,
-                pending_payment=dict(session_record.payment_draft or {}) or None,
-                verified_team_code=session_record.verified_team_code,
-                team_code_attempts=session_record.team_code_attempts,
-                business_snapshot=session_record.last_business_profile,
-                client_cache=list(session_record.client_cache or []) or None,
-                last_tool_called=session_record.last_tool,
-                last_client_mentioned=session_record.last_client_mentioned,
-                last_invoice_mentioned=session_record.last_invoice_mentioned,
-                last_invoice_results=list(session_record.last_invoice_results or []) or None,
-                last_client_results=list(session_record.last_client_results or []) or None,
-                last_market_query=session_record.last_market_query,
-                last_market_results=list(session_record.last_market_results or []) or None,
-                last_response_context=session_record.last_response_context,
-            )
-
-            org_context = {
+            # Build context for intelligent_agent
+            agent_context = {
+                "session_id": context.session_id,
                 "org_id": context.org_uuid,
+                "org_uuid": context.org_uuid,
+                "user_id": context.user_id,
                 "business_id": normalize_business_id(context.business_id),
             }
-            try:
-                org_profile = await self.backend.get_my_organization(context.user_id)
-                if org_profile.success and org_profile.data:
-                    org_context["business"] = org_profile.data
-            except Exception as exc:
-                logger.warning("voice_org_context_fetch_failed", session_id=context.session_id, error=str(exc))
 
-            result = await agent_process(
-                text=text,
-                session=session,
-                org_context=org_context,
-                groq_key=settings.GROQ_API_KEY,
-                backend=self.backend,
-                is_voice=True,
+            # Get conversation history
+            conversation_history = list(session_record.history or [])
+
+            # Process with intelligent_agent
+            result = await intelligent_agent.process(
+                user_message=text,
+                context=agent_context,
+                conversation_history=conversation_history,
             )
 
-            session_record.history = _sanitize_history_messages(session.history[-20:])
-            session_record.last_tool = session.last_tool_called
-            session_record.last_business_profile = session.business_snapshot
-            session_record.invoice_draft_data = (
-                dict(session.pending_invoice) if session.pending_invoice is not None else None
-            )
-            session_record.client_draft = (
-                dict(session.pending_client) if session.pending_client is not None else None
-            )
-            session_record.expense_draft = dict(session.pending_expense or {})
-            session_record.payment_draft = dict(session.pending_payment or {})
-            session_record.verified_team_code = session.verified_team_code
-            session_record.team_code_attempts = session.team_code_attempts
-            session_record.client_cache = list(session.client_cache or [])
-            session_record.last_client_mentioned = session.last_client_mentioned
-            session_record.last_invoice_mentioned = session.last_invoice_mentioned
-            session_record.last_invoice_results = list(session.last_invoice_results or [])
-            session_record.last_client_results = list(session.last_client_results or [])
-            session_record.last_market_query = session.last_market_query
-            session_record.last_market_results = list(session.last_market_results or [])
-            session_record.last_response_context = session.last_response_context
+            # Update session history
+            session_record.history.append({"role": "user", "content": text})
+            response_text = result.get("message", "")
+            session_record.history.append({"role": "assistant", "content": response_text})
+
+            if len(session_record.history) > 20:
+                session_record.history = session_record.history[-20:]
+
             session_manager.save_session(session_record)
 
         logger.info(
             "voice_process_complete",
             session_id=context.session_id,
             success=result.get("success", False),
-            tool_called=result.get("tool_called"),
+            agent_type=result.get("agent_type"),
         )
-        return result
+
+        return {
+            "response_text": response_text,
+            "raw_response": response_text,
+            "intent": "INTELLIGENT_QUERY",
+            "success": result.get("success", True),
+            "session_id": context.session_id,
+            "agent_type": result.get("agent_type"),
+        }
 
 
 voice_processor = VoiceProcessor()

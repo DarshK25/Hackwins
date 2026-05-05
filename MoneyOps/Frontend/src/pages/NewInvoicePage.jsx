@@ -141,7 +141,8 @@ export default function NewInvoicePage() {
         const storedDraft = sessionStorage.getItem("voice_invoice_draft");
         if (storedDraft) {
             try {
-                applyVoiceInvoiceDraft({ draft: JSON.parse(storedDraft) });
+                const parsedDraft = JSON.parse(storedDraft);
+                applyVoiceInvoiceDraft(parsedDraft?.draft ? parsedDraft : { draft: parsedDraft });
             } catch {}
             sessionStorage.removeItem("voice_invoice_draft");
         }

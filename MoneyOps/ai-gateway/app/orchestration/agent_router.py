@@ -33,17 +33,6 @@ class AgentRouter:
         # Finance Agent (MVP)
         if feature_flags.ENABLE_FINANCE_AGENT:
             self._agents[AgentType.FINANCE_AGENT] = finance_agent
-        
-        # Other agents (v2.0 - stubs for now)
-        if feature_flags.ENABLE_SALES_AGENT:
-            # self._agents[AgentType.SALES_AGENT] = sales_agent
-            pass
-        
-        if feature_flags.ENABLE_STRATEGY_AGENT:
-            # self._agents[AgentType.STRATEGY_AGENT] = strategy_agent
-            pass
-        
-        # ... other agents
     
     def get_agent(self, agent_type: AgentType) -> Optional[BaseAgent]:
         """Get an agent by type"""

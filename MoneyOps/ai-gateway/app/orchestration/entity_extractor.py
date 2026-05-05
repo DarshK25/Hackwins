@@ -7,7 +7,7 @@ import re
 from decimal import Decimal
 
 from datetime import datetime
-from app.llm.groq_client import groq_client
+from app.llm.multi_provider import llm_client as groq_client
 from app.utils.logger import get_logger
 from app.schemas.entities import (
     Entity,
