@@ -8,6 +8,7 @@ import httpx
 import re
 import datetime
 import time
+import json
 from urllib.parse import urlsplit, parse_qsl
 from pydantic import BaseModel, Field, field_validator
 from rapidfuzz import process, fuzz
@@ -16,6 +17,21 @@ from app.config import settings
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Conditionally import gRPC client
+if settings.GRPC_ENABLED:
+    from app.adapters.grpc_client import grpc_client
+    logger.info("gRPC client enabled for backend adapter")
+else:
+    grpc_client = None
+
+# Conditionally import Redis for caching
+try:
+    from app.integrations.redis_client import get_redis, cache_get, cache_set, cache_delete
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    logger.warning("Redis not available, using in-memory cache")
 
 
 def normalize_business_id(business_id: Optional[Any], default: str = "1") -> str:
@@ -73,16 +89,30 @@ class BackendHttpAdapter:
             base_url=self.base_url, timeout=self.timeout, headers=default_headers
         )
 
-        self._onboarding_cache: Dict[str, tuple[bool, float]] = {}
-        self._org_uuid_cache: Dict[str, str] = {}
-        self._ONBOARDING_TTL = 300
+        # Use Redis for caching if available, otherwise fallback to in-memory
+        self._use_redis_cache = REDIS_AVAILABLE and settings.REDIS_HOST
+        if not self._use_redis_cache:
+            self._onboarding_cache: Dict[str, tuple[bool, float]] = {}
+            self._org_uuid_cache: Dict[str, str] = {}
+            self._ONBOARDING_TTL = 300
 
-        logger.info("backend_adapter_initialized", base_url=self.base_url)
+        logger.info("backend_adapter_initialized", base_url=self.base_url, redis_cache=self._use_redis_cache)
 
     async def resolve_org_uuid(self, clerk_id: str) -> Optional[str]:
         if not clerk_id or clerk_id == "unknown":
             return None
-        if clerk_id in self._org_uuid_cache:
+
+        # Try Redis cache first
+        if self._use_redis_cache:
+            try:
+                r = await get_redis()
+                cache_key = f"org_uuid:{clerk_id}"
+                cached = await r.get(cache_key)
+                if cached:
+                    return cached
+            except Exception as e:
+                logger.warning("redis_cache_get_failed", key=cache_key, error=str(e))
+        elif clerk_id in self._org_uuid_cache:
             return self._org_uuid_cache[clerk_id]
 
         resp = await self.get_onboarding_status(clerk_id)
@@ -96,7 +126,15 @@ class BackendHttpAdapter:
                 data.get("orgId") or data.get("orgUuid") or data.get("organizationId")
             )
             if org_uuid:
-                self._org_uuid_cache[clerk_id] = org_uuid
+                # Cache in Redis or in-memory
+                if self._use_redis_cache:
+                    try:
+                        r = await get_redis()
+                        await r.setex(f"org_uuid:{clerk_id}", 300, org_uuid)
+                    except Exception as e:
+                        logger.warning("redis_cache_set_failed", error=str(e))
+                else:
+                    self._org_uuid_cache[clerk_id] = org_uuid
                 return org_uuid
         return None
 
@@ -170,7 +208,18 @@ class BackendHttpAdapter:
             return BackendResponse(success=False, error=str(e), status_code=500)
 
     async def get_onboarding_status(self, clerk_id: str) -> BackendResponse:
-        if clerk_id in self._onboarding_cache:
+        # Try Redis cache first for onboarding status
+        if self._use_redis_cache:
+            try:
+                r = await get_redis()
+                cache_key = f"onboarding:{clerk_id}"
+                cached_data = await r.get(cache_key)
+                if cached_data:
+                    data = json.loads(cached_data)
+                    return BackendResponse(success=True, data=data, status_code=200)
+            except Exception as e:
+                logger.warning("redis_cache_get_failed", key=cache_key, error=str(e))
+        elif clerk_id in self._onboarding_cache:
             cached_data, ts = self._onboarding_cache[clerk_id]
             if time.time() - ts < self._ONBOARDING_TTL:
                 return BackendResponse(success=True, data=cached_data, status_code=200)
@@ -188,7 +237,14 @@ class BackendHttpAdapter:
                 data.get("onboardingComplete", False) or data.get("orgId") is not None
             )
             # Cache the FULL data (including orgId) not just the boolean
-            self._onboarding_cache[clerk_id] = (data, time.time())
+            if self._use_redis_cache:
+                try:
+                    r = await get_redis()
+                    await r.setex(f"onboarding:{clerk_id}", 300, json.dumps(data))
+                except Exception as e:
+                    logger.warning("redis_cache_set_failed", error=str(e))
+            else:
+                self._onboarding_cache[clerk_id] = (data, time.time())
             resp.data = data
         return resp
 
@@ -205,6 +261,20 @@ class BackendHttpAdapter:
     async def create_invoice_direct(
         self, org_id: str, user_id: str, payload: Dict[str, Any]
     ) -> BackendResponse:
+        # Use gRPC if enabled
+        if settings.GRPC_ENABLED and grpc_client:
+            try:
+                result = await grpc_client.create_invoice(org_id, payload)
+                return BackendResponse(
+                    success=result.get("success", False),
+                    data=result.get("data"),
+                    error=result.get("error"),
+                    status_code=200 if result.get("success") else 500,
+                )
+            except Exception as e:
+                logger.error("grpc_create_invoice_error", org_id=org_id, error=str(e))
+                # Fall through to HTTP
+
         return await self._request(
             "POST", "/api/invoices", data=payload, org_id=org_id, user_id=user_id
         )
@@ -245,6 +315,20 @@ class BackendHttpAdapter:
         status: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> BackendResponse:
+        # Use gRPC if enabled
+        if settings.GRPC_ENABLED and grpc_client:
+            try:
+                result = await grpc_client.get_invoices(org_id, status)
+                return BackendResponse(
+                    success=result.get("success", False),
+                    data=result.get("data"),
+                    error=result.get("error"),
+                    status_code=200 if result.get("success") else 500,
+                )
+            except Exception as e:
+                logger.error("grpc_get_invoices_error", org_id=org_id, error=str(e))
+                # Fall through to HTTP
+
         params = {"limit": limit}
         if status:
             params["status"] = status
@@ -275,6 +359,30 @@ class BackendHttpAdapter:
         user_id: Optional[str] = None,
         tone: str = "gentle",
     ) -> dict:
+        # Use gRPC if enabled
+        if settings.GRPC_ENABLED and grpc_client:
+            try:
+                result = await grpc_client.send_collection_email(
+                    invoice_id=invoice_id,
+                    client_email=client_email,
+                    client_name=client_name,
+                    invoice_number=invoice_number,
+                    amount=amount,
+                    due_date=due_date,
+                    org_id=org_id,
+                    tone=tone,
+                )
+                return {
+                    "sent": result.get("success", False),
+                    "recipient": client_email,
+                    "status_code": 200 if result.get("success") else 500,
+                    "error": result.get("error"),
+                    "source": "grpc",
+                }
+            except Exception as e:
+                logger.error("grpc_send_email_error", invoice_id=invoice_id, error=str(e))
+                # Fall through to HTTP
+
         payload = {
             "type": "PAYMENT_REMINDER",
             "recipientEmail": client_email,
@@ -300,6 +408,7 @@ class BackendHttpAdapter:
             "recipient": client_email,
             "status_code": resp.status_code,
             "error": resp.error,
+            "source": "http",
         }
 
     async def get_financial_summary(

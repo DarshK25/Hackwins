@@ -1,0 +1,278 @@
+syntax = "proto3";
+
+package moneyops;
+
+option java_package = "com.moneyops.grpc";
+option java_multiple_files = true;
+
+// ==================== Common Messages ====================
+
+message Empty {}
+
+message ErrorResponse {
+  string code = 1;
+  string message = 2;
+}
+
+message PaginationRequest {
+  int32 page = 1;
+  int32 limit = 2;
+}
+
+message PaginationResponse {
+  int32 page = 1;
+  int32 limit = 2;
+  int32 total = 3;
+}
+
+// ==================== Organization Messages ====================
+
+message OrgIdRequest {
+  string org_id = 1;
+}
+
+message ClerkIdRequest {
+  string clerk_id = 1;
+}
+
+message Organization {
+  string id = 1;
+  string name = 2;
+  string clerk_id = 3;
+  string gst_number = 4;
+  string status = 5;
+  string created_at = 6;
+}
+
+message OnboardingStatus {
+  bool onboarding_complete = 1;
+  string org_id = 2;
+  string org_uuid = 3;
+  string organization_id = 4;
+}
+
+message GetOnboardingStatusResponse {
+  bool success = 1;
+  OnboardingStatus data = 2;
+  ErrorResponse error = 3;
+}
+
+message GetOrganizationResponse {
+  bool success = 1;
+  Organization data = 2;
+  ErrorResponse error = 3;
+}
+
+// ==================== Client Messages ====================
+
+message Client {
+  string id = 1;
+  string display_name = 2;
+  string backend_name = 3;
+  string email = 4;
+  string status = 5;
+  string org_id = 6;
+}
+
+message GetClientsRequest {
+  string org_id = 1;
+  int32 limit = 2;
+}
+
+message GetClientsResponse {
+  bool success = 1;
+  repeated Client clients = 2;
+  ErrorResponse error = 3;
+}
+
+message CreateClientRequest {
+  string org_id = 1;
+  string name = 2;
+  string email = 3;
+  string phone = 4;
+  string gst_number = 5;
+}
+
+message CreateClientResponse {
+  bool success = 1;
+  Client client = 2;
+  ErrorResponse error = 3;
+}
+
+// ==================== Invoice Messages ====================
+
+enum InvoiceStatus {
+  INVOICE_STATUS_UNSPECIFIED = 0;
+  DRAFT = 1;
+  SENT = 2;
+  OVERDUE = 3;
+  PAID = 4;
+  CANCELLED = 5;
+}
+
+message InvoiceItem {
+  string description = 1;
+  double quantity = 2;
+  double unit_price = 3;
+  double amount = 4;
+}
+
+message Invoice {
+  string id = 1;
+  string invoice_number = 2;
+  string client_id = 3;
+  string org_id = 4;
+  double total_amount = 5;
+  string status = 6;
+  string due_date = 7;
+  string created_at = 8;
+  string description = 9;
+  repeated InvoiceItem items = 10;
+}
+
+message GetInvoicesRequest {
+  string org_id = 1;
+  InvoiceStatus status = 2;
+  int32 limit = 3;
+}
+
+message GetInvoicesResponse {
+  bool success = 1;
+  repeated Invoice invoices = 2;
+  ErrorResponse error = 3;
+}
+
+message GetInvoiceRequest {
+  string invoice_id = 1;
+  string org_id = 2;
+}
+
+message GetInvoiceResponse {
+  bool success = 1;
+  Invoice invoice = 2;
+  ErrorResponse error = 3;
+}
+
+message CreateInvoiceRequest {
+  string org_id = 1;
+  string client_id = 2;
+  double total_amount = 3;
+  string due_date = 4;
+  string description = 5;
+  repeated InvoiceItem items = 6;
+}
+
+message CreateInvoiceResponse {
+  bool success = 1;
+  Invoice invoice = 2;
+  ErrorResponse error = 3;
+}
+
+message MarkPaidRequest {
+  string invoice_id = 1;
+  string org_id = 2;
+  double amount = 3;
+  string description = 4;
+  string payment_date = 5;
+}
+
+message MarkPaidResponse {
+  bool success = 1;
+  Invoice invoice = 2;
+  ErrorResponse error = 3;
+}
+
+// ==================== Finance Messages ====================
+
+message FinanceMetricsRequest {
+  string org_id = 1;
+  string business_id = 2;
+}
+
+message FinanceMetrics {
+  double total_revenue = 1;
+  double total_expenses = 2;
+  double net_profit = 3;
+  double cash_balance = 4;
+  int32 outstanding_invoices = 5;
+  double outstanding_amount = 6;
+}
+
+message GetFinanceMetricsResponse {
+  bool success = 1;
+  FinanceMetrics data = 2;
+  ErrorResponse error = 3;
+}
+
+message FinancialSummaryRequest {
+  string org_id = 1;
+}
+
+message Transaction {
+  string id = 1;
+  string type = 2;
+  double amount = 3;
+  string description = 4;
+  string date = 5;
+  string category = 6;
+}
+
+message FinancialSummary {
+  double total_income = 1;
+  double total_expense = 2;
+  repeated Transaction recent_transactions = 3;
+}
+
+message GetFinancialSummaryResponse {
+  bool success = 1;
+  FinancialSummary data = 2;
+  ErrorResponse error = 3;
+}
+
+// ==================== Notification Messages ====================
+
+message SendCollectionEmailRequest {
+  string invoice_id = 1;
+  string client_email = 2;
+  string client_name = 3;
+  string invoice_number = 4;
+  double amount = 5;
+  string due_date = 6;
+  string org_id = 7;
+  string tone = 8;
+}
+
+message SendCollectionEmailResponse {
+  bool success = 1;
+  bool sent = 2;
+  string recipient = 3;
+  ErrorResponse error = 4;
+}
+
+// ==================== Service Definitions ====================
+
+service OrganizationService {
+  rpc GetOnboardingStatus(ClerkIdRequest) returns (GetOnboardingStatusResponse);
+  rpc GetOrganization(OrgIdRequest) returns (GetOrganizationResponse);
+}
+
+service ClientService {
+  rpc GetClients(GetClientsRequest) returns (GetClientsResponse);
+  rpc CreateClient(CreateClientRequest) returns (CreateClientResponse);
+}
+
+service InvoiceService {
+  rpc GetInvoices(GetInvoicesRequest) returns (GetInvoicesResponse);
+  rpc GetInvoice(GetInvoiceRequest) returns (GetInvoiceResponse);
+  rpc CreateInvoice(CreateInvoiceRequest) returns (CreateInvoiceResponse);
+  rpc MarkPaid(MarkPaidRequest) returns (MarkPaidResponse);
+}
+
+service FinanceService {
+  rpc GetFinanceMetrics(FinanceMetricsRequest) returns (GetFinanceMetricsResponse);
+  rpc GetFinancialSummary(FinancialSummaryRequest) returns (GetFinancialSummaryResponse);
+}
+
+service NotificationService {
+  rpc SendCollectionEmail(SendCollectionEmailRequest) returns (SendCollectionEmailResponse);
+}

@@ -484,3 +484,51 @@ def extract_json(content: str) -> str:
 
 # Singleton instance
 llm_client = MultiProviderClient()
+
+
+def get_langchain_llm(provider: str = "groq"):
+    """Get a LangChain-compatible LLM for LangGraph.
+
+    Returns a LangChain ChatModel that can be used with bind_tools().
+    """
+    return llm_client.get_langchain_llm(provider)
+
+
+# Add method to MultiProviderClient
+def _add_langchain_method():
+    import langchain_groq
+    import langchain_anthropic
+    from langchain_openai import ChatOpenAI
+
+    def get_langchain_llm(self, provider: str = "groq"):
+        """Get LangChain-compatible LLM for LangGraph."""
+        if provider == "groq" and "groq" in self.providers:
+            return langchain_groq.ChatGroq(
+                api_key=self.providers["groq"]["api_key"],
+                model_name=self.providers["groq"]["model"],
+                temperature=0.3,
+                max_tokens=2000,
+            )
+        elif provider == "anthropic" and "anthropic" in self.providers:
+            return langchain_anthropic.ChatAnthropic(
+                api_key=self.providers["anthropic"]["api_key"],
+                model="claude-3-5-sonnet-20241022",
+                temperature=0.3,
+                max_tokens=2000,
+            )
+        else:
+            # Default to Groq
+            if "groq" in self.providers:
+                return langchain_groq.ChatGroq(
+                    api_key=self.providers["groq"]["api_key"],
+                    model_name=self.providers["groq"]["model"],
+                    temperature=0.3,
+                )
+            raise ValueError("No LLM provider available for LangChain")
+
+    # Add method to class
+    MultiProviderClient.get_langchain_llm = get_langchain_llm
+
+
+_add_langchain_method()
+

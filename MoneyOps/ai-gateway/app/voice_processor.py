@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from app.adapters.backend_adapter import get_backend_adapter, normalize_business_id
-from app.agents.intelligent_orchestrator import intelligent_agent
+from app.agents.master_orchestrator import master_orchestrator
 from app.state.session_manager import session_manager
 from app.utils.logger import get_logger
 
@@ -66,7 +66,7 @@ class VoiceProcessor:
             if context.history:
                 session_record.history = _sanitize_history_messages(context.history[-20:])
 
-            # Build context for intelligent_agent
+            # Build context for master_orchestrator
             agent_context = {
                 "session_id": context.session_id,
                 "org_id": context.org_uuid,
@@ -78,8 +78,8 @@ class VoiceProcessor:
             # Get conversation history
             conversation_history = list(session_record.history or [])
 
-            # Process with intelligent_agent
-            result = await intelligent_agent.process(
+            # Process with master_orchestrator (TRUE executor-based agent)
+            result = await master_orchestrator.process(
                 user_message=text,
                 context=agent_context,
                 conversation_history=conversation_history,

@@ -22,7 +22,7 @@ class FeatureFlags(BaseSettings):
     # === STRATEGIC FEATURES (Disabled for MVP, enable in v2.0) ===
     ENABLE_HEALTH_SCORING: bool = False          # Business health /100
     ENABLE_STRATEGIC_RECOMMENDATIONS: bool = False  # AI recommendations
-    ENABLE_COMPETITOR_ANALYSIS: bool = False     # Market intelligence
+    ENABLE_COMPETITOR_ANALYSIS: bool = False     # Market intelligence - VANITY
     ENABLE_ML_FORECASTING: bool = False          # Revenue/sales forecasting
     ENABLE_MULTI_AGENT_ORCHESTRATION: bool = False  # Complex multi-agent workflows
     ENABLE_CUSTOMER_CHURN_PREDICTION: bool = False  # ML-based churn

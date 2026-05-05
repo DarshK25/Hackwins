@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     # Shared secret for service-to-service auth (AI-Gateway → Spring Boot backend)
     INTERNAL_SERVICE_TOKEN: str = "moneyops-internal-ai-gateway-service-secret-2024"
 
+    # gRPC Settings
+    GRPC_ENABLED: bool = False  # Set to True to use gRPC instead of HTTP
+    GRPC_SERVER_HOST: str = "127.0.0.1"
+    GRPC_SERVER_PORT: int = 50051
+    GRPC_CLIENT_HOST: str = "127.0.0.1"
+    GRPC_CLIENT_PORT: int = 50051
+
     @model_validator(mode="after")
     def validate_service_token(self) -> "Settings":
         import os

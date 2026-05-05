@@ -2,13 +2,19 @@
 gRPC Client for MoneyOps.
 Replaces HTTP calls in backend_adapter.py with low-latency gRPC.
 """
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 import grpc
 import asyncio
-from concurrent import futures
 
-# Will generate from .proto files
-# from app.grpc.gen import invoices_pb2, invoices_pb2_grpc
+# Import generated gRPC stubs
+from app.grpc.gen import moneyops_pb2, moneyops_pb2_grpc
+from app.grpc.gen.moneyops_pb2 import (  # noqa: F401
+    GetInvoicesRequest,
+    CreateInvoiceRequest,
+    MarkPaidRequest,
+    InvoiceItem as GrpcInvoiceItem,
+    InvoiceStatus,
+)
 
 
 class GRPCClient:
@@ -44,20 +50,53 @@ class GRPCClient:
         Replaces HTTP call in backend_adapter.py
         """
         try:
-            # TODO: Import generated stubs after .proto compilation
-            # stub = invoices_pb2_grpc.InvoiceServiceStub(self.channel)
-            # request = invoices_pb2.GetInvoicesRequest(
-            #     org_id=org_id,
-            #     status=status or ""
-            # )
-            # response = await stub.GetInvoices(request, timeout=30)
-            
-            # Placeholder - returns structure matching HTTP response
-            return {
-                "success": True,
-                "data": [],  # Will be populated from gRPC response
-                "source": "grpc",
-            }
+            stub = moneyops_pb2_grpc.InvoiceServiceStub(self.channel)
+
+            # Map status string to enum
+            status_enum = InvoiceStatus.INVOICE_STATUS_UNSPECIFIED
+            if status:
+                status_map = {
+                    "DRAFT": InvoiceStatus.DRAFT,
+                    "SENT": InvoiceStatus.SENT,
+                    "OVERDUE": InvoiceStatus.OVERDUE,
+                    "PAID": InvoiceStatus.PAID,
+                    "CANCELLED": InvoiceStatus.CANCELLED,
+                }
+                status_enum = status_map.get(status.upper(), InvoiceStatus.INVOICE_STATUS_UNSPECIFIED)
+
+            request = GetInvoicesRequest(
+                org_id=org_id,
+                status=status_enum,
+                limit=100,
+            )
+            response = await stub.GetInvoices(request, timeout=30)
+
+            if response.success:
+                invoices = []
+                for inv in response.invoices:
+                    invoices.append({
+                        "id": inv.id,
+                        "invoiceNumber": inv.invoice_number,
+                        "clientId": inv.client_id,
+                        "orgId": inv.org_id,
+                        "totalAmount": inv.total_amount,
+                        "status": inv.status,
+                        "dueDate": inv.due_date,
+                        "createdAt": inv.created_at,
+                        "description": inv.description,
+                    })
+                return {
+                    "success": True,
+                    "data": invoices,
+                    "source": "grpc",
+                }
+            else:
+                error_msg = response.error.message if response.error else "Unknown error"
+                return {
+                    "success": False,
+                    "error": f"gRPC error: {error_msg}",
+                    "source": "grpc",
+                }
         except grpc.RpcError as e:
             return {
                 "success": False,
@@ -79,20 +118,35 @@ class GRPCClient:
     ) -> Dict[str, Any]:
         """Mark invoice as paid via gRPC"""
         try:
-            # stub = invoices_pb2_grpc.InvoiceServiceStub(self.channel)
-            # request = invoices_pb2.MarkPaidRequest(
-            #     invoice_id=invoice_id,
-            #     org_id=org_id,
-            #     amount=payment_data.get("amount", 0),
-            #     description=payment_data.get("description", "")
-            # )
-            # response = await stub.MarkPaid(request, timeout=30)
-            
-            return {
-                "success": True,
-                "data": {"status": "PAID"},
-                "source": "grpc",
-            }
+            stub = moneyops_pb2_grpc.InvoiceServiceStub(self.channel)
+
+            request = MarkPaidRequest(
+                invoice_id=invoice_id,
+                org_id=org_id,
+                amount=payment_data.get("amount", 0),
+                description=payment_data.get("description", ""),
+                payment_date=payment_data.get("paymentDate", ""),
+            )
+            response = await stub.MarkPaid(request, timeout=30)
+
+            if response.success:
+                inv = response.invoice
+                return {
+                    "success": True,
+                    "data": {
+                        "id": inv.id,
+                        "status": inv.status,
+                        "invoiceNumber": inv.invoice_number,
+                    },
+                    "source": "grpc",
+                }
+            else:
+                error_msg = response.error.message if response.error else "Unknown error"
+                return {
+                    "success": False,
+                    "error": f"gRPC error: {error_msg}",
+                    "source": "grpc",
+                }
         except grpc.RpcError as e:
             return {
                 "success": False,
@@ -109,19 +163,93 @@ class GRPCClient:
     async def create_invoice(self, org_id: str, invoice_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create invoice via gRPC"""
         try:
-            # stub = invoices_pb2_grpc.InvoiceServiceStub(self.channel)
-            # request = invoices_pb2.CreateInvoiceRequest(
-            #     org_id=org_id,
-            #     client_id=invoice_data.get("clientId"),
-            #     total_amount=invoice_data.get("totalAmount", 0),
-            #     due_date=invoice_data.get("dueDate", ""),
-            #     description=invoice_data.get("description", "")
-            # )
-            # response = await stub.CreateInvoice(request, timeout=30)
-            
+            stub = moneyops_pb2_grpc.InvoiceServiceStub(self.channel)
+
+            # Convert items if present
+            items = []
+            if "items" in invoice_data:
+                for item in invoice_data["items"]:
+                    items.append(GrpcInvoiceItem(
+                        description=item.get("description", ""),
+                        quantity=item.get("quantity", 1),
+                        unit_price=item.get("unitPrice", 0),
+                        amount=item.get("amount", 0),
+                    ))
+
+            request = CreateInvoiceRequest(
+                org_id=org_id,
+                client_id=invoice_data.get("clientId", ""),
+                total_amount=invoice_data.get("totalAmount", 0),
+                due_date=invoice_data.get("dueDate", ""),
+                description=invoice_data.get("description", ""),
+                items=items,
+            )
+            response = await stub.CreateInvoice(request, timeout=30)
+
+            if response.success:
+                inv = response.invoice
+                return {
+                    "success": True,
+                    "data": {
+                        "id": inv.id,
+                        "invoiceNumber": inv.invoice_number,
+                        "status": inv.status,
+                        "totalAmount": inv.total_amount,
+                    },
+                    "source": "grpc",
+                }
+            else:
+                error_msg = response.error.message if response.error else "Unknown error"
+                return {
+                    "success": False,
+                    "error": f"gRPC error: {error_msg}",
+                    "source": "grpc",
+                }
+        except grpc.RpcError as e:
             return {
-                "success": True,
-                "data": {"id": "new-invoice-id"},
+                "success": False,
+                "error": f"gRPC error: {e.code()}: {e.details()}",
+                "source": "grpc",
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "source": "grpc",
+            }
+
+    async def send_collection_email(
+        self,
+        invoice_id: str,
+        client_email: str,
+        client_name: str,
+        invoice_number: str,
+        amount: float,
+        due_date: str,
+        org_id: Optional[str] = None,
+        tone: str = "gentle",
+    ) -> Dict[str, Any]:
+        """Send collection email via gRPC"""
+        try:
+            stub = moneyops_pb2_grpc.NotificationServiceStub(self.channel)
+
+            request = moneyops_pb2.SendCollectionEmailRequest(
+                invoice_id=invoice_id,
+                client_email=client_email,
+                client_name=client_name,
+                invoice_number=invoice_number,
+                amount=amount,
+                due_date=due_date,
+                org_id=org_id or "",
+                tone=tone,
+            )
+            response = await stub.SendCollectionEmail(request, timeout=30)
+
+            return {
+                "success": response.success,
+                "sent": response.sent,
+                "recipient": response.recipient,
+                "error": response.error.message if response.error else None,
                 "source": "grpc",
             }
         except grpc.RpcError as e:

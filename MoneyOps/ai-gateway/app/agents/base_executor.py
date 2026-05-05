@@ -736,18 +736,39 @@ class MasterOrchestrator:
             "errors": state.errors,
         }
 
-    def _select_executor(self, user_request: str) -> str:
-        """Select executor based on request content"""
+    async def _select_executor_llm(self, user_request: str) -> str:
+        """Use LLM to select executor (NOT keyword matching)"""
+        prompt = f"""Which executor should handle this request?
+- finance_executor: invoices, payments, expenses, balance
+- compliance_executor: GST, tax, filing, compliance
+- collections_executor: reminders, overdue, aging, escalation
+- treds_executor: working capital, discount invoices
+
+Request: {user_request}
+
+Return ONLY the executor name, nothing else."""
+
+        try:
+            response = await llm_client.simple_completion(prompt=prompt, task_type="simple")
+            executor = response.strip().lower()
+            if executor in self.executors:
+                return executor
+        except Exception as e:
+            logger.error("llm_executor_selection_error", error=str(e))
+
+        # Safe fallback (not ideal, but prevents crash)
         request = user_request.lower()
-
-        if any(w in request for w in ["treds", "discount", "working capital", "get cash now"]):
+        if "treds" in request or "discount" in request:
             return "treds_executor"
-        if any(w in request for w in ["remind", "chase", "collect", "overdue", "aging", "escalate"]):
+        if "remind" in request or "overdue" in request:
             return "collections_executor"
-        if any(w in request for w in ["gst", "tax", "compliance", "reconcile", "filing", "deadline"]):
+        if "gst" in request or "compliance" in request:
             return "compliance_executor"
-
         return "finance_executor"
+
+    def _select_executor(self, user_request: str) -> str:
+        """DEPRECATED: Use _select_executor_llm instead"""
+        return self._select_executor_llm(user_request)
 
 
 # Singleton instance
