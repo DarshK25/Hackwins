@@ -9,14 +9,15 @@ from typing import Optional
 
 
 def _resolve_env_path() -> Path:
-    """Prefer the voice-service-local .env; fall back to monorepo root if needed."""
-    service_env = Path(__file__).resolve().parents[1] / ".env"
-    if service_env.exists():
-        return service_env
+    """Always load from monorepo root .env (single source of truth)."""
+    # Path: MoneyOps/voice-service/app/config.py -> 3 levels up = MoneyOps/.env
+    root_env = Path(__file__).resolve().parents[3] / ".env"
+    if root_env.exists():
+        return root_env
 
-    repo_env = Path(__file__).resolve().parents[2] / ".env"
-    return repo_env
-
+    # Fallback: try parents[2] if structure changes
+    fallback = Path(__file__).resolve().parents[2] / ".env"
+    return fallback
 
 _env_path = _resolve_env_path()
 load_dotenv(dotenv_path=_env_path, override=True)
